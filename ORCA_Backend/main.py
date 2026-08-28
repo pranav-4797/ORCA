@@ -67,7 +67,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allow_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "DELETE", "HEAD", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
@@ -121,7 +121,7 @@ class PositionRequest(BaseModel):
     location_name: str = ""
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     """Lightweight keep-alive health check for Render & external monitors (e.g. UptimeRobot)."""
     return {"status": "ok"}

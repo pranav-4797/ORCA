@@ -20,11 +20,17 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def test_health_endpoint():
-    response = client.get("/health")
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-    data = response.json()
+    # Test GET
+    get_res = client.get("/health")
+    assert get_res.status_code == 200, f"GET expected 200, got {get_res.status_code}"
+    data = get_res.json()
     assert data == {"status": "ok"}, f"Expected {{'status': 'ok'}}, got {data}"
-    print("[PASS] Health check test passed: status=200, payload={'status': 'ok'}")
+    print("[PASS] GET /health returned 200 OK with payload {'status': 'ok'}")
+
+    # Test HEAD (used by UptimeRobot by default)
+    head_res = client.head("/health")
+    assert head_res.status_code == 200, f"HEAD expected 200, got {head_res.status_code}"
+    print("[PASS] HEAD /health returned 200 OK")
 
 
 if __name__ == "__main__":
