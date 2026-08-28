@@ -50,6 +50,7 @@ import logging
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger("orca.imd_cap")
