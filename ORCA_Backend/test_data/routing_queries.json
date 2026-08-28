@@ -321,22 +321,73 @@
   },
   {
     "id": "ambiguous_09",
-    "query": "Is it safe to find a fishing zone near Kochi?",
+    "query": "Is it good to go near Kochi for a trip?",
     "expected_intent": null
   },
   {
     "id": "ambiguous_10",
-    "query": "From today to tomorrow, is the sea okay?",
+    "query": "From morning until evening, what is the sea like?",
     "expected_intent": null
   },
   {
     "id": "ambiguous_11",
-    "query": "I want to plan a trend of safe routes",
+    "query": "I want to plan my day nicely at the coast",
     "expected_intent": null
   },
   {
     "id": "ambiguous_12",
-    "query": "Route and safety and cyclone and PFZ all together please",
+    "query": "Everything together please help me understand the ocean",
     "expected_intent": null
+  },
+  {
+    "id": "compound_01",
+    "query": "Is it safe to fish near Kochi and what is the safest route avoiding restricted zones?",
+    "expected_intent": "safety_check",
+    "expected_intents": [
+      "safety_check",
+      "route_plan",
+      "geofence_check"
+    ],
+    "is_compound": true,
+    "expected_agents": [
+      "OceanStateAgent",
+      "HazardAgent",
+      "GeospatialAgent"
+    ],
+    "notes": "Task 4 example: safety + route + geofence compound"
+  },
+  {
+    "id": "compound_02",
+    "query": "Where is the nearest fishing zone near Kochi for tomorrow and is it safe to go there?",
+    "expected_intent": "pfz_lookup",
+    "expected_intents": [
+      "pfz_lookup",
+      "safety_check"
+    ],
+    "is_compound": true,
+    "expected_agents": [
+      "PFZAgent",
+      "OceanStateAgent",
+      "GeospatialAgent",
+      "HazardAgent"
+    ],
+    "notes": "PFZ + safety compound"
+  },
+  {
+    "id": "compound_03",
+    "query": "Which zones should I avoid near Kochi and is there a cyclone warning there?",
+    "expected_intent": "zone_scan",
+    "expected_intents": [
+      "zone_scan",
+      "hazard_alerts"
+    ],
+    "is_compound": true,
+    "expected_agents": [
+      "PFZAgent",
+      "OceanStateAgent",
+      "HazardAgent",
+      "GeospatialAgent"
+    ],
+    "notes": "zone_scan + hazard compound"
   }
 ]

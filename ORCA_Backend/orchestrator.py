@@ -449,10 +449,19 @@ class Orchestrator:
         `live_position`: when the client explicitly sent device GPS or a
         destination, the Geospatial Agent ALWAYS runs -- the user is asking
         about their specific spot even if the planner missed it.
+
+        Compound-intent (Task 4): when is_compound is True, requested is
+        already a union of multiple intents' agents — use it directly
+        (deduplicated) instead of intersecting with single intent's defaults.
         """
         requested = {a for a in (plan.get("agents_needed") or [])}
-        defaults = INTENT_DEFAULT_AGENTS.get(plan["intent"], [])
-        chosen = requested & set(defaults) or set(defaults)
+        # Compound: use union directly
+        if plan.get("is_compound"):
+            chosen = set(requested)
+            # Still ensure hazard dependency and live_position
+        else:
+            defaults = INTENT_DEFAULT_AGENTS.get(plan["intent"], [])
+            chosen = requested & set(defaults) or set(defaults)
         # Dependency repair: hazard needs an ocean reading.
         if "HazardAgent" in chosen:
             chosen.add("OceanStateAgent")
@@ -2007,6 +2016,8 @@ class Orchestrator:
                 "routing_mode": fast_decision.routing_mode,
                 "complexity": fast_decision.complexity,
                 "confidence": fast_decision.confidence,
+                "is_compound": getattr(fast_decision, "is_compound", False),
+                "compound_intents": getattr(fast_decision, "compound_intents", None),
             }
             # Memory override for "same place" — copy prior location
             if prior is not None and prior.location_name and plan["location_name"] in ("unknown", "", "same"):

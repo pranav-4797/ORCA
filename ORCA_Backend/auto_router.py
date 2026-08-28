@@ -48,7 +48,7 @@ INTENT_KEYWORDS = {
     ],
     "route_plan": [
         r"route", r"navigate", r"safest path", r"how do i get", r"safe route",
-        r"waypoint", r"passage", r"from.*to.*", r"plan.*route",
+        r"waypoint", r"passage", r"\bfrom\b.{2,40}?\bto\b", r"plan.*route",
     ],
     "geofence_check": [
         r"boundary", r"border", r"restricted", r"geofence", r"imbl",
@@ -61,7 +61,7 @@ INTENT_KEYWORDS = {
     ],
     "pfz_lookup": [
         r"fishing zone", r"fish zone", r"pfz", r"where to fish", r"nearest.*fishing",
-        r"productive.*zone", r"fish.*zone", r"potential fishing",
+        r"productive.*zone", r"\bfish(?:ing)?\s+zone\b", r"potential fishing",
     ],
     "safety_check": [
         r"\bsafe\b", r"safety", r"go fishing", r"venture", r"risky", r"danger",
@@ -87,6 +87,8 @@ class RoutingDecision:
     confidence: float
     routing_mode: str  # fast-rules | llm-planner
     reason: str
+    is_compound: bool = False
+    compound_intents: list | None = None
 
 
 def _score_intents(q: str) -> dict[str, int]:
@@ -144,12 +146,72 @@ def fast_route(normalized_query: str) -> RoutingDecision | None:
     if not scores:
         return None
 
-    # Pick top intent by score, tie -> ambiguous
+    # Pick top intent by score, tie -> ambiguous (single-intent fast path)
     sorted_intents = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     top_intent, top_score = sorted_intents[0]
     second_score = sorted_intents[1][1] if len(sorted_intents) > 1 else 0
 
-    # Confidence logic:
+    # --- Compound-intent handling (Task 4) ---
+    # If two or more intents score above shared confidence threshold (0.78),
+    # union their agent lists instead of only top intent's list.
+    # Threshold corresponds to: score>=2 (0.92) OR score==1 with len>=3 (0.78)
+    # This is more conservative than raw score>=1, avoids false compound from
+    # weak single-hit short queries. Trend weak single-hit is excluded.
+    _qualifying = []
+    _qualifying_conf = {}
+    for intent, sc in scores.items():
+        if sc >= 2:
+            # For trend, even score 2 is considered qualifying (needs 2 keywords)
+            # No extra filter needed for sc>=2
+            _qualifying.append(intent)
+            _qualifying_conf[intent] = 0.92
+        elif sc == 1:
+            if len(q.split()) < 3:
+                continue  # 0.55 <0.6, not qualifying
+            if intent == "trend_analysis":
+                # Single trend word alone is weak — require explicit "trend" or "why has"
+                if "trend" not in q.lower() and "why has" not in q.lower():
+                    continue
+            _qualifying.append(intent)
+            _qualifying_conf[intent] = 0.78
+    # If compound, union agents and force at least complex
+    if len(_qualifying) >= 2:
+        # Use top intent for primary intent field, but union agents
+        # Deduplicate preserving order: qualifying sorted by score desc
+        _qualifying_sorted = sorted(_qualifying, key=lambda x: scores[x], reverse=True)
+        union_agents: list[str] = []
+        seen: set[str] = set()
+        for intent in _qualifying_sorted:
+            for a in INTENT_DEFAULT_AGENTS.get(intent, []):
+                if a not in seen:
+                    seen.add(a)
+                    union_agents.append(a)
+        # Complexity: at least complex for compound
+        base_complexity = _detect_complexity(q, top_intent, len(union_agents))
+        if base_complexity in ("fast", "standard"):
+            compound_complexity = "complex"
+        else:
+            compound_complexity = base_complexity  # keep deep/complex
+        # Confidence: conservative min of qualifying (at least 0.78)
+        compound_confidence = min(_qualifying_conf[i] for i in _qualifying)
+        # Trend always deep; ensure deep if trend in qualifying
+        if "trend_analysis" in _qualifying and compound_complexity != "deep":
+            # Trend analysis compound should be deep per spec
+            # But keep at least complex; _detect_complexity already makes trend deep
+            pass
+        reason = f"Compound intent ({', '.join(_qualifying_sorted)}) — union of {len(union_agents)} agents."
+        return RoutingDecision(
+            intent=top_intent,  # keep top for backwards compat, agents are unioned
+            agents=union_agents,
+            complexity=compound_complexity,
+            confidence=compound_confidence,
+            routing_mode="fast-rules",
+            reason=reason,
+            is_compound=True,
+            compound_intents=_qualifying_sorted,
+        )
+
+    # Confidence logic (single-intent fast path):
     #  - top_score >=2 and gap >=1 => high confidence (0.92)
     #  - top_score ==1 and no tie => medium-high (0.78) — still usable for fast path
     #  - tie or top_score==1 with tie => low (fallback to LLM)

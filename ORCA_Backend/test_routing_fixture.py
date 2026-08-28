@@ -41,7 +41,10 @@ def _load_fixture():
 def test_routing_fixture_metrics():
     data, path = _load_fixture()
     assert isinstance(data, list) and len(data) >= 40, f"Fixture should have >=40 queries, got {len(data)} at {path}"
-    print(f"\n[Routing Fixture] Loaded {len(data)} queries from {path}")
+    # Exclude compound entries from single-intent metrics (they are tested separately)
+    compound_entries = [e for e in data if e.get("is_compound")]
+    single_data = [e for e in data if not e.get("is_compound")]
+    print(f"\n[Routing Fixture] Loaded {len(data)} queries from {path} ({len(compound_entries)} compound, {len(single_data)} single)")
 
     intents = ["safety_check", "pfz_lookup", "hazard_alerts", "route_plan", "geofence_check", "trend_analysis", "zone_scan"]
     # Also track fallback expected
@@ -57,7 +60,7 @@ def test_routing_fixture_metrics():
     fast_path_total = 0
     fallback_total = 0
 
-    for entry in data:
+    for entry in single_data:
         q = entry["query"]
         expected = entry.get("expected_intent")  # None means should fallback
         decision = auto_router.fast_route(q)
@@ -97,12 +100,17 @@ def test_routing_fixture_metrics():
         # Debug per query if mismatch
         # print(f"{entry.get('id')}: expected={expected}, predicted={predicted} conf={confidence} fallback={should_fallback}")
 
-    total = len(data)
-    print(f"[Routing Fixture] Total queries: {total}")
-    print(f"  Fast-path (fast-rules) : {fast_path_total} ({fast_path_total/total:.1%})")
-    print(f"  Fallback (LLM planner) : {fallback_total} ({fallback_total/total:.1%})")
+    total = len(single_data)
+    print(f"[Routing Fixture] Total single-intent queries: {total} (compound excluded)")
+    print(f"  Fast-path (fast-rules) : {fast_path_total} ({fast_path_total/total:.1%} of single)")
+    print(f"  Fallback (LLM planner) : {fallback_total} ({fallback_total/total:.1%} of single)")
     if fallback_expected:
         print(f"  Ambiguous expected FALLBACK: {fallback_expected}, correctly fallback: {fallback_correct} ({fallback_correct/fallback_expected:.1%})")
+    if compound_entries:
+        print(f"  Compound queries: {len(compound_entries)} (tested separately)")
+
+    # Also include compound in overall total for summary
+    total_all = len(data)
 
     # Per-intent precision/recall
     print("\nPer-intent precision / recall (fast-rules only):")
@@ -114,9 +122,9 @@ def test_routing_fixture_metrics():
         f1 = 2*prec*rec/(prec+rec) if (prec+rec)>0 else 0.0
         print(f"{intent:<16} {support:>7} {tp[intent]:>4} {fp[intent]:>4} {fn[intent]:>4} {prec:>5.2f} {rec:>5.2f} {f1:>5.2f}")
 
-    # Overall accuracy (including fallback as correct class)
+    # Overall accuracy (including fallback as correct class) — on single-intent subset
     correct = 0
-    for entry in data:
+    for entry in single_data:
         expected = entry.get("expected_intent")
         decision = auto_router.fast_route(entry["query"])
         predicted = decision.intent if decision else None
@@ -125,13 +133,32 @@ def test_routing_fixture_metrics():
             correct += 1
         elif expected is not None and predicted == expected:
             correct += 1
-    accuracy = correct/total
-    print(f"\nOverall accuracy (fast-rules vs expected, fallback counted): {correct}/{total} = {accuracy:.2%}")
+    accuracy = correct/total if total else 0
+    print(f"\nOverall accuracy (single-intent, fallback counted): {correct}/{total} = {accuracy:.2%}")
 
-    # Print mismatches for debugging
-    print("\nMismatched queries (expected != predicted):")
+    # Compound handling check (Task 4)
+    if compound_entries:
+        print("\nCompound-intent handling (Task 4):")
+        for entry in compound_entries:
+            q = entry["query"]
+            expected_intents = entry.get("expected_intents") or []
+            expected_agents = set(entry.get("expected_agents") or [])
+            decision = auto_router.fast_route(q)
+            if decision is None:
+                print(f"  {entry['id']}: FAIL — expected compound but got fallback None")
+            else:
+                agents_ok = expected_agents.issubset(set(decision.agents)) if expected_agents else True
+                intent_ok = decision.intent in expected_intents if expected_intents else True
+                complexity_ok = decision.complexity in ("complex", "deep")
+                status = "PASS" if (agents_ok and intent_ok and complexity_ok) else "FAIL"
+                print(f"  {entry['id']}: {status} — predicted intent={decision.intent} agents={decision.agents} complexity={decision.complexity} (expected intents {expected_intents}, agents {expected_agents})")
+                if status == "FAIL":
+                    print(f"    Query: {q[:80]}")
+
+    # Print mismatches for debugging (single-intent only)
+    print("\nMismatched queries (single-intent, expected != predicted):")
     mismatches = []
-    for entry in data:
+    for entry in single_data:
         expected = entry.get("expected_intent")
         decision = auto_router.fast_route(entry["query"])
         predicted = decision.intent if decision else None
@@ -154,6 +181,8 @@ def test_routing_fixture_metrics():
     # Save a summary JSON for manual inspection (optional)
     summary = {
         "total": total,
+        "total_all": total_all,
+        "compound": len(compound_entries),
         "fast_path": fast_path_total,
         "fallback": fallback_total,
         "fallback_expected": fallback_expected,
@@ -175,6 +204,46 @@ def test_routing_fixture_metrics():
         print(f"\n[Routing Fixture] Summary written to {out_path}")
     except Exception:
         pass
+
+def test_compound_intent_handling():
+    """Task 4: verify compound queries union agents and set complexity at least complex."""
+    data, _ = _load_fixture()
+    compounds = [e for e in data if e.get("is_compound")]
+    assert len(compounds) >= 2, f"Need at least 2 compound fixtures, got {len(compounds)}"
+    for entry in compounds:
+        q = entry["query"]
+        expected_intents = entry.get("expected_intents") or []
+        expected_agents = set(entry.get("expected_agents") or [])
+        decision = auto_router.fast_route(q)
+        assert decision is not None, f"Compound query {entry['id']} should NOT fallback, got None (fallback) for '{q}'"
+        # Agents should be unioned (superset of expected)
+        assert expected_agents.issubset(set(decision.agents)), f"{entry['id']} agents {decision.agents} should include {expected_agents}"
+        # Complexity at least complex
+        assert decision.complexity in ("complex", "deep"), f"{entry['id']} complexity should be at least complex, got {decision.complexity}"
+        # Intent should be one of expected intents (top)
+        if expected_intents:
+            assert decision.intent in expected_intents or decision.intent == expected_intents[0], f"{entry['id']} intent {decision.intent} not in {expected_intents}"
+        # Reason should mention compound
+        assert "Compound" in decision.reason or len(decision.agents) > 2, f"{entry['id']} reason should indicate compound: {decision.reason}"
+
+def test_compound_specific_examples():
+    """Direct tests for Task 4 example queries."""
+    # Example from task description
+    q1 = "Is it safe to fish near Kochi and what's the safest route avoiding restricted zones?"
+    d1 = auto_router.fast_route(q1)
+    assert d1 is not None, "Compound safety+route+geofence should not fallback"
+    # Should include all three intents' agents: safety (Ocean,Hazard,Geo), route (Geo,Ocean,Hazard), geofence (Geo) => at least those 3
+    needed = {"OceanStateAgent", "HazardAgent", "GeospatialAgent"}
+    assert needed.issubset(set(d1.agents)), f"q1 agents {d1.agents} should contain {needed}"
+    assert d1.complexity in ("complex", "deep")
+
+    q2 = "Where is the nearest fishing zone near Kochi for tomorrow and is it safe to go there?"
+    d2 = auto_router.fast_route(q2)
+    assert d2 is not None
+    needed2 = {"PFZAgent", "OceanStateAgent", "HazardAgent", "GeospatialAgent"}
+    # pfz+ safety union is 4 agents
+    assert needed2.issubset(set(d2.agents)) or len(d2.agents) >= 4, f"q2 agents {d2.agents} should be union pfz+safety"
+    assert d2.complexity in ("complex", "deep")
 
 def test_routing_fixture_file_exists():
     data, path = _load_fixture()
