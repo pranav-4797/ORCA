@@ -14,7 +14,7 @@ Queries run in `panel` mode (specialists debate before reconciling) or
 | Orchestrator (LangGraph) | **Real** — planning, conditional specialist selection, parallel dispatch, trace |
 | Ocean-State Agent | **Fully real** — LIVE Open-Meteo SST/waves/wind + harmonic tide prediction fitted on real UHSLC gauge observations; chlorophyll LIVE via NOAA ERDDAP when reachable, honest seeded fallback otherwise (per-field provenance always shown) |
 | Hazard Agent | **Fully real** — threshold logic + LIVE keyless IMD CAP alert feed (cyclone/marine warnings, polygon hit-test); gated `api.imd.gov.in` kept as secondary fallback |
-| PFZ Agent | **Derived from live data** — strongest live-SST thermal front sampled around the user via one batched Open-Meteo call; Bhuvan official layer coded, disabled until endpoint verified. Seeded value only as last-resort error fallback, always tagged |
+| PFZ Agent | **Official live advisory** — nearest landing centre's INCOIS/SAMUDRA PFZ (zone geometry, direction/distance/depth) from the keyless `gemini.incois.gov.in` feeds, cached 10 min; falls back to derived live-SST thermal front, then seeded. Always tagged, never hidden |
 | Geospatial Reasoning Agent | **Real math** on Tier-2 static data — point-in-polygon/distance vs treaty-digitized IMBL + MPA GeoJSON (`data/marine_boundaries.geojson`), safe-route detours; GEBCO bathymetry TODO |
 | Synthesis Agent | **Real** — reconciles all findings, flags cross-agent conflicts, assigns confidence |
 | Response Agent | **Real** — final answer composed in the user's detected language |
@@ -56,14 +56,16 @@ orca_backend/
 │   ├── language_agent.py        # PS #1: detect language, normalize query
 │   ├── ocean_state_agent.py     # PS #4: LIVE Open-Meteo SST/waves/wind (+tide/chl sim)
 │   ├── hazard_agent.py          # PS #5: threshold-based safety verdict
-│   ├── pfz_agent.py             # PS #3: nearest fishing zone (derived; Bhuvan TODO)
+│   ├── pfz_agent.py             # PS #3: nearest fishing zone (official INCOIS/SAMUDRA advisory, derived/SIM fallback)
 │   ├── geospatial_agent.py      # PS #6: IMBL/MPA geofence + safe-route planning
 │   ├── synthesis_agent.py       # PS #7: reconcile findings, flag conflicts
 │   ├── response_agent.py        # PS #9: final answer in the user's language
 │   └── ...
 ├── data/
 │   └── marine_boundaries.geojson  # Tier-2 IMBL + MPA boundaries (treaty-digitized)
-├── data_connectors/             # MOSDAC/INCOIS/IMD stubs (NOT ACTIVATED)
+├── data_connectors/
+│   ├── incois_pfz.py            # LIVE INCOIS/SAMUDRA PFZ feeds (lines + landing centres + advisory text)
+│   └── ...                      # MOSDAC/IMD stubs (NOT ACTIVATED)
 ├── main.py                      # FastAPI HTTP layer
 ├── test_run.py                  # CLI smoke test (all intents + Marathi query)
 └── requirements.txt
