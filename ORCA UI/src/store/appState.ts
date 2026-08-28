@@ -143,40 +143,38 @@ class AppStore {
         try {
           const remoteData = await loadUserSessionsFromFirestore(user.uid);
           if (remoteData && remoteData.chats.length > 0) {
-            // Merge remote chats with any local chats created while offline/guest
-            const remoteIds = new Set(remoteData.chats.map(c => c.id));
-            const localUnsynced = this.chats.filter(c => !remoteIds.has(c.id));
-
-            this.chats = [...remoteData.chats, ...localUnsynced];
-            this.messages = { ...this.messages, ...remoteData.messages };
-
-            // Upload any localUnsynced guest chats to the cloud
-            for (const chat of localUnsynced) {
-              void saveUserChatToFirestore(user.uid, chat);
-              const msgs = this.messages[chat.id] || [];
-              for (const msg of msgs) {
-                void saveUserMessageToFirestore(user.uid, chat.id, msg);
-              }
-            }
+            this.chats = remoteData.chats;
+            this.messages = remoteData.messages;
 
             if (!this.activeChatId || !this.chats.some(c => c.id === this.activeChatId)) {
               this.activeChatId = this.chats[0].id;
             }
             this.notify();
-            showToast(`Synced ${this.chats.length} mission sessions from cloud`, 'info');
+            showToast(`Loaded ${this.chats.length} chat sessions from Firestore`, 'success');
           } else {
-            // New user or no remote sessions: sync current local/guest chats to Firestore
-            for (const chat of this.chats) {
-              void saveUserChatToFirestore(user.uid, chat);
-              const msgs = this.messages[chat.id] || [];
-              for (const msg of msgs) {
-                void saveUserMessageToFirestore(user.uid, chat.id, msg);
-              }
-            }
+            // First time login: create clean session in cloud
+            const initialChat: Chat = {
+              id: generateId('chat'),
+              title: 'Mission Briefing',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              agentId: 'orca-nav',
+              model: 'llama-3.3-70b-versatile',
+              messageCount: 0,
+              pinned: false,
+            };
+            this.chats = [initialChat];
+            this.messages = { [initialChat.id]: [] };
+            this.activeChatId = initialChat.id;
+            void saveUserChatToFirestore(user.uid, initialChat);
+            this.notify();
           }
         } catch (e) {
           console.warn('[Firestore] Sync initialization error:', e);
         }
+      } else {
+        // Not logged in (Guest/Demo): strictly local memory/temporary storage, never in Firestore
+        this.loadFromStorage();
       }
       this.notify();
     });
@@ -200,9 +198,13 @@ class AppStore {
     try {
       await logoutUser();
       this.currentUser = null;
-      this.loadFromStorage();
+      this.chats = [...INITIAL_CHATS];
+      this.messages = { ...INITIAL_MESSAGES };
+      this.activeChatId = this.chats[0]?.id || null;
+      localStorage.removeItem('ai_workspace_chats');
+      localStorage.removeItem('ai_workspace_messages');
       this.notify();
-      showToast('Signed out of ORCA workstation. Local storage active.', 'info');
+      showToast('Signed out. Switched to guest mode.', 'info');
     } catch (err: any) {
       console.error('Sign Out Error:', err);
       showToast('Error during sign out.', 'error');

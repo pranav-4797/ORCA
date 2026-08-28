@@ -74,24 +74,26 @@ export async function saveUserProfile(user: User): Promise<void> {
 }
 
 /**
- * Save or update a mission brief / chat session in Firestore
+ * Save or update a mission brief / chat session in Firestore (Only for authenticated users)
  */
 export async function saveUserChatToFirestore(uid: string, chat: Chat): Promise<void> {
+  if (!uid || !chat || !chat.id) return;
   try {
     const chatRef = doc(db, 'users', uid, 'chats', chat.id);
     await setDoc(chatRef, {
       id: chat.id,
-      title: chat.title,
-      createdAt: chat.createdAt,
-      updatedAt: chat.updatedAt,
-      agentId: chat.agentId,
-      model: chat.model,
+      title: chat.title || 'Marine Briefing',
+      createdAt: chat.createdAt || Date.now(),
+      updatedAt: chat.updatedAt || Date.now(),
+      agentId: chat.agentId || 'orca-nav',
+      model: chat.model || 'llama-3.3-70b-versatile',
       pinned: chat.pinned || false,
       project: chat.project || 'General',
       tags: chat.tags || [],
-      messageCount: chat.messageCount,
+      messageCount: chat.messageCount || 0,
       lastMessagePreview: chat.lastMessagePreview || '',
     }, { merge: true });
+    console.info(`[Firestore] Chat ${chat.id} saved for user ${uid}`);
   } catch (err) {
     console.warn('[Firestore] Failed to save chat session:', err);
   }
@@ -101,9 +103,11 @@ export async function saveUserChatToFirestore(uid: string, chat: Chat): Promise<
  * Delete a mission brief / chat session and its subcollection from Firestore
  */
 export async function deleteUserChatFromFirestore(uid: string, chatId: string): Promise<void> {
+  if (!uid || !chatId) return;
   try {
     const chatRef = doc(db, 'users', uid, 'chats', chatId);
     await deleteDoc(chatRef);
+    console.info(`[Firestore] Chat ${chatId} deleted for user ${uid}`);
   } catch (err) {
     console.warn('[Firestore] Failed to delete chat:', err);
   }
@@ -113,15 +117,16 @@ export async function deleteUserChatFromFirestore(uid: string, chatId: string): 
  * Save a message (user prompt or AI advisory with activity trace) in Firestore
  */
 export async function saveUserMessageToFirestore(uid: string, chatId: string, message: Message): Promise<void> {
+  if (!uid || !chatId || !message || !message.id) return;
   try {
     const msgRef = doc(db, 'users', uid, 'chats', chatId, 'messages', message.id);
     // Sanitize undefined fields for Firestore
     const payload: Record<string, any> = {
       id: message.id,
-      chatId: message.chatId,
+      chatId: message.chatId || chatId,
       role: message.role,
-      content: message.content,
-      timestamp: message.timestamp,
+      content: message.content || '',
+      timestamp: message.timestamp || Date.now(),
     };
     if (message.agentId) payload.agentId = message.agentId;
     if (message.modelUsed) payload.modelUsed = message.modelUsed;
