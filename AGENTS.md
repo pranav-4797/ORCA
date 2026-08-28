@@ -162,5 +162,21 @@ service cloud.firestore {
 
 - **Live Web Application:** [https://orca-2530.web.app](https://orca-2530.web.app)
 - **Live Multi-Agent Backend:** [https://orca-backend-1i5u.onrender.com](https://orca-backend-1i5u.onrender.com)
+- **Keep-Alive Health Check:** [https://orca-backend-1i5u.onrender.com/health](https://orca-backend-1i5u.onrender.com/health)
 - **GitHub Repository:** [https://github.com/pranav-4797/ORCA](https://github.com/pranav-4797/ORCA)
 - **Firebase Console:** [https://console.firebase.google.com/project/orca-2530](https://console.firebase.google.com/project/orca-2530)
+
+---
+
+## 7. Keep-Alive Health-Check Architecture (`GET /health`)
+
+To support automated uptime monitoring services (such as [UptimeRobot](https://uptimerobot.com)), ORCA exposes an ultra-lightweight, zero-overhead health check endpoint:
+
+```
+GET /health
+Response: 200 OK -> {"status": "ok"}
+```
+
+- **Execution Profile:** Microsecond execution time (<1ms), returning pure static JSON.
+- **Independence:** Does not invoke LangGraph, Groq LLM inference, oceanographic connectors, or Firestore.
+- **Open Uptime Monitoring:** Bypasses API key guards and CORS restrictions so external cron workers and uptime checkers can monitor availability and keep the container responsive.

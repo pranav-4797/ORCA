@@ -125,3 +125,23 @@ sequence via direct calls instead of crashing.
   `data_connectors/chlorophyll.py`); provenance tags always show which path ran.
 - Tide prediction needs a UHSLC gauge within 400 km (Cochin/Vizag/Minicoy/Port
   Blair today); outside that range it degrades to a tagged seeded value.
+
+---
+
+## Keep-Alive Health Check (`GET /health`)
+
+ORCA provides an ultra-lightweight health-check endpoint designed specifically for container liveness probes and external uptime monitoring services (such as [UptimeRobot](https://uptimerobot.com)):
+
+- **Endpoint:** `GET /health`
+- **Public URL (Production):** `https://orca-backend-1i5u.onrender.com/health`
+- **Response Format:**
+  ```json
+  {
+    "status": "ok"
+  }
+  ```
+
+### Design Guarantees:
+- **Instant Execution (<1ms):** Does not trigger LLMs (Groq), LangGraph pipelines, oceanographic APIs, or Firestore storage.
+- **Zero Authentication / Header Requirements:** Accessible publicly without `X-API-Key` or Bearer tokens so standard HTTP monitoring pings succeed reliably.
+- **Uptime Monitoring:** External monitoring services (e.g. UptimeRobot configured on a 5 or 10-minute recurring interval) can ping this URL to verify backend availability and keep the service warm.

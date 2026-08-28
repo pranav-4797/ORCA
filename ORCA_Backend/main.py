@@ -122,13 +122,9 @@ class PositionRequest(BaseModel):
 
 
 @app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "sms_enabled": alert_bus.sms_enabled(),
-        "registered_users": len(list_users()),
-        "storage": storage.info(),
-    }
+async def health():
+    """Lightweight keep-alive health check for Render & external monitors (e.g. UptimeRobot)."""
+    return {"status": "ok"}
 
 
 @app.get("/agents")
