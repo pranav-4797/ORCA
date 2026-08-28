@@ -168,34 +168,23 @@ export class MessageItem {
     const formattedTime = formatTime(this.message.timestamp);
     const modelPill = this.message.modelUsed || agent.defaultModel;
 
-    // Compact Sleek DotLottie Loading State while awaiting response
+    // Pure Minimalist Animation while awaiting response (no card/panel box)
     if ((!this.message.content || !this.message.content.trim()) && isStreaming) {
       this.element.innerHTML = `
         <div class="message-avatar" style="background-color:${agent.avatarBg};color:${agent.avatarColor};">
           ${ICONS[agent.icon] || ICONS.bot}
         </div>
 
-        <div class="orca-thinking-card animate-fade-in">
-          <div class="orca-loading-container">
-            <div class="orca-loading-lottie">
-              <dotlottie-player
-                src="/loading.lottie"
-                background="transparent"
-                speed="1"
-                style="width: 32px; height: 32px;"
-                loop
-                autoplay>
-              </dotlottie-player>
-              <div class="orca-sonar-spinner" aria-hidden="true"></div>
-            </div>
-            <div class="orca-loading-text">
-              <div class="orca-loading-title">
-                <span>${agent.name}</span>
-                <span class="orca-thinking-pulse"><span></span><span></span><span></span></span>
-              </div>
-              <span class="orca-loading-subtitle">Deliberating with multi-agent panel...</span>
-            </div>
-          </div>
+        <div class="orca-pure-loader animate-fade-in">
+          <dotlottie-player
+            src="/loading.lottie"
+            background="transparent"
+            speed="1"
+            style="width: 38px; height: 38px;"
+            loop
+            autoplay>
+          </dotlottie-player>
+          <div class="orca-sonar-spinner" aria-hidden="true"></div>
         </div>
       `;
       return;

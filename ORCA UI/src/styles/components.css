@@ -1616,50 +1616,35 @@
 .toast.info { border-left: 3px solid var(--primary); }
 
 /* =========================================================================
-   ORCA COMPACT DOTLOTTIE LOADING STATE (Replaces empty odd box)
+   ORCA PURE MINIMALIST LOADING ANIMATION (No Card, No Panel, No Border)
    ========================================================================= */
-.orca-thinking-card {
+.orca-pure-loader {
   display: inline-flex !important;
-  width: auto !important;
-  max-width: fit-content !important;
-  background: var(--bg-surface) !important;
-  border: 1px solid var(--border-default) !important;
-  border-radius: var(--radius-sm) !important;
-  padding: 8px 14px !important;
-  box-shadow: var(--shadow-sm) !important;
   align-items: center !important;
-  margin: 0 !important;
+  justify-content: center !important;
+  position: relative !important;
+  width: 38px !important;
+  height: 38px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 2px 0 !important;
 }
 
-.orca-loading-container {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.orca-loading-lottie {
-  position: relative;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.orca-loading-lottie dotlottie-player {
+.orca-pure-loader dotlottie-player {
   position: relative;
   z-index: 2;
-  width: 32px !important;
-  height: 32px !important;
+  width: 38px !important;
+  height: 38px !important;
 }
 
-.orca-sonar-spinner {
+.orca-pure-loader .orca-sonar-spinner {
   position: absolute;
-  top: 4px;
-  left: 4px;
-  width: 24px;
-  height: 24px;
+  top: 6px;
+  left: 6px;
+  width: 26px;
+  height: 26px;
   border: 2.5px solid rgba(14, 124, 134, 0.2);
   border-top: 2.5px solid var(--primary);
   border-radius: 50%;
@@ -1670,51 +1655,5 @@
 @keyframes orcaSonarSpin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
-}
-
-.orca-loading-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.orca-loading-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--primary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  line-height: 1.2;
-}
-
-.orca-loading-subtitle {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  letter-spacing: -0.01em;
-}
-
-.orca-thinking-pulse {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: 2px;
-}
-
-.orca-thinking-pulse span {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--primary);
-  animation: orcaPulse 1.2s infinite ease-in-out;
-}
-
-.orca-thinking-pulse span:nth-child(2) { animation-delay: 0.2s; }
-.orca-thinking-pulse span:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes orcaPulse {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
-  40% { transform: scale(1.2); opacity: 1; }
 }
 
