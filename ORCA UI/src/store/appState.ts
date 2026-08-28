@@ -8,8 +8,10 @@ import {
   OrcaApiService,
   BACKEND_URL,
   fetchOrcaAgents,
+  fetchPfzLive,
   fetchVizGeojson,
   fetchVizSeries,
+  OrcaPfzLive,
   OrcaSpecialist,
   OrcaVizSeries,
 } from '../services/orcaApiService';
@@ -69,9 +71,15 @@ class AppStore {
   public mapPanelOpen: boolean = true;
   public activityPanelOpen: boolean = false;
 
-  // Query routing: 'auto' = ORCA picks best specialist(s) (default, fast);
+// Query routing: 'auto' = ORCA picks best specialist(s) (default, fast);
   // 'panel' = all specialists discuss then reconcile (demo/deep);
   // 'agent' = one named specialist answers directly (no discussion).
+
+  // Official INCOIS PFZ live layer (zone lines + landing centres), refreshed
+  // whenever the app comes online. Feed is cached server-side for 10 minutes.
+  public pfzLive: OrcaPfzLive | null = null;
+  public pfzLiveLoadedAt: number = 0;
+
   public queryMode: 'auto' | 'panel' | 'agent' = 'auto';
   public directAgentKey: string = '';
   public backendAgents: OrcaSpecialist[] = [
@@ -230,6 +238,7 @@ class AppStore {
         console.info('[ORCA] backend online at', BACKEND_URL);
         showToast('Connected to ORCA backend', 'success');
         void this.fetchBackendAgents();
+        void this.loadPfzLive();
         OrcaApiService.startAlertStream(
           'web-demo-user', 16.9902, 73.3120,
           (alert) => this.injectProactiveAlert(alert),
@@ -326,6 +335,18 @@ class AppStore {
   public toggleMapPanel(open?: boolean): void {
     this.mapPanelOpen = open !== undefined ? open : !this.mapPanelOpen;
     this.notify();
+  }
+
+  /** Pull the official INCOIS PFZ feed (zone lines + landing centres) once
+   * when the backend comes online; the OceanMap renders it as a base layer.
+   * A failure here is non-fatal: the map simply keeps the viz-only view. */
+  public async loadPfzLive(): Promise<void> {
+    const feed = await fetchPfzLive();
+    if (feed) {
+      this.pfzLive = feed;
+      this.pfzLiveLoadedAt = Date.now();
+      this.notify();
+    }
   }
 
   public toggleActivityPanel(open?: boolean): void {

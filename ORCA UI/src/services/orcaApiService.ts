@@ -36,6 +36,30 @@ export interface OrcaSpecialist {
   requires: string[];
 }
 
+export interface OrcaPfzLandingCenter {
+  name?: string | null;
+  state?: string | null;
+  sector_id?: string | null;
+  sector_name?: string | null;
+  direction?: string | null;
+  angle_deg?: number | null;
+  advisory_distance_km?: number | string | null;
+  advisory_depth_m?: number | string | null;
+  centre_lat?: number | null;
+  centre_lon?: number | null;
+  distance_km_to_centre?: number | null;
+  pfz_lat?: number | null;
+  pfz_lon?: number | null;
+  forecast_date?: string | null;
+  valid_upto?: string | null;
+}
+
+export interface OrcaPfz {
+  source?: string;
+  landing_center?: OrcaPfzLandingCenter | null;
+  alternates?: Array<Record<string, unknown>>;
+}
+
 export interface OrcaQueryResponse {
   answer: string;
   status?: 'SAFE' | 'CAUTION' | 'UNSAFE' | 'CRITICAL' | 'INFO';
@@ -47,7 +71,7 @@ export interface OrcaQueryResponse {
   discussion?: OrcaDiscussionTurn[];
   mode?: 'auto' | 'panel' | 'agent';
   answered_by?: string;
-  timings?: Record<string, number>;
+timings?: Record<string, number>;
   routing?: {
     intent: string;
     agents: string[];
@@ -79,6 +103,7 @@ export interface OrcaQueryResponse {
     raw_best_zone?: any;
     final_zone?: any;
   };
+  pfz?: OrcaPfz | null;
 }
 
 /** Addressable specialists for direct-agent queries (backend registry). */
@@ -136,6 +161,33 @@ export function fetchVizSeries(sessionId: string): Promise<OrcaVizSeries> {
     if (!res.ok) throw new Error(`/viz/series -> HTTP ${res.status}`);
     return res.json();
   });
+}
+
+// ---------------------------------------------------------------------------
+// Official INCOIS PFZ live layer (/api/pfz/live) -- zone lines + landing
+// centres for the operations map. Cached server-side for 10 minutes.
+// ---------------------------------------------------------------------------
+
+export interface OrcaPfzLive {
+  available?: string[];
+  fetched_at?: string;
+  forecast_date?: string | null;
+  valid_upto?: string | null;
+  pfz_lines?: { type: string; features: any[] } | null;
+  landing_centres?: { type: string; features: any[] } | null;
+  sectors?: Record<string, { name?: string | null }>;
+}
+
+export async function fetchPfzLive(): Promise<OrcaPfzLive | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/pfz/live`, {
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null; // backend offline or INCOIS unreachable -- map degrades silently
+  }
 }
 
 const STATUS_CALLOUT: Record<string, string> = {
@@ -343,7 +395,7 @@ export class OrcaApiService implements IAIService {
     // ---- Phase 3: verdict callout — render immediately (no fake per-token sleep) ---------
     const verdict = STATUS_CALLOUT[data.status || ''] ||
       `⚪ VERDICT: ${(data.status || 'info').toUpperCase()}`;
-    const fullText = `> [!IMPORTANT]\n> ${verdict}\n\n${data.answer}`;
+    const fullText = `> [!IMPORTANT]\n> ${verdict}\n\n${data.answer}${this.pfzCardMarkdown(data.pfz)}`;
 
     if (options.voiceBlob && (data as any).transcribed_text) {
       onChunk({
@@ -382,6 +434,28 @@ export class OrcaApiService implements IAIService {
       OrcaApiService.speak(fullText, data.language);
     }
     return streamed;
+  }
+
+  /** Compact "Official INCOIS PFZ" card appended under the answer when the
+   * backend resolved the query against the live advisory (landing centre +
+   * issued direction/distance/depth). Uses markdown the renderer supports. */
+  private pfzCardMarkdown(pfz?: OrcaPfz | null): string {
+    const lc = pfz?.landing_center;
+    if (!lc?.name) return '';
+    const rows: Array<[string, string]> = [
+      ['Landing centre', `${lc.name}${lc.state ? `, ${lc.state}` : ''}`],
+      ['Sector', `${lc.sector_id ?? ''}${lc.sector_name ? ` — ${lc.sector_name}` : ''}`],
+      ['Zone direction', lc.direction ? String(lc.direction) : ''],
+      ['Distance offshore', lc.advisory_distance_km != null ? `${lc.advisory_distance_km} km` : ''],
+      ['Depth', lc.advisory_depth_m != null ? `${lc.advisory_depth_m} m` : ''],
+      ['Valid until', lc.valid_upto ?? ''],
+      ['Zone position',
+        lc.pfz_lat != null && lc.pfz_lon != null ? `${lc.pfz_lat}, ${lc.pfz_lon}` : ''],
+    ].filter(([, v]) => v !== '' && v != null) as Array<[string, string]>;
+
+    const source = (pfz?.source || 'incois_live').replace(/_/g, ' ').toUpperCase();
+    return `\n\n> **🎣 OFFICIAL PFZ ADVISORY** · ${source}\n> \n` +
+      rows.map(([k, v]) => `> **${k}:** ${v}`).join('\n') + '\n';
   }
 
   /** Multipart voice query -> STT -> same graph -> same payload shape. */
