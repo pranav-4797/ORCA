@@ -526,7 +526,12 @@ export class OrcaApiService implements IAIService {
   private static LANG_TAGS: Record<string, string> = {
     en: 'en-IN', hi: 'hi-IN', mr: 'mr-IN', ta: 'ta-IN', te: 'te-IN',
     bn: 'bn-IN', ml: 'ml-IN', kn: 'kn-IN', gu: 'gu-IN', or: 'or-IN',
-    pa: 'pa-IN',
+    kok: 'kok-IN', tcy: 'tcy-IN',
+    kfr: 'sd-IN',  // Kutchi -> Sindhi (closest available)
+    byr: 'ml-IN',  // Beary -> Malayalam (closest available)
+    mvv: 'mr-IN',  // Malvani -> Marathi (closest available)
+    ncr: 'hi-IN',  // Nicobarese -> Hindi (generic fallback)
+    adm: 'hi-IN',  // Andamanese -> Hindi (generic fallback)
   };
 
   /** Browser speech synthesis of the final answer (PS Sec 17 TTS leg). */
