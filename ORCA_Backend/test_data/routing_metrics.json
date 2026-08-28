@@ -1,0 +1,68 @@
+{
+  "total": 68,
+  "total_all": 71,
+  "compound": 3,
+  "fast_path": 56,
+  "fallback": 12,
+  "fallback_expected": 12,
+  "fallback_correct": 12,
+  "accuracy": 1.0,
+  "per_intent": {
+    "safety_check": {
+      "support": 8,
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "pfz_lookup": {
+      "support": 8,
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "hazard_alerts": {
+      "support": 8,
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "route_plan": {
+      "support": 8,
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "geofence_check": {
+      "support": 8,
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "trend_analysis": {
+      "support": 8,
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "zone_scan": {
+      "support": 8,
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    }
+  }
+}
