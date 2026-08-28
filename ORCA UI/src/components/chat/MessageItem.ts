@@ -254,7 +254,7 @@ export class MessageItem {
     const formattedTime = formatTime(this.message.timestamp);
     const modelPill = this.message.modelUsed || agent.defaultModel;
 
-    // Pure Minimalist Animation while awaiting response (no card/panel box) — friend's UI improvement, preserved
+    // Pure Minimalist Animation while awaiting response (no card/panel box)
     if ((!this.message.content || !this.message.content.trim()) && isStreaming) {
       this.element.innerHTML = `
         <div class="message-avatar orca-brand-avatar">
