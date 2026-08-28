@@ -393,9 +393,15 @@ export class OrcaApiService implements IAIService {
     }
 
     // ---- Phase 3: verdict callout — render immediately (no fake per-token sleep) ---------
+    // When the backend returned the official INCOIS PFZ template it already
+    // carries its own IMPORTANT/VERDICT header + quick summary, so skip the
+    // generic callout and the appended card to avoid duplication.
+    const hasOfficialPfzTemplate = data.answer.includes('🛡️ IMPORTANT');
     const verdict = STATUS_CALLOUT[data.status || ''] ||
       `⚪ VERDICT: ${(data.status || 'info').toUpperCase()}`;
-    const fullText = `> [!IMPORTANT]\n> ${verdict}\n\n${data.answer}${this.pfzCardMarkdown(data.pfz)}`;
+    const fullText = hasOfficialPfzTemplate
+      ? `${data.answer}`
+      : `> [!IMPORTANT]\n> ${verdict}\n\n${data.answer}${this.pfzCardMarkdown(data.pfz)}`;
 
     if (options.voiceBlob && (data as any).transcribed_text) {
       onChunk({

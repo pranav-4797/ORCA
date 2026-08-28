@@ -23,6 +23,7 @@ export class OceanMap {
   private layer: L.FeatureGroup | null = null;
   private lastGeojson: any = null;
   private lastPfzToken: string = '';
+  private queryPoint: { lat: number; lon: number } | null = null;
 
   private readonly COLORS: Record<string, { color: string; fill: string }> = {
     query_point: { color: '#38bdf8', fill: '#38bdf8' },
@@ -175,6 +176,14 @@ fleet_recommended: { color: '#16a34a', fill: '#16a34a' },
 
   private renderShapes(features: any[], isBackground: (f: any) => boolean): void {
     if (!this.layer) return;
+    this.queryPoint = null;
+    for (const f of features) {
+      const kind: string = f.properties?.kind ?? '';
+      if (kind === 'query_point' && f.geometry?.type === 'Point') {
+        const [qlon, qlat] = f.geometry.coordinates;
+        this.queryPoint = { lat: qlat, lon: qlon };
+      }
+    }
     for (const f of features) {
       const kind: string = f.properties?.kind ?? '';
       const c = this.COLORS[kind] ?? { color: '#94a3b8', fill: '#94a3b8' };
@@ -229,13 +238,78 @@ fleet_recommended: { color: '#16a34a', fill: '#16a34a' },
       }
 
       if (shape) {
-        shape.bindPopup(this.popupHtml(f.properties ?? {}));
+        shape.bindPopup(this.popupHtml(f.properties ?? {}, kind, f.geometry));
         this.layer.addLayer(shape);
       }
     }
   }
 
-  private popupHtml(p: any): string {
+  private geoDistKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const p1 = (lat1 * Math.PI) / 180, p2 = (lat2 * Math.PI) / 180;
+    const dp = p2 - p1, dl = ((lon2 - lon1) * Math.PI) / 180;
+    const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  private geoBearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const p1 = (lat1 * Math.PI) / 180, p2 = (lat2 * Math.PI) / 180;
+    const dl = ((lon2 - lon1) * Math.PI) / 180;
+    const y = Math.sin(dl) * Math.cos(p2);
+    const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+    return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  }
+
+  private compassWord(deg: number): string {
+    const points = ['North', 'North-East', 'East', 'South-East',
+      'South', 'South-West', 'West', 'North-West'];
+    return points[Math.round(deg / 45) % 8];
+  }
+
+  private coordLabel(lat: number, lon: number): string {
+    const ns = lat < 0 ? 'S' : 'N';
+    const ew = lon < 0 ? 'W' : 'E';
+    return `${Math.abs(lat).toFixed(4)}° ${ns}, ${Math.abs(lon).toFixed(4)}° ${ew}`;
+  }
+
+  private popupHtml(p: any, kind?: string, geometry?: any): string {
+    const row = (k: string, v: any) =>
+      `<div style="font-size:11px;line-height:1.6;"><b>${k}</b>: ${String(v)}</div>`;
+
+    if (kind === 'pfz_landing') {
+      const zlat = p?.pfz_lat ?? null;
+      const zlon = p?.pfz_lon ?? null;
+      let dist: number | null = p?.distance_from_user_km ?? null;
+      let bear: number | null = p?.bearing_from_user_deg ?? null;
+      if ((dist == null || bear == null) && zlat != null && zlon != null && this.queryPoint) {
+        const computed = this.geoDistKm(this.queryPoint.lat, this.queryPoint.lon, zlat, zlon);
+        dist = dist ?? computed;
+        bear = bear ?? this.geoBearingDeg(this.queryPoint.lat, this.queryPoint.lon, zlat, zlon);
+      }
+      const rows: string[] = [];
+      if (p?.name) rows.push(row('Landing Centre', `${p.name}${p.state ? `, ${p.state}` : ''}`));
+      if (dist != null) rows.push(row('Distance from you', `${dist.toFixed(1)} km`));
+      if (bear != null) rows.push(row('Bearing', `${Math.round(bear)}° (${this.compassWord(bear)})`));
+      if (p?.advisory_depth_m != null) rows.push(row('Water depth', `${p.advisory_depth_m} m`));
+      if (zlat != null && zlon != null) rows.push(row('Coordinates', this.coordLabel(zlat, zlon)));
+      rows.push(row('Source', '🛡️ Official INCOIS PFZ'));
+      return `<div style="max-width:240px;">${rows.join('')}</div>`;
+    }
+
+    if (kind === 'pfz_primary') {
+      const rows: string[] = [];
+      if (p?.distance_km != null) rows.push(row('Distance from you', `${Number(p.distance_km).toFixed(1)} km`));
+      if (p?.bearing_deg != null) {
+        const b = Number(p.bearing_deg);
+        rows.push(row('Bearing', `${Math.round(b)}° (${this.compassWord(b)})`));
+      }
+      if (geometry?.type === 'Point') {
+        rows.push(row('Coordinates', this.coordLabel(geometry.coordinates[1], geometry.coordinates[0])));
+      }
+      rows.push(row('Source', '🛡️ Official INCOIS PFZ'));
+      return `<div style="max-width:240px;">${rows.join('')}</div>`;
+    }
+
     const rows = Object.entries(p)
       .filter(([, v]) => v !== null && v !== undefined && v !== '')
       .map(
