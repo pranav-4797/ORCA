@@ -17,6 +17,8 @@ class SafetyStatus(str, Enum):
     SAFE = "SAFE"
     CAUTION = "CAUTION"
     UNSAFE = "UNSAFE"
+    EXTREME = "EXTREME"
+    CRITICAL = "CRITICAL"  # alias for EXTREME, for synthesis compatibility
 
 
 class DataSource(str, Enum):

@@ -1,0 +1,200 @@
+{
+  "answer": "SAFE: safe Wave 1.0 m and wind moderate. [Note: some fields simulated due to live feed unavailability.]",
+  "status": "SAFE",
+  "reasoning": [
+    "wave 1.0"
+  ],
+  "evidence_sources": [
+    "simulated"
+  ],
+  "trace": [
+    {
+      "agent_name": "LanguageAgent",
+      "action": "Detected language 'en' [mode=fast-path, ASCII heuristic]",
+      "result_summary": "Normalized query ready for planning (43 chars); LLM call skipped.",
+      "data_sources": [],
+      "duration_ms": 0.0011999800335615873
+    },
+    {
+      "agent_name": "PlanningAgent",
+      "action": "Parsed query [mode=fast-rules routing=fast-rules complexity=standard] intent='safety_check', location='Ratnagiri Coast', time_window='tomorrow'",
+      "result_summary": "[fast-rules] Safety question requires current sea-state and hazard thresholds. Dispatching to ocean_state -> geospatial -> SynthesisAgent. | Auto Router selected: Ocean State + Geospatial \u2014 Reason: [fast-rules] Safety question requires current sea-state and hazard thresholds. (complexity=standard, conf=0.92)",
+      "data_sources": [],
+      "duration_ms": 1.203799998620525
+    },
+    {
+      "agent_name": "OceanStateAgent",
+      "action": "fake",
+      "result_summary": "wave 1.0m",
+      "data_sources": [
+        "simulated"
+      ],
+      "duration_ms": 5
+    },
+    {
+      "agent_name": "GeospatialAgent",
+      "action": "Checked boundaries (geofence)",
+      "result_summary": "Geofence checked: clear",
+      "data_sources": [],
+      "duration_ms": 0.0
+    },
+    {
+      "agent_name": "HazardAgent",
+      "action": "fake hazard",
+      "result_summary": "Verdict SAFE",
+      "data_sources": [
+        "simulated"
+      ],
+      "duration_ms": 2
+    },
+    {
+      "agent_name": "FleetConvergence",
+      "action": "Skipped fleet convergence \u2014 no PFZ candidates",
+      "result_summary": "No fishing zones to analyze; fleet convergence unavailable",
+      "data_sources": [],
+      "duration_ms": 0.000600004568696022
+    },
+    {
+      "agent_name": "DiscussionAgent",
+      "action": "Skipped round-table (fast path \u2014 no conflict/complexity)",
+      "result_summary": "Discussion disabled for fast/standard query; deterministic synthesis will be used.",
+      "data_sources": [],
+      "duration_ms": 0.0025999906938523054
+    },
+    {
+      "agent_name": "SynthesisAgent",
+      "action": "Deterministic synthesis (fast path \u2014 no LLM reconciliation needed)",
+      "result_summary": "Verdict 'SAFE' (deterministic); single specialist/no conflict.",
+      "data_sources": [
+        "simulated"
+      ],
+      "duration_ms": 0.008100003469735384
+    },
+    {
+      "agent_name": "SafetyFloor",
+      "action": "Safety floor check \u2014 no severe warning, verdict unchanged",
+      "result_summary": "Verdict 'SAFE' remains (no severe IMD warning)",
+      "data_sources": [],
+      "duration_ms": 0.3715000057127327
+    },
+    {
+      "agent_name": "ResponseAgent",
+      "action": "Composed deterministic answer (fast path \u2014 no LLM)",
+      "result_summary": "Answer written deterministically (103 chars) \u2014 verdict SAFE",
+      "data_sources": [],
+      "duration_ms": 0.01379998866468668
+    },
+    {
+      "agent_name": "Orchestrator",
+      "action": "Latency telemetry",
+      "result_summary": "ORCA completed in 8 ms (discussion_ms=0ms, dispatch_ms=2ms, fleet_ms=0ms, geospatial_ms=0ms, hazard_ms=0ms, language_ms=0ms, ocean_ms=0ms, planning_ms=1ms, response_ms=0ms, routing_ms=1ms, safety_floor_ms=0ms, synthesis_ms=0ms)",
+      "data_sources": [],
+      "duration_ms": 8.0
+    }
+  ],
+  "ocean_state": {
+    "location": {
+      "name": "Ratnagiri Coast",
+      "lat": 16.9902,
+      "lon": 73.312
+    },
+    "timestamp": "2026-08-28 10:11:52.498415+00:00",
+    "sst_celsius": 28.0,
+    "chlorophyll_mg_m3": 0.8,
+    "wave_height_m": 1.0,
+    "wind_speed_kmh": 12.0,
+    "wind_gust_kmh": 20.0,
+    "tide_level_m": 1.0,
+    "source": "simulated",
+    "confidence": 0.6,
+    "reasoning_note": "Wave height 1.0 m",
+    "field_sources": {
+      "sst_celsius": "simulated",
+      "wave_height_m": "simulated",
+      "wind_speed_kmh": "simulated",
+      "wind_gust_kmh": "simulated",
+      "chlorophyll_mg_m3": "simulated",
+      "tide_level_m": "simulated"
+    },
+    "exceedance_windows": [],
+    "tide_extremes": [],
+    "hourly_series": {}
+  },
+  "risk": {
+    "status": "SAFE",
+    "headline": "safe",
+    "flags": [],
+    "reasoning": [
+      "wave 1.0"
+    ],
+    "evidence_sources": [
+      "simulated"
+    ],
+    "confidence": 0.9,
+    "reasoning_note": "Verdict SAFE",
+    "exceedance_windows": [],
+    "cap_polygons": [],
+    "marine_bulletins": []
+  },
+  "conflicts": [],
+  "discussion": [],
+  "mode": "cached_demo",
+  "answered_by": "AUTO SELECT \u2192 ocean_state + geospatial (fast-rules, standard)",
+  "confidence_score": 0.5,
+  "evidence_tiers": [
+    {
+      "source": "simulated",
+      "tier": "Tier 3",
+      "kind": "simulated / seeded fallback"
+    }
+  ],
+  "language": "en",
+  "pfz": null,
+  "geofence": {
+    "reference_location": {
+      "name": "Ratnagiri Coast",
+      "lat": 16.9902,
+      "lon": 73.312
+    },
+    "hits": [],
+    "nearest_boundary_km": 96.4,
+    "clear": true,
+    "reasoning_note": ""
+  },
+  "route": null,
+  "trend": null,
+  "avoid_zones": [],
+  "timings": {
+    "language_ms": 0.0,
+    "planning_ms": 1.3,
+    "routing_ms": 1.2,
+    "ocean_ms": 0.0,
+    "geospatial_ms": 0.0,
+    "hazard_ms": 0.4,
+    "dispatch_ms": 1.5,
+    "fleet_ms": 0.0,
+    "discussion_ms": 0.0,
+    "synthesis_ms": 0.0,
+    "safety_floor_ms": 0.4,
+    "response_ms": 0.0,
+    "total_ms": 8.0
+  },
+  "routing": {
+    "intent": "safety_check",
+    "agents": [
+      "ocean_state",
+      "geospatial"
+    ],
+    "routing_mode": "fast-rules",
+    "complexity": "standard",
+    "reason": "[fast-rules] Safety question requires current sea-state and hazard thresholds.",
+    "confidence": 0.92
+  },
+  "fleet_convergence": {
+    "status": "UNAVAILABLE",
+    "reason": "no PFZ"
+  },
+  "demo_query": "Is it safe to fish near Ratnagiri tomorrow?",
+  "demo_normalized": "is it safe to fish near ratnagiri tomorrow?",
+  "cached_demo": true
+}

@@ -1,0 +1,125 @@
+{
+  "answer": "No restricted boundary within alert buffer.",
+  "status": "CAUTION",
+  "reasoning": [],
+  "evidence_sources": [],
+  "trace": [
+    {
+      "agent_name": "LanguageAgent",
+      "action": "Detected language 'en' [mode=fast-path, ASCII heuristic]",
+      "result_summary": "Normalized query ready for planning (38 chars); LLM call skipped.",
+      "data_sources": [],
+      "duration_ms": 0.000800006091594696
+    },
+    {
+      "agent_name": "PlanningAgent",
+      "action": "Parsed query [mode=fast-rules routing=fast-rules complexity=fast] intent='geofence_check', location='Kochi Coast', time_window='today'",
+      "result_summary": "[fast-rules] Boundary proximity check requires geospatial. Dispatching to geospatial -> SynthesisAgent. | Auto Router selected: Geospatial \u2014 Reason: [fast-rules] Boundary proximity check requires geospatial. (complexity=fast, conf=0.92)",
+      "data_sources": [],
+      "duration_ms": 0.06029999349266291
+    },
+    {
+      "agent_name": "GeospatialAgent",
+      "action": "Checked boundaries (geofence)",
+      "result_summary": "Geofence checked: clear",
+      "data_sources": [],
+      "duration_ms": 0.0
+    },
+    {
+      "agent_name": "FleetConvergence",
+      "action": "Skipped fleet convergence \u2014 no PFZ candidates",
+      "result_summary": "No fishing zones to analyze; fleet convergence unavailable",
+      "data_sources": [],
+      "duration_ms": 0.000300002284348011
+    },
+    {
+      "agent_name": "DiscussionAgent",
+      "action": "Skipped round-table (fast path \u2014 no conflict/complexity)",
+      "result_summary": "Discussion disabled for fast/standard query; deterministic synthesis will be used.",
+      "data_sources": [],
+      "duration_ms": 0.001600012183189392
+    },
+    {
+      "agent_name": "SynthesisAgent",
+      "action": "Deterministic synthesis (fast path \u2014 no LLM reconciliation needed)",
+      "result_summary": "Verdict 'CAUTION' (deterministic); single specialist/no conflict.",
+      "data_sources": [],
+      "duration_ms": 0.002600019797682762
+    },
+    {
+      "agent_name": "SafetyFloor",
+      "action": "Safety floor check \u2014 no severe warning, verdict unchanged",
+      "result_summary": "Verdict 'CAUTION' remains (no severe IMD warning)",
+      "data_sources": [],
+      "duration_ms": 0.0026999914553016424
+    },
+    {
+      "agent_name": "ResponseAgent",
+      "action": "Composed deterministic answer (fast path \u2014 no LLM)",
+      "result_summary": "Answer written deterministically (43 chars) \u2014 verdict N/A",
+      "data_sources": [],
+      "duration_ms": 0.005399982910603285
+    },
+    {
+      "agent_name": "Orchestrator",
+      "action": "Latency telemetry",
+      "result_summary": "ORCA completed in 3 ms (discussion_ms=0ms, dispatch_ms=0ms, fleet_ms=0ms, geospatial_ms=0ms, language_ms=0ms, planning_ms=0ms, response_ms=0ms, routing_ms=0ms, safety_floor_ms=0ms, synthesis_ms=0ms)",
+      "data_sources": [],
+      "duration_ms": 2.9
+    }
+  ],
+  "ocean_state": null,
+  "risk": null,
+  "conflicts": [],
+  "discussion": [],
+  "mode": "cached_demo",
+  "answered_by": "AUTO SELECT \u2192 geospatial (fast-rules, fast)",
+  "confidence_score": 0.85,
+  "evidence_tiers": [],
+  "language": "en",
+  "pfz": null,
+  "geofence": {
+    "reference_location": {
+      "name": "Kochi Coast",
+      "lat": 9.9312,
+      "lon": 76.2673
+    },
+    "hits": [],
+    "nearest_boundary_km": 218.9,
+    "clear": true,
+    "reasoning_note": ""
+  },
+  "route": null,
+  "trend": null,
+  "avoid_zones": [],
+  "timings": {
+    "language_ms": 0.0,
+    "planning_ms": 0.1,
+    "routing_ms": 0.1,
+    "geospatial_ms": 0.0,
+    "dispatch_ms": 0.5,
+    "fleet_ms": 0.0,
+    "discussion_ms": 0.0,
+    "synthesis_ms": 0.0,
+    "safety_floor_ms": 0.0,
+    "response_ms": 0.0,
+    "total_ms": 2.9
+  },
+  "routing": {
+    "intent": "geofence_check",
+    "agents": [
+      "geospatial"
+    ],
+    "routing_mode": "fast-rules",
+    "complexity": "fast",
+    "reason": "[fast-rules] Boundary proximity check requires geospatial.",
+    "confidence": 0.92
+  },
+  "fleet_convergence": {
+    "status": "UNAVAILABLE",
+    "reason": "no PFZ"
+  },
+  "demo_query": "Am I near a restricted area off Kochi?",
+  "demo_normalized": "am i near a restricted area off kochi?",
+  "cached_demo": true
+}

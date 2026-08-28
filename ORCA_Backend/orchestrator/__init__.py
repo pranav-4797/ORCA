@@ -64,6 +64,7 @@ from typing import Annotated, List, Optional, TypedDict
 import llm_client
 import sessions as session_store
 import fleet_convergence as fleet_engine
+import routing_telemetry
 from agents.discussion_agent import DiscussionAgent
 from agents.geospatial_agent import GeospatialAgent
 from agents.hazard_agent import HazardAgent, get_thresholds
@@ -411,6 +412,7 @@ class Orchestrator:
         g.add_node("fleet_convergence", self._node_fleet_convergence)
         g.add_node("discussion", self._node_discussion)
         g.add_node("synthesis", self._node_synthesis)
+        g.add_node("safety_floor", self._node_safety_floor)
         g.add_node("response", self._node_response)
         g.add_node("unsupported", self._node_unsupported)
 
@@ -432,7 +434,8 @@ class Orchestrator:
         g.add_edge("specialists", "fleet_convergence")
         g.add_edge("fleet_convergence", "discussion")
         g.add_edge("discussion", "synthesis")
-        g.add_edge("synthesis", "response")
+        g.add_edge("synthesis", "safety_floor")
+        g.add_edge("safety_floor", "response")
         g.add_edge("response", END)
         g.add_edge("unsupported", END)
         return g.compile()
@@ -522,6 +525,49 @@ class Orchestrator:
             return False
         return True
 
+    def _record_telemetry(self, state: dict | ORCAGraphState, response: OrchestratorResponse, total_ms: float):
+        """Lightweight routing telemetry — best-effort, never fails query."""
+        try:
+            routing_mode = state.get("routing_mode") or state.get("plan", {}).get("routing_mode", "rules")
+            complexity = state.get("complexity") or state.get("plan", {}).get("complexity", "fast")
+            mode = state.get("mode") or getattr(response, "mode", "auto")
+            # Determine if discussion/synthesis LLM actually ran by inspecting traces
+            traces = list(state.get("traces") or []) + list(getattr(response, "trace", []) or [])
+            # Fallback: also check response.trace
+            discussion_ran = False
+            synthesis_ran = False
+            for t in traces:
+                name = getattr(t, "agent_name", "") or t.get("agent_name", "") if isinstance(t, dict) else getattr(t, "agent_name", "")
+                action = getattr(t, "action", "") or t.get("action", "") if isinstance(t, dict) else getattr(t, "action", "")
+                if name == "DiscussionAgent":
+                    if "Skipped" not in action:
+                        discussion_ran = True
+                if name == "SynthesisAgent":
+                    if "Skipped" not in action and "Deterministic" not in action:
+                        synthesis_ran = True
+            # Also respect the gating logic if traces ambiguous
+            # If no Discussion trace found, infer via _should_run_discussion
+            if not any(getattr(t, "agent_name", "") == "DiscussionAgent" for t in traces if hasattr(t, "agent_name")):
+                try:
+                    discussion_ran = self._should_run_discussion(state)  # type: ignore
+                except:
+                    pass
+            if not any(getattr(t, "agent_name", "") == "SynthesisAgent" for t in traces if hasattr(t, "agent_name")):
+                try:
+                    synthesis_ran = self._should_use_synthesis_llm(state)  # type: ignore
+                except:
+                    pass
+            routing_telemetry.record(
+                routing_mode=routing_mode,
+                complexity=complexity,
+                discussion_ran=discussion_ran,
+                synthesis_ran=synthesis_ran,
+                latency_ms=total_ms,
+                mode=mode,
+            )
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # Public entrypoint — now supports auto | panel | agent
     # ------------------------------------------------------------------
@@ -542,6 +588,17 @@ class Orchestrator:
         if mode_norm not in ("auto", "panel", "agent"):
             mode_norm = "auto"
         session_id = session_id or str(uuid.uuid4())
+        # Demo cache check — Task 9, feature-flagged, default off
+        try:
+            import demo_cache
+            if demo_cache.is_enabled():
+                cached = demo_cache.get_cached_orchestrator_response(raw_query, session_id)
+                if cached is not None:
+                    # Ensure session_id handling and mode
+                    cached.mode = "cached_demo"
+                    return cached
+        except Exception:
+            pass
         initial: ORCAGraphState = {
             "raw_query": raw_query,
             "session_id": session_id,
@@ -592,6 +649,11 @@ class Orchestrator:
             # expose timings optionally
             if hasattr(response, "timings"):
                 response.timings = timings  # type: ignore
+            # Telemetry: record routing/synthesis
+            try:
+                self._record_telemetry(final_state, response, total_ms)
+            except:
+                pass
             return response
         # No langgraph fallback — sequential with same gating
         return self._handle_query_auto_sequential(initial)
@@ -607,6 +669,15 @@ class Orchestrator:
         else:
             response.timings["total_ms"] = round(total_ms, 1)  # type: ignore
         response = self._attach_latency_trace(response, getattr(response, "timings", {}), response.trace)
+        # Telemetry
+        try:
+            # Build minimal state for telemetry from response trace/timings
+            state = {"routing_mode": getattr(response, "routing", {}).get("routing_mode", "rules") if hasattr(response, "routing") else "rules",
+                     "complexity": getattr(response, "routing", {}).get("complexity", "fast") if hasattr(response, "routing") else "fast",
+                     "mode": "auto", "traces": response.trace, "timings": getattr(response, "timings", {})}
+            self._record_telemetry(state, response, total_ms)
+        except:
+            pass
         return response
 
     def _attach_latency_trace(self, response: OrchestratorResponse, timings: dict, existing_traces: list) -> OrchestratorResponse:
@@ -631,10 +702,10 @@ class Orchestrator:
         return response
 
     def _enforce_safety_clamp(self, response: OrchestratorResponse, state: dict) -> OrchestratorResponse:
-        """LLM must NEVER override deterministic UNSAFE. If hazard says UNSAFE, response stays UNSAFE."""
+        """LLM must NEVER override deterministic UNSAFE/EXTREME. If hazard says UNSAFE/EXTREME, response stays there."""
         risk = state.get("risk")
-        if risk is not None and hasattr(risk, "status") and risk.status.value == "UNSAFE":
-            if response.status.value != "UNSAFE":
+        if risk is not None and hasattr(risk, "status") and risk.status.value in ("UNSAFE", "EXTREME", "CRITICAL"):
+            if response.status.value not in ("UNSAFE", "EXTREME", "CRITICAL"):
                 response.status = risk.status
                 response.reasoning = getattr(risk, "reasoning", []) or response.reasoning
         return response
@@ -694,6 +765,10 @@ class Orchestrator:
                 pass
             if hasattr(response, "timings"):
                 response.timings = timings  # type: ignore
+            try:
+                self._record_telemetry(final_state, response, total_ms)
+            except:
+                pass
             return response
         response = self._handle_query_sequential(initial)
         response.mode = "panel"
@@ -701,6 +776,13 @@ class Orchestrator:
         try:
             # For sequential fallback, record from response if available
             self._record_fleet_activity({"pfz": getattr(response, "pfz", None), "fleet_convergence": getattr(response, "fleet_convergence", None), "session_id": initial.get("session_id")}, response)
+        except:
+            pass
+        try:
+            state = {"routing_mode": getattr(response, "routing", {}).get("routing_mode", "rules") if hasattr(response, "routing") else "rules",
+                     "complexity": getattr(response, "routing", {}).get("complexity", "fast") if hasattr(response, "routing") else "fast",
+                     "mode": "panel", "traces": response.trace, "timings": getattr(response, "timings", {})}
+            self._record_telemetry(state, response, 0)
         except:
             pass
         return response
@@ -1169,6 +1251,56 @@ class Orchestrator:
         timings = dict(state.get("timings") or {})
         timings["synthesis_ms"] = round(synth_trace.duration_ms, 1)
         return {"synthesis": synthesis, "traces": [synth_trace], "timings": timings}
+
+    def _node_safety_floor(self, state: ORCAGraphState) -> dict:
+        """Deterministic safety-floor pass — Task 8. Only ever RAISES verdict."""
+        t0 = time.perf_counter()
+        synthesis = state.get("synthesis") or {}
+        risk = state.get("risk")
+        # Import here to avoid circular and keep fallback light
+        try:
+            import safety_floor
+            new_synthesis = safety_floor.apply_safety_floor(synthesis, risk)
+            new_risk = safety_floor.enforce_risk_floor(risk)
+            # Check if floor triggered
+            floor_triggered = new_synthesis is not synthesis or new_synthesis.get("safety_floor_applied")
+            # Also check verdict raised
+            if floor_triggered or new_synthesis.get("verdict") != synthesis.get("verdict"):
+                trace = AgentTrace(
+                    agent_name="SafetyFloor",
+                    action="Applied safety floor — raised verdict to EXTREME due to severe IMD warning",
+                    result_summary=f"Synthesis verdict '{synthesis.get('verdict')}' -> '{new_synthesis.get('verdict')}' (severe warning active)",
+                    data_sources=list(risk.evidence_sources) if risk else [],
+                    duration_ms=(time.perf_counter() - t0) * 1000,
+                )
+                timings = dict(state.get("timings") or {})
+                timings["safety_floor_ms"] = round(trace.duration_ms, 1)
+                return {"synthesis": new_synthesis, "risk": new_risk, "traces": [trace], "timings": timings}
+            # No floor needed
+            trace = AgentTrace(
+                agent_name="SafetyFloor",
+                action="Safety floor check — no severe warning, verdict unchanged",
+                result_summary=f"Verdict '{synthesis.get('verdict')}' remains (no severe IMD warning)",
+                data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            timings = dict(state.get("timings") or {})
+            timings["safety_floor_ms"] = round(trace.duration_ms, 1)
+            return {"synthesis": synthesis, "risk": risk, "traces": [trace], "timings": timings}
+        except Exception as exc:
+            # Never break pipeline on floor failure
+            import logging
+            logging.getLogger("orca.orchestrator").warning("safety floor failed: %s", exc)
+            trace = AgentTrace(
+                agent_name="SafetyFloor",
+                action="Safety floor check failed — pipeline continued",
+                result_summary=str(exc)[:200],
+                data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            timings = dict(state.get("timings") or {})
+            timings["safety_floor_ms"] = round(trace.duration_ms, 1)
+            return {"synthesis": synthesis, "risk": risk, "traces": [trace], "timings": timings}
 
     def _node_response(self, state: ORCAGraphState) -> dict:
         t0 = time.perf_counter()
@@ -1835,6 +1967,44 @@ class Orchestrator:
         state["synthesis"] = synthesis
         trace.append(t)
 
+        # Safety floor — Task 8: deterministic pass after synthesis, before response. Only raises.
+        t_floor0 = time.perf_counter()
+        try:
+            import safety_floor
+            new_synthesis = safety_floor.apply_safety_floor(synthesis, state.get("risk"))
+            new_risk = safety_floor.enforce_risk_floor(state.get("risk"))
+            if new_synthesis is not synthesis or new_synthesis.get("verdict") != synthesis.get("verdict") or new_risk is not state.get("risk"):
+                # Floor triggered
+                synthesis = new_synthesis
+                state["synthesis"] = synthesis
+                if new_risk is not state.get("risk"):
+                    state["risk"] = new_risk
+                t_floor = AgentTrace(
+                    agent_name="SafetyFloor",
+                    action="Applied safety floor — raised verdict to EXTREME due to severe IMD warning",
+                    result_summary=f"Synthesis verdict '{synthesis.get('verdict')}' after floor (severe warning active)",
+                    data_sources=list(new_risk.evidence_sources) if new_risk else [],
+                    duration_ms=(time.perf_counter() - t_floor0) * 1000,
+                )
+                timings["safety_floor_ms"] = round(t_floor.duration_ms, 1)
+                trace.append(t_floor)
+            else:
+                t_floor = AgentTrace(
+                    agent_name="SafetyFloor",
+                    action="Safety floor check — no severe warning, verdict unchanged",
+                    result_summary=f"Verdict '{synthesis.get('verdict')}' remains",
+                    data_sources=[],
+                    duration_ms=(time.perf_counter() - t_floor0) * 1000,
+                )
+                timings["safety_floor_ms"] = round(t_floor.duration_ms, 1)
+                trace.append(t_floor)
+        except Exception as exc:
+            import logging
+            logging.getLogger("orca.orchestrator").warning("safety floor failed: %s", exc)
+            t_floor = AgentTrace(agent_name="SafetyFloor", action="Safety floor check failed", result_summary=str(exc)[:200], data_sources=[], duration_ms=(time.perf_counter() - t_floor0)*1000)
+            timings["safety_floor_ms"] = round(t_floor.duration_ms, 1)
+            trace.append(t_floor)
+
         # Response gating — deterministic for fast auto queries
         t_resp0 = time.perf_counter()
         use_deterministic = auto_mode and state.get("complexity") in ("fast", "standard") and state.get("query_depth") != "deep" and state.get("risk") is not None and not use_llm_synth
@@ -1857,9 +2027,9 @@ class Orchestrator:
         response.trace = trace
         # Attach timings to response for telemetry serialization
         response.timings = timings  # type: ignore
-        # Safety clamp
+        # Safety clamp (existing, keeps UNSAFE from being overridden) — floor already raised to EXTREME if needed
         risk = state.get("risk")
-        if risk is not None and risk.status.value == "UNSAFE" and response.status.value != "UNSAFE":
+        if risk is not None and risk.status.value in ("UNSAFE", "EXTREME", "CRITICAL") and response.status.value not in ("UNSAFE", "EXTREME", "CRITICAL"):
             response.status = risk.status
         # Record fleet activity for future convergence (real only)
         try:
@@ -1968,6 +2138,21 @@ class Orchestrator:
         )
         state["synthesis"] = synthesis
         trace.append(t)
+        # Safety floor for direct mode
+        try:
+            import safety_floor
+            new_synth = safety_floor.apply_safety_floor(synthesis, state.get("risk"))
+            new_risk = safety_floor.enforce_risk_floor(state.get("risk"))
+            if new_synth is not synthesis or new_synth.get("verdict") != synthesis.get("verdict"):
+                synthesis = new_synth
+                state["synthesis"] = synthesis
+                if new_risk is not state.get("risk"):
+                    state["risk"] = new_risk
+                trace.append(AgentTrace(agent_name="SafetyFloor", action="Applied safety floor — raised verdict to EXTREME", result_summary=f"Verdict -> {new_synth.get('verdict')}", data_sources=[], duration_ms=0.1))
+            else:
+                trace.append(AgentTrace(agent_name="SafetyFloor", action="Safety floor check — no severe warning", result_summary=f"Verdict '{synthesis.get('verdict')}' remains", data_sources=[], duration_ms=0.1))
+        except Exception:
+            pass
 
         answer, t = self.response_agent.run(
             context, synthesis,
@@ -1980,6 +2165,12 @@ class Orchestrator:
         response.trace = trace
         response.mode = "agent"
         response.answered_by = f"{spec['name']} (direct -- no discussion round)"
+        try:
+            # Agent mode: discussion never, synthesis always (LLM)
+            st = {"routing_mode": plan.get("routing_mode","rules"), "complexity": plan.get("complexity","fast"), "mode": "agent", "traces": trace, "timings": {}}
+            self._record_telemetry(st, response, 0)
+        except:
+            pass
         return response
 
     # ------------------------------------------------------------------

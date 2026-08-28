@@ -130,6 +130,19 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/telemetry")
+def debug_telemetry():
+    """Lightweight routing telemetry — counters for routing_mode and LLM usage (Task 6)."""
+    import routing_telemetry
+    return routing_telemetry.get_stats()
+
+
+@app.get("/debug/telemetry/summary")
+def debug_telemetry_summary():
+    import routing_telemetry
+    return {"summary": routing_telemetry.summary_text()}
+
+
 @app.get("/agents")
 def agents_registry():
     """Addressable specialists for mode='agent' queries. Also describes auto/panel semantics."""

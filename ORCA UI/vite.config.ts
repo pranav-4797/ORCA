@@ -112,5 +112,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    // Task 11: code-split heavy deps to keep initial bundle <500kB
+    // Leaflet (OceanMap) is dynamic via import(), firebase is split via manualChunks
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+        },
+      },
+    },
   },
 });

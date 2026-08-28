@@ -2,8 +2,6 @@ import { store } from '../../store/appState';
 import { ICONS } from '../../utils/icons';
 import { AgentActivity } from './AgentActivity';
 import { AgentSelector } from './AgentSelector';
-import { OceanMap } from '../map/OceanMap';
-import { VizChart } from '../map/VizChart';
 import { showToast } from '../ui/Toast';
 import { OrcaApiService } from '../../services/orcaApiService';
 
@@ -11,18 +9,36 @@ export class AgentPanel {
   private element: HTMLElement;
   private agentActivity: AgentActivity;
   private agentSelector: AgentSelector;
-  private oceanMap: OceanMap;
-  private vizChart: VizChart;
+  private oceanMap: any = null;
+  private vizChart: any = null;
+  private mapsLoading = false;
+  private mapsLoadPromise: Promise<void> | null = null;
 
   constructor() {
     this.element = document.createElement('aside');
     this.element.className = 'agent-panel';
     this.agentActivity = new AgentActivity();
     this.agentSelector = new AgentSelector();
-    this.oceanMap = new OceanMap();
-    this.vizChart = new VizChart();
+    // Lazy-load heavy map/chart components on demand (Task 11)
+    // Do not instantiate OceanMap/VizChart here — they pull in leaflet (~150kB) and are not needed for initial paint
     this.render();
     store.subscribe(() => this.render());
+  }
+
+  private async ensureMapsLoaded(): Promise<void> {
+    if (this.oceanMap && this.vizChart) return;
+    if (this.mapsLoadPromise) return this.mapsLoadPromise;
+    this.mapsLoading = true;
+    this.mapsLoadPromise = (async () => {
+      const [{ OceanMap }, { VizChart }] = await Promise.all([
+        import('../map/OceanMap'),
+        import('../map/VizChart'),
+      ]);
+      this.oceanMap = new OceanMap();
+      this.vizChart = new VizChart();
+      this.mapsLoading = false;
+    })();
+    return this.mapsLoadPromise;
   }
 
   public getElement(): HTMLElement {
@@ -190,8 +206,18 @@ export class AgentPanel {
 
       if (store.mapPanelOpen) {
         const body = document.createElement('div');
-        body.appendChild(this.oceanMap.getElement());
-        body.appendChild(this.vizChart.getElement());
+        if (this.oceanMap && this.vizChart) {
+          body.appendChild(this.oceanMap.getElement());
+          body.appendChild(this.vizChart.getElement());
+        } else {
+          const placeholder = document.createElement('div');
+          placeholder.className = 'viz-chart-empty';
+          placeholder.textContent = 'Loading operational picture…';
+          body.appendChild(placeholder);
+          this.ensureMapsLoaded().then(() => {
+            if (store.mapPanelOpen) this.render();
+          });
+        }
         section.appendChild(body);
       }
       mapContainer.appendChild(section);

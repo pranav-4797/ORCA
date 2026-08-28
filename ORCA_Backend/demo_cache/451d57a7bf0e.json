@@ -1,0 +1,236 @@
+{
+  "answer": "ZONE_A: base 94.4 fleet 0 adj 94.4 \ud83d\udfe2 Minimal crowding Nearest PFZ 12.0 km away at 45\u00b0 bearing (SST 27.5\u00b0C). [Note: some fields simulated due to live feed unavailability.]",
+  "status": "CAUTION",
+  "reasoning": [],
+  "evidence_sources": [],
+  "trace": [
+    {
+      "agent_name": "LanguageAgent",
+      "action": "Detected language 'en' [mode=fast-path, ASCII heuristic]",
+      "result_summary": "Normalized query ready for planning (51 chars); LLM call skipped.",
+      "data_sources": [],
+      "duration_ms": 0.0016999838408082724
+    },
+    {
+      "agent_name": "PlanningAgent",
+      "action": "Parsed query [mode=fast-rules routing=fast-rules complexity=standard] intent='pfz_lookup', location='Kochi Coast', time_window='today'",
+      "result_summary": "[fast-rules] Fishing zone lookup requires thermal front analysis. Dispatching to ocean_state -> pfz -> geospatial -> SynthesisAgent. | Auto Router selected: Ocean State + Pfz + Geospatial \u2014 Reason: [fast-rules] Fishing zone lookup requires thermal front analysis. (complexity=standard, conf=0.92)",
+      "data_sources": [],
+      "duration_ms": 0.07880001794546843
+    },
+    {
+      "agent_name": "OceanStateAgent",
+      "action": "fake",
+      "result_summary": "wave 1.0m",
+      "data_sources": [
+        "simulated"
+      ],
+      "duration_ms": 5
+    },
+    {
+      "agent_name": "PFZAgent",
+      "action": "fake",
+      "result_summary": "pfz",
+      "data_sources": [
+        "derived_from_live_data"
+      ],
+      "duration_ms": 1
+    },
+    {
+      "agent_name": "GeospatialAgent",
+      "action": "Checked boundaries (geofence)",
+      "result_summary": "Geofence checked: clear",
+      "data_sources": [],
+      "duration_ms": 0.0
+    },
+    {
+      "agent_name": "FleetConvergence",
+      "action": "Analyzed fleet crowding for 1 candidate zones [OK]",
+      "result_summary": "Fleet convergence OK: 1 zones, raw ZONE_A \u2192 final ZONE_A changed=False",
+      "data_sources": [],
+      "duration_ms": 0.05709999823011458
+    },
+    {
+      "agent_name": "DiscussionAgent",
+      "action": "Skipped round-table (fast path \u2014 no conflict/complexity)",
+      "result_summary": "Discussion disabled for fast/standard query; deterministic synthesis will be used.",
+      "data_sources": [],
+      "duration_ms": 0.0028999929782003164
+    },
+    {
+      "agent_name": "SynthesisAgent",
+      "action": "Deterministic synthesis (fast path \u2014 no LLM reconciliation needed)",
+      "result_summary": "Verdict 'CAUTION' (deterministic); single specialist/no conflict.",
+      "data_sources": [],
+      "duration_ms": 0.0050000089686363935
+    },
+    {
+      "agent_name": "SafetyFloor",
+      "action": "Safety floor check \u2014 no severe warning, verdict unchanged",
+      "result_summary": "Verdict 'CAUTION' remains (no severe IMD warning)",
+      "data_sources": [],
+      "duration_ms": 0.0044000043999403715
+    },
+    {
+      "agent_name": "ResponseAgent",
+      "action": "Composed deterministic answer (fast path \u2014 no LLM)",
+      "result_summary": "Answer written deterministically (170 chars) \u2014 verdict N/A",
+      "data_sources": [],
+      "duration_ms": 0.018499995348975062
+    },
+    {
+      "agent_name": "Orchestrator",
+      "action": "Latency telemetry",
+      "result_summary": "ORCA completed in 4 ms (discussion_ms=0ms, dispatch_ms=1ms, fleet_ms=0ms, geospatial_ms=0ms, language_ms=0ms, ocean_ms=0ms, pfz_ms=1ms, planning_ms=0ms, response_ms=0ms, routing_ms=0ms, safety_floor_ms=0ms, synthesis_ms=0ms)",
+      "data_sources": [],
+      "duration_ms": 4.2
+    }
+  ],
+  "ocean_state": {
+    "location": {
+      "name": "Kochi Coast",
+      "lat": 9.9312,
+      "lon": 76.2673
+    },
+    "timestamp": "2026-08-28 10:11:52.511153+00:00",
+    "sst_celsius": 28.0,
+    "chlorophyll_mg_m3": 0.8,
+    "wave_height_m": 1.0,
+    "wind_speed_kmh": 12.0,
+    "wind_gust_kmh": 20.0,
+    "tide_level_m": 1.0,
+    "source": "simulated",
+    "confidence": 0.6,
+    "reasoning_note": "Wave height 1.0 m",
+    "field_sources": {
+      "sst_celsius": "simulated",
+      "wave_height_m": "simulated",
+      "wind_speed_kmh": "simulated",
+      "wind_gust_kmh": "simulated",
+      "chlorophyll_mg_m3": "simulated",
+      "tide_level_m": "simulated"
+    },
+    "exceedance_windows": [],
+    "tide_extremes": [],
+    "hourly_series": {}
+  },
+  "risk": null,
+  "conflicts": [],
+  "discussion": [],
+  "mode": "cached_demo",
+  "answered_by": "AUTO SELECT \u2192 ocean_state + pfz + geospatial (fast-rules, standard)",
+  "confidence_score": 0.41,
+  "evidence_tiers": [
+    {
+      "source": "simulated",
+      "tier": "Tier 3",
+      "kind": "simulated / seeded fallback"
+    }
+  ],
+  "language": "en",
+  "pfz": {
+    "reference_location": {
+      "name": "Kochi Coast",
+      "lat": 9.9312,
+      "lon": 76.2673
+    },
+    "center_lat": 10.0312,
+    "center_lon": 76.3673,
+    "distance_from_reference_km": 12.0,
+    "bearing_deg": 45.0,
+    "sst_at_zone_celsius": 27.5,
+    "chlorophyll_at_zone_mg_m3": 0.8,
+    "source": "derived_from_live_data",
+    "confidence": 0.6,
+    "reasoning_note": "zone 12 km away",
+    "field_sources": {},
+    "alternates": []
+  },
+  "geofence": {
+    "reference_location": {
+      "name": "Kochi Coast",
+      "lat": 9.9312,
+      "lon": 76.2673
+    },
+    "hits": [],
+    "nearest_boundary_km": 218.9,
+    "clear": true,
+    "reasoning_note": ""
+  },
+  "route": null,
+  "trend": null,
+  "avoid_zones": [],
+  "timings": {
+    "language_ms": 0.0,
+    "planning_ms": 0.2,
+    "routing_ms": 0.1,
+    "ocean_ms": 0.3,
+    "pfz_ms": 1,
+    "geospatial_ms": 0.0,
+    "dispatch_ms": 0.9,
+    "fleet_ms": 0.1,
+    "discussion_ms": 0.0,
+    "synthesis_ms": 0.0,
+    "safety_floor_ms": 0.0,
+    "response_ms": 0.0,
+    "total_ms": 4.2
+  },
+  "routing": {
+    "intent": "pfz_lookup",
+    "agents": [
+      "ocean_state",
+      "pfz",
+      "geospatial"
+    ],
+    "routing_mode": "fast-rules",
+    "complexity": "standard",
+    "reason": "[fast-rules] Fishing zone lookup requires thermal front analysis.",
+    "confidence": 0.92
+  },
+  "fleet_convergence": {
+    "status": "OK",
+    "window_hours": 6,
+    "timestamp": 1787911912.5120652,
+    "recommendation_changed": false,
+    "change_reason": "No crowding-driven change: ZONE_A remains best (base 94.4 adj 94.4)",
+    "candidates": [
+      {
+        "zone_id": "ZONE_A",
+        "center_lat": 10.0312,
+        "center_lon": 76.3673,
+        "distance_km": 12.0,
+        "bearing_deg": 45.0,
+        "sst_celsius": 27.5,
+        "base_suitability": 94.4,
+        "fleet_count": 0,
+        "crowding_ratio": 0.0,
+        "crowding_penalty": 0.0,
+        "adjusted_suitability": 94.4,
+        "is_safe": true,
+        "is_legal": true,
+        "is_recommended": true,
+        "source": "derived_from_live_data",
+        "crowding_label": "\ud83d\udfe2 Minimal crowding"
+      }
+    ],
+    "raw_best_zone": {
+      "zone_id": "ZONE_A",
+      "center_lat": 10.0312,
+      "center_lon": 76.3673,
+      "base_suitability": 94.4,
+      "fleet_count": 0,
+      "adjusted_suitability": 94.4
+    },
+    "final_zone": {
+      "zone_id": "ZONE_A",
+      "center_lat": 10.0312,
+      "center_lon": 76.3673,
+      "base_suitability": 94.4,
+      "fleet_count": 0,
+      "adjusted_suitability": 94.4
+    }
+  },
+  "demo_query": "Where is the nearest fishing zone near Kochi today?",
+  "demo_normalized": "where is the nearest fishing zone near kochi today?",
+  "cached_demo": true
+}

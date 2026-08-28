@@ -1,0 +1,166 @@
+{
+  "answer": "Verdict: CAUTION [llm_unavailable] Template response.",
+  "status": "CAUTION",
+  "reasoning": [],
+  "evidence_sources": [],
+  "trace": [
+    {
+      "agent_name": "LanguageAgent",
+      "action": "Detected language 'en' [mode=fast-path, ASCII heuristic]",
+      "result_summary": "Normalized query ready for planning (54 chars); LLM call skipped.",
+      "data_sources": [],
+      "duration_ms": 0.0008999777492135763
+    },
+    {
+      "agent_name": "PlanningAgent",
+      "action": "Parsed query [mode=fast-rules routing=fast-rules complexity=deep] intent='trend_analysis', location='Kochi Coast', time_window='today'",
+      "result_summary": "[fast-rules] Analytical question about change over time requires historical correlation. Dispatching to trend -> SynthesisAgent. | Auto Router selected: Trend \u2014 Reason: [fast-rules] Analytical question about change over time requires historical correlation. (complexity=deep, conf=0.92)",
+      "data_sources": [],
+      "duration_ms": 0.05959998816251755
+    },
+    {
+      "agent_name": "TrendAgent",
+      "action": "fake trend",
+      "result_summary": "trend",
+      "data_sources": [],
+      "duration_ms": 5
+    },
+    {
+      "agent_name": "FleetConvergence",
+      "action": "Skipped fleet convergence \u2014 no PFZ candidates",
+      "result_summary": "No fishing zones to analyze; fleet convergence unavailable",
+      "data_sources": [],
+      "duration_ms": 0.000900006853044033
+    },
+    {
+      "agent_name": "DiscussionAgent",
+      "action": "Moderated round-table between 1 agents (Trend)",
+      "result_summary": "1 exchanges; consensus: [llm_unavailable] Deterministic exchange; final reconciliation follows in the Synthesis Agent.",
+      "data_sources": [],
+      "duration_ms": 0.023600005079060793
+    },
+    {
+      "agent_name": "SynthesisAgent",
+      "action": "Reconciled all specialist findings into one verdict",
+      "result_summary": "Verdict 'CAUTION' (confidence medium); conflicts flagged: 0; round-table consensus honoured",
+      "data_sources": [],
+      "duration_ms": 0.029999995604157448
+    },
+    {
+      "agent_name": "SafetyFloor",
+      "action": "Safety floor check \u2014 no severe warning, verdict unchanged",
+      "result_summary": "Verdict 'CAUTION' remains (no severe IMD warning)",
+      "data_sources": [],
+      "duration_ms": 0.0033999967854470015
+    },
+    {
+      "agent_name": "ResponseAgent",
+      "action": "Composed final answer in English",
+      "result_summary": "Answer written (53 chars)",
+      "data_sources": [],
+      "duration_ms": 0.025899993488565087
+    },
+    {
+      "agent_name": "Orchestrator",
+      "action": "Latency telemetry",
+      "result_summary": "ORCA completed in 3 ms (discussion_ms=0ms, dispatch_ms=1ms, fleet_ms=0ms, language_ms=0ms, planning_ms=0ms, response_ms=0ms, routing_ms=0ms, safety_floor_ms=0ms, synthesis_ms=0ms, trend_ms=5ms)",
+      "data_sources": [],
+      "duration_ms": 3.3
+    }
+  ],
+  "ocean_state": null,
+  "risk": null,
+  "conflicts": [],
+  "discussion": [
+    {
+      "speaker": "Trend Agent",
+      "addressing": null,
+      "stance": "clarify",
+      "point": "[llm_unavailable] Context over 6 months: SST +0.020 C/mo, chlorophyll +0.001 mg/m3/mo."
+    },
+    {
+      "consensus": "[llm_unavailable] Deterministic exchange; final reconciliation follows in the Synthesis Agent."
+    }
+  ],
+  "mode": "cached_demo",
+  "answered_by": "AUTO SELECT \u2192 trend (fast-rules, deep)",
+  "confidence_score": 0.3,
+  "evidence_tiers": [],
+  "language": "en",
+  "pfz": null,
+  "geofence": null,
+  "route": null,
+  "trend": {
+    "location_name": "Kochi Coast",
+    "window_months": 6,
+    "points": [
+      {
+        "date": "2025-01-15",
+        "sst_celsius": 28.0,
+        "chlorophyll_mg_m3": 0.8
+      },
+      {
+        "date": "2025-02-15",
+        "sst_celsius": 28.0,
+        "chlorophyll_mg_m3": 0.8
+      },
+      {
+        "date": "2025-03-15",
+        "sst_celsius": 28.0,
+        "chlorophyll_mg_m3": 0.8
+      },
+      {
+        "date": "2025-04-15",
+        "sst_celsius": 28.0,
+        "chlorophyll_mg_m3": 0.8
+      },
+      {
+        "date": "2025-05-15",
+        "sst_celsius": 28.0,
+        "chlorophyll_mg_m3": 0.8
+      },
+      {
+        "date": "2025-06-15",
+        "sst_celsius": 28.0,
+        "chlorophyll_mg_m3": 0.8
+      }
+    ],
+    "sst_trend_per_month": 0.02,
+    "chl_trend_per_month": 0.001,
+    "sst_chl_correlation": 0.5,
+    "interpretation_note": "warming",
+    "field_sources": {},
+    "reasoning_note": "trend"
+  },
+  "avoid_zones": [],
+  "timings": {
+    "language_ms": 0.0,
+    "planning_ms": 0.1,
+    "routing_ms": 0.1,
+    "trend_ms": 5,
+    "dispatch_ms": 0.6,
+    "fleet_ms": 0.0,
+    "discussion_ms": 0.0,
+    "synthesis_ms": 0.0,
+    "safety_floor_ms": 0.0,
+    "response_ms": 0.0,
+    "total_ms": 3.3
+  },
+  "routing": {
+    "intent": "trend_analysis",
+    "agents": [
+      "trend"
+    ],
+    "routing_mode": "fast-rules",
+    "complexity": "deep",
+    "reason": "[fast-rules] Analytical question about change over time requires historical correlation.",
+    "confidence": 0.92
+  },
+  "fleet_convergence": {
+    "status": "UNAVAILABLE",
+    "reason": "no PFZ"
+  },
+  "demo_query": "Why has SST changed over the last 6 months near Kochi?",
+  "demo_normalized": "why has sst changed over the last 6 months near kochi?",
+  "cached_demo": true
+}
