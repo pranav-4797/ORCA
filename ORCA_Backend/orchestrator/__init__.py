@@ -71,6 +71,7 @@ from agents.hazard_agent import HazardAgent, get_thresholds
 from agents.language_agent import LanguageAgent
 from agents.ocean_state_agent import OceanStateAgent
 from agents.pfz_agent import PFZAgent
+from agents.pfz_output import format_pfz_answer
 from agents.response_agent import ResponseAgent
 from agents.synthesis_agent import SynthesisAgent
 from agents.trend_agent import TrendAgent
@@ -1444,6 +1445,17 @@ class Orchestrator:
         fleet = state.get("fleet_convergence")
         context = state.get("context")
         parts: list[str] = []
+        # Official PFZ lookups: documented INCOIS template (exact format),
+        # unless fleet convergence actively changed the recommendation.
+        if (state.get("plan", {}).get("intent") == "pfz_lookup"
+                and pfz is not None
+                and getattr(getattr(pfz, "source", None), "value", None) == "incois_live"
+                and not (fleet and fleet.get("recommendation_changed"))):
+            verdict = ((state.get("synthesis") or {}).get("verdict")
+                       or (risk.status.value if risk else "CAUTION"))
+            formatted = format_pfz_answer(pfz, verdict=verdict)
+            if formatted:
+                return formatted[:1500]
         # Verdict line is authoritative and already rendered as HUD; answer complements it concisely.
         if risk is not None:
             if risk.status.value == "UNSAFE":

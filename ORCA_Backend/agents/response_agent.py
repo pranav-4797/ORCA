@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 
 import llm_client
+from agents.pfz_output import format_pfz_answer, is_pfz_lookup_query
 from models import (
     AgentTrace,
     GeofenceStatus,
@@ -52,13 +53,24 @@ class ResponseAgent:
         language = context.language or "en"
         lang_name = _LANGUAGE_NAMES.get(language, language)
 
-        try:
-            answer = self._compose_with_llm(
-                context, synthesis, lang_name, ocean_state, pfz, geofence, route,
-                trend, discussion=discussion or {},
+        # Official-PFZ lookups get the documented INCOIS template verbatim
+        # (deterministic, no LLM needed for distance/bearing/coords facts).
+        official_pfz = None
+        if pfz is not None and is_pfz_lookup_query(context.raw_query):
+            official_pfz = format_pfz_answer(
+                pfz, verdict=(synthesis or {}).get("verdict", "CAUTION")
             )
-        except llm_client.LLMUnavailableError:
-            answer = self._fallback_answer(context, synthesis, risk, pfz, geofence, route)
+
+        if official_pfz is not None:
+            answer = official_pfz
+        else:
+            try:
+                answer = self._compose_with_llm(
+                    context, synthesis, lang_name, ocean_state, pfz, geofence, route,
+                    trend, discussion=discussion or {},
+                )
+            except llm_client.LLMUnavailableError:
+                answer = self._fallback_answer(context, synthesis, risk, pfz, geofence, route)
 
         duration_ms = (time.perf_counter() - start) * 1000
         trace = AgentTrace(
