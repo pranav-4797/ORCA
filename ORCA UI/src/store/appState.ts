@@ -538,6 +538,10 @@ class AppStore {
     const chat = this.chats.find(c => c.id === chatId);
     if (chat) {
       chat.pinned = !chat.pinned;
+      chat.updatedAt = Date.now();
+      if (this.currentUser) {
+        void saveUserChatToFirestore(this.currentUser.uid, chat);
+      }
       this.notify();
     }
   }
@@ -820,6 +824,9 @@ class AppStore {
       } else {
         msg.reactions = { type: reaction };
       }
+      if (this.currentUser) {
+        void saveUserMessageToFirestore(this.currentUser.uid, this.activeChatId, msg);
+      }
       this.notify();
     }
   }
@@ -836,6 +843,10 @@ class AppStore {
 
     msg.content = newContent;
     msg.isEdited = true;
+
+    if (this.currentUser) {
+      void saveUserMessageToFirestore(this.currentUser.uid, this.activeChatId, msg);
+    }
 
     // If it's a user message, truncate everything after and re-generate
     if (msg.role === 'user') {
