@@ -103,6 +103,8 @@ class QueryRequest(BaseModel):
     vessel_class: str | None = None
     # Query depth policy for auto mode: auto | fast | standard | deep (overrides ORCA_QUERY_DEPTH)
     query_depth: str | None = None
+    # Fleet Convergence demo: low/medium/high/severe — injects SIMULATED fleet activity for demo
+    fleet_demo_level: str | None = None
 
 
 class RegisterRequest(BaseModel):
@@ -178,10 +180,12 @@ def query(request: QueryRequest):
     cache_key_src = "|".join([
         request.query.strip().lower(), request.mode, request.agent or "",
         request.vessel_class or "", str(device_gps), str(destination),
-        session_id, request.query_depth or "",
+        session_id, request.query_depth or "", request.fleet_demo_level or "",
     ])
     cache_key = hashlib.sha256(cache_key_src.encode()).hexdigest()
-    cached = storage.response_cache.get(cache_key)
+    # Don't cache demo fleet queries — they are meant to change with simulated levels
+    use_cache = not request.fleet_demo_level
+    cached = storage.response_cache.get(cache_key) if use_cache else None
     if cached is not None:
         return cached
 
@@ -194,6 +198,7 @@ def query(request: QueryRequest):
         target_agent=request.agent,
         vessel_class=request.vessel_class,
         query_depth=request.query_depth,
+        fleet_demo_level=request.fleet_demo_level,
     )
     _last_responses[session_id] = response
     payload = _serialize(response)
@@ -334,7 +339,40 @@ def viz_geojson(session_id: str):
         })
 
     pfz = getattr(r, "pfz", None)
-    if pfz is not None:
+    # Fleet convergence — crowding-adjusted candidates (Innovation #1)
+    fleet = getattr(r, "fleet_convergence", None)
+    if fleet and fleet.get("candidates"):
+        for cand in fleet["candidates"]:
+            is_rec = cand.get("is_recommended", False)
+            kind = "fleet_recommended" if is_rec else "fleet_candidate"
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "kind": kind,
+                    "zone_id": cand["zone_id"],
+                    "name": f"{cand['zone_id']} {'✓ Recommended' if is_rec else ''}",
+                    "base_suitability": cand["base_suitability"],
+                    "fleet_count": cand["fleet_count"],
+                    "adjusted_suitability": cand["adjusted_suitability"],
+                    "crowding_ratio": cand["crowding_ratio"],
+                    "crowding_label": cand.get("crowding_label", ""),
+                    "status": fleet.get("status", "OK"),
+                },
+                "geometry": {"type": "Point", "coordinates": [cand["center_lon"], cand["center_lat"]]},
+            })
+        # Also add raw_best vs final for legend
+        if fleet.get("raw_best_zone") and fleet.get("final_zone") and fleet.get("recommendation_changed"):
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "kind": "fleet_change",
+                    "raw_best": fleet["raw_best_zone"]["zone_id"],
+                    "final": fleet["final_zone"]["zone_id"],
+                    "reason": fleet.get("change_reason", "")[:120],
+                },
+                "geometry": {"type": "Point", "coordinates": [fleet["final_zone"]["center_lon"], fleet["final_zone"]["center_lat"]]},
+            })
+    elif pfz is not None:
         features.append({
             "type": "Feature",
             "properties": {
@@ -431,6 +469,103 @@ def viz_series(session_id: str):
     ]
     return {"series": series, "exceedance_windows": windows, "tides": tides}
 
+
+# ---------------------------------------------------------------------------
+# Fleet Convergence Forecast (Innovation #1)
+# ---------------------------------------------------------------------------
+
+class FleetSimulateRequest(BaseModel):
+    lat: float | None = None
+    lon: float | None = None
+    level: str = "high"  # low/medium/high/severe
+    session_id: str | None = None  # reference session for zone, else use lat/lon
+
+@app.get("/fleet/status")
+def fleet_status():
+    import fleet_convergence as fc
+    recent = fc.fleet_store.get_recent(window_hours=fc.FLEET_WINDOW_HOURS, include_simulated=True)
+    real = [a for a in recent if not a.is_simulated]
+    sim = [a for a in recent if a.is_simulated]
+    return {
+        "window_hours": fc.FLEET_WINDOW_HOURS,
+        "radius_km": fc.FLEET_RADIUS_KM,
+        "target_capacity": fc.FLEET_TARGET_CAPACITY,
+        "penalty_factor": fc.FLEET_PENALTY_FACTOR,
+        "max_penalty": fc.FLEET_MAX_PENALTY,
+        "total_recent": len(recent),
+        "real_count": len(real),
+        "simulated_count": len(sim),
+        "recent": [
+            {"zone_lat": a.zone_lat, "zone_lon": a.zone_lon, "session_id": a.session_id[:8], "is_simulated": a.is_simulated, "age_min": round((__import__("time").time() - a.timestamp)/60, 1)}
+            for a in recent[-20:]
+        ],
+    }
+
+@app.post("/fleet/simulate")
+def fleet_simulate(req: FleetSimulateRequest):
+    import fleet_convergence as fc
+    # If lat/lon not provided, try to use last response's pfz
+    lat = req.lat
+    lon = req.lon
+    if lat is None or lon is None:
+        # Try to find from last response for this session
+        if req.session_id and req.session_id in _last_responses:
+            pfz = getattr(_last_responses[req.session_id], "pfz", None)
+            if pfz:
+                lat = pfz.center_lat
+                lon = pfz.center_lon
+        if lat is None or lon is None:
+            raise HTTPException(400, "lat/lon required or provide session_id with prior PFZ")
+    n = fc.simulate_fleet_activity(lat, lon, level=req.level)
+    return {"simulated": n, "level": req.level, "center": {"lat": lat, "lon": lon}, "status": "SIMULATED"}
+
+@app.post("/fleet/clear")
+def fleet_clear(simulated_only: bool = True):
+    import fleet_convergence as fc
+    fc.fleet_store.clear(simulated_only=simulated_only)
+    return {"cleared": True, "simulated_only": simulated_only}
+
+@app.get("/fleet/demo")
+def fleet_demo(lat: float, lon: float, level: str = "high"):
+    """Deterministic demo: returns what fleet analysis WOULD be for given center without persisting."""
+    import fleet_convergence as fc
+    from models import Location
+    # Build a fake pfz at this location for demo
+    fake_pfz = type("obj", (), {
+        "center_lat": lat, "center_lon": lon,
+        "distance_from_reference_km": 12.0, "bearing_deg": 45.0,
+        "sst_at_zone_celsius": 27.5, "chlorophyll_at_zone_mg_m3": 0.8,
+        "source": type("obj", (), {"value": "simulated"})(),
+        "alternates": [
+            {"center_lat": lat+0.1, "center_lon": lon+0.1, "distance_km": 18, "bearing_deg": 90, "sst_celsius": 27.0, "gradient_vs_reference_c": 1.2},
+            {"center_lat": lat-0.1, "center_lon": lon-0.1, "distance_km": 22, "bearing_deg": 180, "sst_celsius": 26.8, "gradient_vs_reference_c": 0.8},
+        ]
+    })()
+    # Temporarily simulate without polluting store? For demo we just compute with simulated counts
+    # We will simulate in-memory counts without persisting by using a temporary fleet_store snapshot
+    # Simpler: call simulate then analyze then clear simulated? But we want to show effect
+    # For GET demo, we compute crowding as if fleet at given level, without persisting
+    # Use the current store plus simulated on-the-fly
+    # Instead, just return the levels mapping
+    levels = {"low": 2, "medium": 5, "high": 10, "severe": 20}
+    n = levels.get(level.lower(), 10)
+    # Compute mock result
+    candidates = fc.build_candidates_from_pfz(fake_pfz)
+    # Mock fleet counts: primary gets n, alternates get small
+    mock_counts = {c.zone_id: (n if c.zone_id=="ZONE_A" else max(0, n//4)) for c in candidates}
+    fc.apply_fleet_convergence(candidates, mock_counts)
+    raw_best = max(candidates, key=lambda x: x.base_suitability)
+    final = max([c for c in candidates if c.base_suitability >= fc.FLEET_MIN_BASE_SUITABILITY], key=lambda x: x.adjusted_suitability, default=raw_best)
+    return {
+        "demo_level": level,
+        "candidates": [
+            {"zone_id": c.zone_id, "base_suitability": c.base_suitability, "fleet_count": c.fleet_count, "adjusted_suitability": c.adjusted_suitability, "crowding_ratio": c.crowding_ratio}
+            for c in candidates
+        ],
+        "raw_best": raw_best.zone_id if raw_best else None,
+        "final": final.zone_id if final else None,
+        "changed": raw_best.zone_id != final.zone_id if raw_best and final else False,
+    }
 
 @app.delete("/sessions/{session_id}")
 def session_clear(session_id: str):

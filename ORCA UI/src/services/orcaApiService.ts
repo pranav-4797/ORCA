@@ -56,6 +56,29 @@ export interface OrcaQueryResponse {
     reason: string;
     confidence: number;
   };
+  fleet_convergence?: {
+    status: string;
+    window_hours: number;
+    recommendation_changed: boolean;
+    change_reason: string;
+    candidates: Array<{
+      zone_id: string;
+      center_lat: number;
+      center_lon: number;
+      distance_km: number;
+      bearing_deg: number;
+      base_suitability: number;
+      fleet_count: number;
+      crowding_ratio: number;
+      crowding_penalty: number;
+      adjusted_suitability: number;
+      crowding_label?: string;
+      is_recommended?: boolean;
+      source?: string;
+    }>;
+    raw_best_zone?: any;
+    final_zone?: any;
+  };
 }
 
 /** Addressable specialists for direct-agent queries (backend registry). */
@@ -174,6 +197,8 @@ export class OrcaApiService implements IAIService {
     });
 
     let data: OrcaQueryResponse;
+    // Include fleet demo level if set (via options or global demo control)
+    const fleetDemoLevel = (options as any).fleetDemoLevel || OrcaApiService.getFleetDemoLevel() || null;
     try {
       data = options.voiceBlob
         ? await this.postVoiceQuery(options)
@@ -186,6 +211,7 @@ export class OrcaApiService implements IAIService {
               device_gps: OrcaApiService.demoGps(),
               mode: resolvedMode,
               agent: resolvedMode === 'agent' ? options.targetAgent : undefined,
+              fleet_demo_level: fleetDemoLevel || undefined,
             }),
           });
     } catch (err: any) {
@@ -251,6 +277,37 @@ export class OrcaApiService implements IAIService {
       });
     }
 
+    // Fleet Convergence — crowding-adjusted recommendation
+    if ((data as any).fleet_convergence) {
+      const fc = (data as any).fleet_convergence;
+      const status = fc.status || 'OK';
+      const changed = fc.recommendation_changed;
+      const candidates = fc.candidates || [];
+      const simLabel = status.startsWith('SIMULATED') ? ' [DEMO — SIMULATED FLEET ACTIVITY]' : '';
+      if (status === 'UNAVAILABLE') {
+        onChunk({
+          type: 'activity',
+          activityStep: this.step(
+            `fleet-${Date.now()}`,
+            'Fleet convergence unavailable — showing raw suitability',
+            fc.reason || 'No fleet data',
+            'completed',
+          ),
+        });
+      } else {
+        const summary = candidates.map((c: any) => `${c.zone_id}: base ${c.base_suitability} fleet ${c.fleet_count} adj ${c.adjusted_suitability} ${c.crowding_label||''}`).join(' | ').slice(0, 180);
+        onChunk({
+          type: 'activity',
+          activityStep: this.step(
+            `fleet-${Date.now()}`,
+            changed ? `Fleet convergence: ${fc.raw_best_zone?.zone_id} → ${fc.final_zone?.zone_id}${simLabel}` : `Fleet checked: ${fc.final_zone?.zone_id || 'no change'}${simLabel}`,
+            summary || fc.change_reason || `Status ${status}, ${candidates.length} zones`,
+            'completed',
+          ),
+        });
+      }
+    }
+
     // ---- Phase 2b: round-table discussion -> activity steps (only when present; no delay) ------------
     const STANCE_ICON: Record<string, string> = {
       challenge: '\u26a1', clarify: '\u2139\ufe0f', agree: '\u2705', concede: '\ud83e\udd1d',
@@ -305,7 +362,7 @@ export class OrcaApiService implements IAIService {
     // If you want streaming, implement true SSE backend streaming, not sleep().
     let streamed = fullText;
     onChunk({ type: 'token', content: fullText });
-    // Propagate structured status/routing to the message model so HUD uses authoritative backend status, not text parsing fallback.
+    // Propagate structured status/routing/fleet to the message model so HUD uses authoritative backend status, not text parsing fallback.
     onChunk({
       type: 'done',
       content: fullText,
@@ -313,6 +370,7 @@ export class OrcaApiService implements IAIService {
       status: data.status,
       routing: data.routing,
       timings: data.timings,
+      fleetConvergence: (data as any).fleet_convergence,
       tokens: {
         promptTokens: Math.ceil(prompt.length / 4),
         completionTokens: Math.ceil(fullText.length / 4),
@@ -381,6 +439,38 @@ export class OrcaApiService implements IAIService {
   private step(id: string, title: string, desc?: string,
                status: AgentActivityStep['status'] = 'completed'): AgentActivityStep {
     return { id, title, description: desc, status, timestamp: Date.now() };
+  }
+
+  public static fleetDemoLevel: string | null = null;
+
+  /** Fleet Convergence — set demo level for next query (low/medium/high/severe) */
+  public static setFleetDemoLevel(level: string | null): void {
+    OrcaApiService.fleetDemoLevel = level;
+    if (level) localStorage.setItem('orca_fleet_demo_level', level);
+    else localStorage.removeItem('orca_fleet_demo_level');
+  }
+  public static getFleetDemoLevel(): string | null {
+    return OrcaApiService.fleetDemoLevel || localStorage.getItem('orca_fleet_demo_level');
+  }
+  public static async simulateFleet(level: string, lat?: number, lon?: number, sessionId?: string): Promise<any> {
+    const body: any = { level };
+    if (lat != null && lon != null) { body.lat = lat; body.lon = lon; }
+    if (sessionId) body.session_id = sessionId;
+    return fetch(`${BACKEND_URL}/fleet/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => { if (!r.ok) throw new Error(`fleet simulate ${r.status}`); return r.json(); });
+  }
+  public static async clearFleet(simulatedOnly: boolean = true): Promise<any> {
+    return fetch(`${BACKEND_URL}/fleet/clear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ simulated_only: simulatedOnly }),
+    }).then(r => r.json());
+  }
+  public static async getFleetStatus(): Promise<any> {
+    return fetch(`${BACKEND_URL}/fleet/status`).then(r => r.json());
   }
 
   public static cachedGps: [number, number] | null = null;

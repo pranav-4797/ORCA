@@ -63,6 +63,7 @@ from typing import Annotated, List, Optional, TypedDict
 
 import llm_client
 import sessions as session_store
+import fleet_convergence as fleet_engine
 from agents.discussion_agent import DiscussionAgent
 from agents.geospatial_agent import GeospatialAgent
 from agents.hazard_agent import HazardAgent, get_thresholds
@@ -348,6 +349,8 @@ class ORCAGraphState(TypedDict, total=False):
     timings: dict
     query_depth: str
     mode: str  # auto | panel | agent
+    fleet_convergence: Optional[dict]  # FleetConvergenceResult as dict
+    fleet_demo_level: Optional[str]  # low/medium/high/severe for demo
 
 
 class Orchestrator:
@@ -371,6 +374,7 @@ class Orchestrator:
         g.add_node("language_intent", self._node_language)
         g.add_node("planning", self._node_planning)
         g.add_node("specialists", self._node_dispatch)
+        g.add_node("fleet_convergence", self._node_fleet_convergence)
         g.add_node("discussion", self._node_discussion)
         g.add_node("synthesis", self._node_synthesis)
         g.add_node("response", self._node_response)
@@ -391,7 +395,8 @@ class Orchestrator:
             ),
             {"specialists": "specialists", "unsupported": "unsupported"},
         )
-        g.add_edge("specialists", "discussion")
+        g.add_edge("specialists", "fleet_convergence")
+        g.add_edge("fleet_convergence", "discussion")
         g.add_edge("discussion", "synthesis")
         g.add_edge("synthesis", "response")
         g.add_edge("response", END)
@@ -487,6 +492,7 @@ class Orchestrator:
         target_agent: str | None = None,
         vessel_class: str | None = None,
         query_depth: str | None = None,
+        fleet_demo_level: str | None = None,
     ) -> OrchestratorResponse:
         # Normalize mode (backwards compat: panel default previously)
         mode_norm = (mode or "auto").strip().lower()
@@ -501,6 +507,7 @@ class Orchestrator:
             "vessel_class": vessel_class or "small_fishing_boat",
             "mode": mode_norm,
             "query_depth": (query_depth or QUERY_DEPTH).strip().lower() if query_depth else QUERY_DEPTH,
+            "fleet_demo_level": (fleet_demo_level.strip().lower() if fleet_demo_level else None),
             "timings": {},
             "traces": [],
         }
@@ -534,6 +541,11 @@ class Orchestrator:
             response = self._attach_latency_trace(response, timings, final_state.get("traces", []))
             # Safety clamp: LLM must not override deterministic UNSAFE
             response = self._enforce_safety_clamp(response, final_state)
+            # Record fleet activity for future convergence (real, not simulated)
+            try:
+                self._record_fleet_activity(final_state, response)
+            except:
+                pass
             # expose timings optionally
             if hasattr(response, "timings"):
                 response.timings = timings  # type: ignore
@@ -584,6 +596,38 @@ class Orchestrator:
                 response.reasoning = getattr(risk, "reasoning", []) or response.reasoning
         return response
 
+    def _record_fleet_activity(self, state: dict, response: OrchestratorResponse):
+        """Record fleet activity for future convergence — uses final_zone if available, else primary PFZ."""
+        try:
+            fleet = state.get("fleet_convergence") or getattr(response, "fleet_convergence", None)
+            if not fleet or fleet.get("status") == "UNAVAILABLE":
+                return
+            # Don't record simulated demo activity as real fleet — keep isolated
+            if fleet.get("status", "").startswith("SIMULATED"):
+                return
+            final = fleet.get("final_zone")
+            if final:
+                fleet_engine.record_recommendation(
+                    final_zone=type("Obj", (), {
+                        "center_lat": final["center_lat"],
+                        "center_lon": final["center_lon"],
+                    })(),
+                    session_id=state.get("session_id", ""),
+                    reference_lat=state.get("location", {}).lat if hasattr(state.get("location", {}), "lat") else None,
+                    reference_lon=state.get("location", {}).lon if hasattr(state.get("location", {}), "lon") else None,
+                    is_simulated=False,
+                )
+            else:
+                pfz = state.get("pfz")
+                if pfz:
+                    fleet_engine.record_recommendation(
+                        final_zone=type("Obj", (), {"center_lat": pfz.center_lat, "center_lon": pfz.center_lon})(),
+                        session_id=state.get("session_id", ""),
+                        is_simulated=False,
+                    )
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # Panel mode: full graph incl. the round-table discussion
     # ------------------------------------------------------------------
@@ -601,12 +645,21 @@ class Orchestrator:
             timings["total_ms"] = round(total_ms, 1)
             response = self._attach_latency_trace(response, timings, final_state.get("traces", []))
             response = self._enforce_safety_clamp(response, final_state)
+            try:
+                self._record_fleet_activity(final_state, response)
+            except:
+                pass
             if hasattr(response, "timings"):
                 response.timings = timings  # type: ignore
             return response
         response = self._handle_query_sequential(initial)
         response.mode = "panel"
         response.answered_by = "ORCA panel (specialists discussed before answering)"
+        try:
+            # For sequential fallback, record from response if available
+            self._record_fleet_activity({"pfz": getattr(response, "pfz", None), "fleet_convergence": getattr(response, "fleet_convergence", None), "session_id": initial.get("session_id")}, response)
+        except:
+            pass
         return response
 
     # ------------------------------------------------------------------
@@ -860,6 +913,150 @@ class Orchestrator:
             update["trend"] = results["trend"]
         return update
 
+    def _node_fleet_convergence(self, state: ORCAGraphState) -> dict:
+        """Fleet Convergence Forecast — crowding-adjusted suitability.
+
+        Uses PFZ candidates + fleet activity to compute penalty and select
+        best alternative. Safety/legal always overrides fleet optimization.
+        Demo mode: if fleet_demo_level is set, simulated fleet is included.
+        """
+        t0 = time.perf_counter()
+        pfz = state.get("pfz")
+        # If no PFZ, nothing to converge
+        if pfz is None:
+            trace = AgentTrace(
+                agent_name="FleetConvergence",
+                action="Skipped fleet convergence — no PFZ candidates",
+                result_summary="No fishing zones to analyze; fleet convergence unavailable",
+                data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            timings = dict(state.get("timings") or {})
+            timings["fleet_ms"] = round(trace.duration_ms, 1)
+            return {"fleet_convergence": {"status": "UNAVAILABLE", "reason": "no PFZ"}, "traces": [trace], "timings": timings}
+
+        # Handle demo simulation injected via state
+        demo_level = state.get("fleet_demo_level")
+        include_simulated = bool(demo_level) or False
+        # Also check if any simulated data exists globally — include for demo visualization but label SIMULATED
+        # For real queries, we want to count real only; for demo, include simulated
+        # If demo_level set, ensure simulated data exists (auto-generate if empty)
+        if demo_level and pfz:
+            # If no simulated data, auto-populate for demo
+            try:
+                recent_sim = fleet_engine.fleet_store.get_recent(include_simulated=True)
+                sim_count = sum(1 for a in recent_sim if a.is_simulated)
+                if sim_count == 0:
+                    # Generate around primary zone
+                    fleet_engine.simulate_fleet_activity(pfz.center_lat, pfz.center_lon, level=demo_level)
+                    include_simulated = True
+            except:
+                pass
+
+        # If demo not requested but simulated data exists, we still want to show it but mark status SIMULATED
+        # Check if we should include simulated: if there is simulated data and no real data, include for visualization
+        try:
+            all_recent = fleet_engine.fleet_store.get_recent(include_simulated=True)
+            has_sim = any(a.is_simulated for a in all_recent)
+            has_real = any(not a.is_simulated for a in all_recent)
+            if has_sim and not has_real:
+                include_simulated = True
+            elif has_sim and has_real and demo_level:
+                include_simulated = True
+        except:
+            pass
+
+        try:
+            result = fleet_engine.analyze_fleet_convergence(
+                pfz=pfz,
+                ocean_state=state.get("ocean_state"),
+                geofence=state.get("geofence"),
+                risk=state.get("risk"),
+                include_simulated=include_simulated,
+            )
+            # Convert to serializable dict
+            fleet_dict = {
+                "status": result.status,
+                "window_hours": result.window_hours,
+                "timestamp": result.timestamp,
+                "recommendation_changed": result.recommendation_changed,
+                "change_reason": result.change_reason,
+                "candidates": [
+                    {
+                        "zone_id": c.zone_id,
+                        "center_lat": c.center_lat,
+                        "center_lon": c.center_lon,
+                        "distance_km": c.distance_km,
+                        "bearing_deg": c.bearing_deg,
+                        "sst_celsius": c.sst_celsius,
+                        "base_suitability": c.base_suitability,
+                        "fleet_count": c.fleet_count,
+                        "crowding_ratio": c.crowding_ratio,
+                        "crowding_penalty": c.crowding_penalty,
+                        "adjusted_suitability": c.adjusted_suitability,
+                        "is_safe": c.is_safe,
+                        "is_legal": c.is_legal,
+                        "is_recommended": c.is_recommended,
+                        "source": c.source,
+                    } for c in result.candidates
+                ],
+                "raw_best_zone": {
+                    "zone_id": result.raw_best_zone.zone_id,
+                    "center_lat": result.raw_best_zone.center_lat,
+                    "center_lon": result.raw_best_zone.center_lon,
+                    "base_suitability": result.raw_best_zone.base_suitability,
+                    "fleet_count": result.raw_best_zone.fleet_count,
+                    "adjusted_suitability": result.raw_best_zone.adjusted_suitability,
+                } if result.raw_best_zone else None,
+                "final_zone": {
+                    "zone_id": result.final_zone.zone_id,
+                    "center_lat": result.final_zone.center_lat,
+                    "center_lon": result.final_zone.center_lon,
+                    "base_suitability": result.final_zone.base_suitability,
+                    "fleet_count": result.final_zone.fleet_count,
+                    "adjusted_suitability": result.final_zone.adjusted_suitability,
+                } if result.final_zone else None,
+            }
+            # Add crowding labels for UI
+            for cand in fleet_dict["candidates"]:
+                ratio = cand["crowding_ratio"]
+                if ratio >= 1.5:
+                    cand["crowding_label"] = "🔴 High crowding"
+                elif ratio >= 0.8:
+                    cand["crowding_label"] = "🟠 Medium crowding"
+                elif ratio >= 0.3:
+                    cand["crowding_label"] = "🟡 Low crowding"
+                else:
+                    cand["crowding_label"] = "🟢 Minimal crowding"
+
+            summary = f"Fleet convergence {result.status}: {len(result.candidates)} zones, raw {result.raw_best_zone.zone_id if result.raw_best_zone else 'none'} → final {result.final_zone.zone_id if result.final_zone else 'none'} changed={result.recommendation_changed}"
+            if result.recommendation_changed and result.final_zone and result.raw_best_zone:
+                summary += f" ({result.raw_best_zone.base_suitability}→{result.raw_best_zone.adjusted_suitability} vs {result.final_zone.base_suitability}→{result.final_zone.adjusted_suitability})"
+
+            trace = AgentTrace(
+                agent_name="FleetConvergence",
+                action=f"Analyzed fleet crowding for {len(result.candidates)} candidate zones [{result.status}]",
+                result_summary=summary,
+                data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            timings = dict(state.get("timings") or {})
+            timings["fleet_ms"] = round(trace.duration_ms, 1)
+            return {"fleet_convergence": fleet_dict, "traces": [trace], "timings": timings}
+        except Exception as exc:
+            import logging
+            logging.getLogger("orca.orchestrator").warning("fleet convergence failed: %s", exc)
+            trace = AgentTrace(
+                agent_name="FleetConvergence",
+                action="Fleet convergence unavailable — fallback to raw ranking",
+                result_summary=f"Fleet data unavailable: {exc}",
+                data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            timings = dict(state.get("timings") or {})
+            timings["fleet_ms"] = round(trace.duration_ms, 1)
+            return {"fleet_convergence": {"status": "UNAVAILABLE", "reason": str(exc), "candidates": []}, "traces": [trace], "timings": timings}
+
     def _node_discussion(self, state: ORCAGraphState) -> dict:
         """Round-table: specialists read each other's findings and debate. Skipped for FAST mode."""
         t0 = time.perf_counter()
@@ -889,15 +1086,21 @@ class Orchestrator:
 
     def _node_synthesis(self, state: ORCAGraphState) -> dict:
         t0 = time.perf_counter()
+        fleet = state.get("fleet_convergence")
         # Gating: use deterministic synthesis when LLM not needed
         if not self._should_use_synthesis_llm(state):
             # Deterministic verdict pass-through — no LLM call
             risk = state.get("risk")
             deterministic = self.synthesis_agent._fallback_verdict(risk)  # type: ignore
+            # Inject fleet convergence info into synthesis for response
+            if fleet and fleet.get("recommendation_changed"):
+                deterministic["fleet_convergence"] = fleet
+                deterministic["conflicts"].append(f"Fleet convergence: {fleet['raw_best_zone']['zone_id']} raw {fleet['raw_best_zone']['base_suitability']} fleet {fleet['raw_best_zone']['fleet_count']} → {fleet['final_zone']['zone_id']} raw {fleet['final_zone']['base_suitability']} fleet {fleet['final_zone']['fleet_count']}")
+                deterministic["key_points"].append(f"Fleet convergence changed recommendation from {fleet['raw_best_zone']['zone_id']} to {fleet['final_zone']['zone_id']} due to crowding")
             trace = AgentTrace(
                 agent_name="SynthesisAgent",
                 action="Deterministic synthesis (fast path — no LLM reconciliation needed)",
-                result_summary=f"Verdict '{deterministic['verdict']}' (deterministic); single specialist/no conflict.",
+                result_summary=f"Verdict '{deterministic['verdict']}' (deterministic); single specialist/no conflict." + (f" Fleet {fleet['raw_best_zone']['zone_id']}→{fleet['final_zone']['zone_id']}" if fleet and fleet.get("recommendation_changed") else ""),
                 data_sources=list(risk.evidence_sources) if risk else [],
                 duration_ms=(time.perf_counter() - t0) * 1000,
             )
@@ -914,6 +1117,11 @@ class Orchestrator:
             trend=state.get("trend"),
             discussion=state.get("discussion") or {},
         )
+        # Inject fleet info for LLM synthesis as well
+        if fleet and fleet.get("recommendation_changed"):
+            synthesis["fleet_convergence"] = fleet
+            synthesis["conflicts"].append(f"Fleet convergence: {fleet['raw_best_zone']['zone_id']} → {fleet['final_zone']['zone_id']}")
+            synthesis["key_points"].append(f"Fleet convergence: {fleet['change_reason']}")
         timings = dict(state.get("timings") or {})
         timings["synthesis_ms"] = round(synth_trace.duration_ms, 1)
         return {"synthesis": synthesis, "traces": [synth_trace], "timings": timings}
@@ -968,6 +1176,7 @@ class Orchestrator:
         pfz = state.get("pfz")
         geofence = state.get("geofence")
         route = state.get("route")
+        fleet = state.get("fleet_convergence")
         context = state.get("context")
         parts: list[str] = []
         # Verdict line is authoritative and already rendered as HUD; answer complements it concisely.
@@ -989,8 +1198,32 @@ class Orchestrator:
             # Marine bulletins
             for m in getattr(risk, "marine_bulletins", [])[:1]:
                 parts.append(m)
+        # PFZ + Fleet Convergence
         if pfz is not None:
-            parts.append(f"Nearest PFZ {pfz.distance_from_reference_km:.1f} km away at {pfz.bearing_deg:.0f}° bearing (SST {pfz.sst_at_zone_celsius}°C).")
+            if fleet and fleet.get("recommendation_changed") and fleet.get("final_zone") and fleet.get("raw_best_zone"):
+                raw = fleet["raw_best_zone"]
+                final = fleet["final_zone"]
+                sim_label = " [DEMO — SIMULATED FLEET ACTIVITY]" if fleet.get("status","").startswith("SIMULATED") else ""
+                parts.append(f"🎣 Fleet convergence detected{sim_label}: Zone {raw['zone_id']} has highest raw suitability {raw['base_suitability']} but {raw['fleet_count']} ORCA vessels concentrated there (adj {raw['adjusted_suitability']}). Nearby {final['zone_id']} has raw {final['base_suitability']} with only {final['fleet_count']} vessels (adj {final['adjusted_suitability']}).")
+                parts.append(f"**Recommendation: {final['zone_id']}** at {final['center_lat']:.3f}, {final['center_lon']:.3f} ({final['fleet_count']} vessels, crowding-adjusted suitability {final['adjusted_suitability']}). This may provide better effective fishing opportunity with less fleet crowding.")
+                # Also list candidates briefly
+                if fleet.get("candidates"):
+                    for cand in fleet["candidates"][:3]:
+                        parts.append(f"{cand['zone_id']}: base {cand['base_suitability']} fleet {cand['fleet_count']} adj {cand['adjusted_suitability']} {cand.get('crowding_label','')}")
+            else:
+                # No fleet change or no fleet data
+                if fleet and fleet.get("status") == "UNAVAILABLE":
+                    parts.append(f"Nearest PFZ {pfz.distance_from_reference_km:.1f} km away at {pfz.bearing_deg:.0f}° bearing (SST {pfz.sst_at_zone_celsius}°C). Fleet convergence unavailable — showing raw suitability.")
+                elif fleet and fleet.get("candidates"):
+                    # Show fleet counts even when no change, for transparency
+                    for cand in fleet["candidates"][:2]:
+                        parts.append(f"{cand['zone_id']}: base {cand['base_suitability']} fleet {cand['fleet_count']} adj {cand['adjusted_suitability']} {cand.get('crowding_label','')}")
+                    # Still mention primary
+                    parts.append(f"Nearest PFZ {pfz.distance_from_reference_km:.1f} km away at {pfz.bearing_deg:.0f}° bearing (SST {pfz.sst_at_zone_celsius}°C).")
+                else:
+                    parts.append(f"Nearest PFZ {pfz.distance_from_reference_km:.1f} km away at {pfz.bearing_deg:.0f}° bearing (SST {pfz.sst_at_zone_celsius}°C).")
+                if fleet and fleet.get("status","").startswith("SIMULATED"):
+                    parts.append("[DEMO — SIMULATED FLEET ACTIVITY]")
         if geofence is not None and not geofence.clear:
             for h in geofence.hits[:1]:
                 parts.append(f"Boundary alert: {h.zone_name} {'inside' if h.inside_zone else f'{h.distance_to_boundary_km} km away'}.")
@@ -1005,7 +1238,10 @@ class Orchestrator:
         # Add provenance hint for simulated fields
         if ocean is not None and ocean.source.value == "simulated":
             answer += " [Note: some fields simulated due to live feed unavailability.]"
-        return answer[:900]
+        # Safety note if fleet tried to override unsafe
+        if fleet and fleet.get("status") != "UNAVAILABLE" and risk and risk.status.value == "UNSAFE":
+            answer += " Fleet optimization did not override safety — unsafe zones remain excluded."
+        return answer[:1500]
 
     def _node_unsupported(self, state: ORCAGraphState) -> dict:
         trace = AgentTrace(
@@ -1236,6 +1472,7 @@ class Orchestrator:
             "reason": state.get("plan", {}).get("why", ""),
             "confidence": state.get("plan", {}).get("confidence", 0.0),
         }
+        fleet_conv = state.get("fleet_convergence")
 
         return OrchestratorResponse(
             answer=answer,
@@ -1257,6 +1494,7 @@ class Orchestrator:
             evidence_tiers=evidence_tiers,
             timings=timings,
             routing=routing,
+            fleet_convergence=fleet_conv,
         )
 
     @staticmethod
@@ -1333,6 +1571,94 @@ class Orchestrator:
         trace.extend(dispatch_out.get("traces", []))
         timings.update(dispatch_out.get("timings", {}))
 
+        # Fleet Convergence — after PFZ/geo, before discussion
+        t_fleet0 = time.perf_counter()
+        fleet_demo = state.get("fleet_demo_level")
+        # For sequential, also handle include_simulated logic
+        pfz_for_fleet = state.get("pfz")
+        if pfz_for_fleet is not None:
+            try:
+                # Auto-simulate if demo requested and no sim data
+                if fleet_demo and pfz_for_fleet:
+                    try:
+                        recent_sim = fleet_engine.fleet_store.get_recent(include_simulated=True)
+                        if not any(a.is_simulated for a in recent_sim):
+                            fleet_engine.simulate_fleet_activity(pfz_for_fleet.center_lat, pfz_for_fleet.center_lon, level=fleet_demo)
+                    except:
+                        pass
+                # Include simulated fleet when demo level is set
+                fleet_res = fleet_engine.analyze_fleet_convergence(
+                    pfz=pfz_for_fleet,
+                    ocean_state=state.get("ocean_state"),
+                    geofence=state.get("geofence"),
+                    risk=state.get("risk"),
+                    include_simulated=bool(fleet_demo),
+                )
+                # Convert to dict for state
+                fleet_dict = {
+                    "status": fleet_res.status,
+                    "window_hours": fleet_res.window_hours,
+                    "timestamp": fleet_res.timestamp,
+                    "recommendation_changed": fleet_res.recommendation_changed,
+                    "change_reason": fleet_res.change_reason,
+                    "candidates": [
+                        {
+                            "zone_id": c.zone_id,
+                            "center_lat": c.center_lat,
+                            "center_lon": c.center_lon,
+                            "distance_km": c.distance_km,
+                            "bearing_deg": c.bearing_deg,
+                            "sst_celsius": c.sst_celsius,
+                            "base_suitability": c.base_suitability,
+                            "fleet_count": c.fleet_count,
+                            "crowding_ratio": c.crowding_ratio,
+                            "crowding_penalty": c.crowding_penalty,
+                            "adjusted_suitability": c.adjusted_suitability,
+                            "is_safe": c.is_safe,
+                            "is_legal": c.is_legal,
+                            "is_recommended": c.is_recommended,
+                            "source": c.source,
+                        } for c in fleet_res.candidates
+                    ],
+                    "raw_best_zone": {
+                        "zone_id": fleet_res.raw_best_zone.zone_id,
+                        "center_lat": fleet_res.raw_best_zone.center_lat,
+                        "center_lon": fleet_res.raw_best_zone.center_lon,
+                        "base_suitability": fleet_res.raw_best_zone.base_suitability,
+                        "fleet_count": fleet_res.raw_best_zone.fleet_count,
+                        "adjusted_suitability": fleet_res.raw_best_zone.adjusted_suitability,
+                    } if fleet_res.raw_best_zone else None,
+                    "final_zone": {
+                        "zone_id": fleet_res.final_zone.zone_id,
+                        "center_lat": fleet_res.final_zone.center_lat,
+                        "center_lon": fleet_res.final_zone.center_lon,
+                        "base_suitability": fleet_res.final_zone.base_suitability,
+                        "fleet_count": fleet_res.final_zone.fleet_count,
+                        "adjusted_suitability": fleet_res.final_zone.adjusted_suitability,
+                    } if fleet_res.final_zone else None,
+                }
+                for cand in fleet_dict["candidates"]:
+                    ratio = cand["crowding_ratio"]
+                    if ratio >= 1.5:
+                        cand["crowding_label"] = "🔴 High crowding"
+                    elif ratio >= 0.8:
+                        cand["crowding_label"] = "🟠 Medium crowding"
+                    elif ratio >= 0.3:
+                        cand["crowding_label"] = "🟡 Low crowding"
+                    else:
+                        cand["crowding_label"] = "🟢 Minimal crowding"
+                state["fleet_convergence"] = fleet_dict
+                trace.append(AgentTrace(agent_name="FleetConvergence", action=f"Analyzed fleet crowding for {len(fleet_res.candidates)} zones [{fleet_res.status}]", result_summary=f"raw {fleet_res.raw_best_zone.zone_id if fleet_res.raw_best_zone else 'none'} → final {fleet_res.final_zone.zone_id if fleet_res.final_zone else 'none'} changed={fleet_res.recommendation_changed}", data_sources=[], duration_ms=(time.perf_counter()-t_fleet0)*1000))
+                timings["fleet_ms"] = round((time.perf_counter()-t_fleet0)*1000, 1)
+            except Exception as exc:
+                trace.append(AgentTrace(agent_name="FleetConvergence", action="Fleet convergence unavailable", result_summary=str(exc), data_sources=[], duration_ms=(time.perf_counter()-t_fleet0)*1000))
+                timings["fleet_ms"] = round((time.perf_counter()-t_fleet0)*1000, 1)
+                state["fleet_convergence"] = {"status": "UNAVAILABLE", "reason": str(exc), "candidates": []}
+        else:
+            trace.append(AgentTrace(agent_name="FleetConvergence", action="Skipped fleet convergence — no PFZ", result_summary="No candidates", data_sources=[], duration_ms=(time.perf_counter()-t_fleet0)*1000))
+            timings["fleet_ms"] = round((time.perf_counter()-t_fleet0)*1000, 1)
+            state["fleet_convergence"] = {"status": "UNAVAILABLE", "reason": "no PFZ", "candidates": []}
+
         # Discussion gating
         t_disc0 = time.perf_counter()
         if auto_mode and not self._should_run_discussion(state):
@@ -1394,6 +1720,11 @@ class Orchestrator:
         risk = state.get("risk")
         if risk is not None and risk.status.value == "UNSAFE" and response.status.value != "UNSAFE":
             response.status = risk.status
+        # Record fleet activity for future convergence (real only)
+        try:
+            self._record_fleet_activity(state, response)
+        except:
+            pass
         return response
 
     # ------------------------------------------------------------------

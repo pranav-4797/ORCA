@@ -42,4 +42,27 @@ export interface Message {
     routing_mode: string;
     reason: string;
   };
+  /** Fleet Convergence Forecast — crowding-adjusted recommendation */
+  fleetConvergence?: {
+    status: string;
+    window_hours: number;
+    recommendation_changed: boolean;
+    change_reason: string;
+    candidates: Array<{
+      zone_id: string;
+      center_lat: number;
+      center_lon: number;
+      distance_km: number;
+      bearing_deg: number;
+      base_suitability: number;
+      fleet_count: number;
+      crowding_ratio: number;
+      crowding_penalty: number;
+      adjusted_suitability: number;
+      crowding_label?: string;
+      is_recommended?: boolean;
+    }>;
+    raw_best_zone?: any;
+    final_zone?: any;
+  };
 }

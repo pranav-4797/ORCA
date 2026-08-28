@@ -5,6 +5,7 @@ import { AgentSelector } from './AgentSelector';
 import { OceanMap } from '../map/OceanMap';
 import { VizChart } from '../map/VizChart';
 import { showToast } from '../ui/Toast';
+import { OrcaApiService } from '../../services/orcaApiService';
 
 export class AgentPanel {
   private element: HTMLElement;
@@ -115,6 +116,33 @@ export class AgentPanel {
           </div>
         </div>
 
+        <!-- Fleet Convergence Forecast — Innovation #1 -->
+        <div class="orca-telemetry-widget" id="fleet-convergence-widget" style="border-left:3px solid var(--primary);">
+          <div class="widget-section-header">
+            <span class="label-caps" style="display:flex;align-items:center;gap:6px;">${ICONS.sparkles} FLEET CONVERGENCE FORECAST</span>
+            <span class="status-pill info" id="fleet-status-pill">
+              <span class="dot"></span>
+              <span class="data-mono-bold" id="fleet-status-text">CHECKING</span>
+            </span>
+          </div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4;">
+            ORCA detects when its own recommendations concentrate fleet &amp; adjusts toward less-crowded, similarly suitable zones. <span style="color:var(--text-tertiary);">Safety &amp; legal always override.</span>
+          </div>
+          <div class="fleet-demo-controls" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+            <button class="cap-badge fleet-demo-btn" data-level="" style="cursor:pointer;${!OrcaApiService.getFleetDemoLevel() ? 'background:var(--primary);color:#fff;' : ''}">Normal</button>
+            <button class="cap-badge fleet-demo-btn" data-level="low" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='low' ? 'background:var(--primary);color:#fff;' : ''}">Low (2)</button>
+            <button class="cap-badge fleet-demo-btn" data-level="medium" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='medium' ? 'background:var(--primary);color:#fff;' : ''}">Medium (5)</button>
+            <button class="cap-badge fleet-demo-btn" data-level="high" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='high' ? 'background:var(--primary);color:#fff;' : ''}">High (10)</button>
+            <button class="cap-badge fleet-demo-btn" data-level="severe" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='severe' ? 'background:var(--primary);color:#fff;' : ''}">Severe (20+)</button>
+          </div>
+          <div style="display:flex;gap:4px;">
+            <button class="icon-btn" id="btn-fleet-clear" title="Clear simulated fleet" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">Clear Simulation</button>
+            <button class="icon-btn" id="btn-fleet-refresh" title="Refresh fleet status" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">↻ Refresh</button>
+          </div>
+          <div id="fleet-status-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:6px;max-height:60px;overflow-y:auto;"></div>
+          <div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;">Window 6h • Radius 15km • Target 8 vessels • Penalty max 50% • <em>DEMO — SIMULATED Fleet Activity</em> when highlighted</div>
+        </div>
+
         <!-- Active Advisory Persona Info -->
         <div style="padding:var(--space-3);background:var(--bg-card);border:1px solid var(--border-default);border-radius:var(--radius-md);">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
@@ -191,5 +219,77 @@ export class AgentPanel {
         store.toggleAgentPanel(false);
       }
     });
+
+    // Fleet Convergence demo controls
+    const fleetBtns = this.element.querySelectorAll('.fleet-demo-btn');
+    fleetBtns.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const level = (btn as HTMLElement).getAttribute('data-level') || '';
+        OrcaApiService.setFleetDemoLevel(level || null);
+        if (level) {
+          // Try to simulate fleet around last PFZ if available, else just set level for next query
+          const sessionId = store.getActiveChat()?.id || store.activeChatId;
+          let lat: number | undefined, lon: number | undefined;
+          // Try to get from last viz geojson
+          const gj = (store as any).vizGeojson;
+          if (gj?.features) {
+            const pfz = gj.features.find((f:any)=>f.properties?.kind==='pfz_primary' || f.properties?.kind==='fleet_recommended');
+            if (pfz?.geometry?.coordinates) {
+              lon = pfz.geometry.coordinates[0];
+              lat = pfz.geometry.coordinates[1];
+            }
+          }
+          try {
+            if (lat != null && lon != null) {
+              await OrcaApiService.simulateFleet(level, lat, lon, sessionId || undefined);
+              showToast(`Simulated ${level} fleet (${level==='low'?2:level==='medium'?5:level==='high'?10:20} vessels) — next PFZ query will show crowding`, 'info');
+            } else {
+              showToast(`Fleet demo set to ${level || 'Normal'} — next PFZ query near your location will show convergence`, 'info');
+            }
+          } catch {
+            showToast(`Fleet demo set to ${level} (backend simulate failed, will still affect next query)`, 'info');
+          }
+        } else {
+          try { await OrcaApiService.clearFleet(true); } catch {}
+          showToast('Cleared simulated fleet — back to Normal', 'success');
+        }
+        this.render();
+      });
+    });
+    this.element.querySelector('#btn-fleet-clear')?.addEventListener('click', async () => {
+      OrcaApiService.setFleetDemoLevel(null);
+      try { await OrcaApiService.clearFleet(true); showToast('Cleared simulated fleet', 'success'); } catch { showToast('Cleared local demo', 'success'); }
+      this.render();
+    });
+    this.element.querySelector('#btn-fleet-refresh')?.addEventListener('click', () => {
+      this.refreshFleetStatus();
+    });
+    // Auto-refresh fleet status once per render
+    this.refreshFleetStatus();
+  }
+
+  private async refreshFleetStatus(): Promise<void> {
+    const statusText = this.element.querySelector('#fleet-status-text') as HTMLElement | null;
+    const detail = this.element.querySelector('#fleet-status-detail') as HTMLElement | null;
+    if (!statusText) return;
+    try {
+      const s = await OrcaApiService.getFleetStatus();
+      const total = s.total_recent ?? 0;
+      const real = s.real_count ?? 0;
+      const sim = s.simulated_count ?? 0;
+      const mode = sim > 0 && real === 0 ? 'SIMULATED' : sim > 0 ? 'MIXED' : real > 0 ? 'REAL' : 'EMPTY';
+      statusText.textContent = total > 0 ? `${total} recent (${mode})` : 'NO DATA';
+      if (detail) {
+        const recent = (s.recent || []).slice(0,4).map((r:any)=>`${r.zone_lat.toFixed(2)},${r.zone_lon.toFixed(2)} ${r.is_simulated?'SIM':''}`).join(' • ') || 'No recent fleet activity — recommendations will show raw suitability';
+        detail.textContent = `Real ${real} • Simulated ${sim} • Window ${s.window_hours}h • ${recent}`;
+      }
+      const pill = this.element.querySelector('#fleet-status-pill') as HTMLElement | null;
+      if (pill) {
+        pill.className = `status-pill ${total>0 ? (mode==='SIMULATED'?'info':'safe') : 'info'}`;
+      }
+    } catch {
+      if (statusText) statusText.textContent = 'UNAVAILABLE';
+      if (detail) detail.textContent = 'Fleet data unavailable — showing raw suitability';
+    }
   }
 }

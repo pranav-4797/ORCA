@@ -287,3 +287,5 @@ class OrchestratorResponse:
     timings: dict = field(default_factory=dict)
     # Auto routing explainability (which agents were selected and why)
     routing: dict = field(default_factory=dict)
+    # Fleet Convergence Forecast (Innovation #1) — crowding-adjusted recommendation
+    fleet_convergence: Optional[dict] = None

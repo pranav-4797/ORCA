@@ -332,6 +332,8 @@ export class MessageItem {
           </div>
         ` : ''}
 
+        ${this.renderFleetConvergence()}
+
         <div class="ai-msg-body">
           ${renderedHtml}
           ${isStreaming ? `<span class="streaming-cursor"></span>` : ''}
@@ -361,6 +363,75 @@ export class MessageItem {
         ` : ''}
       </div>
     `;
+  }
+
+  private renderFleetConvergence(): string {
+    const fc: any = (this.message as any).fleetConvergence;
+    if (!fc || !fc.candidates || fc.candidates.length === 0) return '';
+    if (fc.status === 'UNAVAILABLE') {
+      return `
+        <div class="fleet-hud-card" style="margin-top:10px;padding:10px 12px;border:1px dashed var(--border-default);border-radius:8px;background:var(--bg-surface);">
+          <div style="font-size:12px;color:var(--text-tertiary);">Fleet convergence unavailable — showing raw fishing suitability. Fleet data will appear when ORCA has recent recommendation history.</div>
+        </div>`;
+    }
+    const simBadge = fc.status && fc.status.startsWith('SIMULATED') ? '<span style="font-size:10px;background:#f59e0b;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">DEMO — SIMULATED FLEET ACTIVITY</span>' : '';
+    const changed = fc.recommendation_changed;
+    const raw = fc.raw_best_zone;
+    const fin = fc.final_zone;
+    let header = '';
+    if (changed && raw && fin) {
+      header = `
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+          <span style="font-weight:700;font-size:13px;color:var(--primary);">🎣 Fleet convergence detected</span>
+          ${simBadge}
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">
+          Zone ${raw.zone_id} has highest raw suitability ${raw.base_suitability} but ${raw.fleet_count} ORCA vessels concentrated there (adj ${raw.adjusted_suitability}). Nearby ${fin.zone_id} has raw ${fin.base_suitability} with only ${fin.fleet_count} vessels (adj ${fin.adjusted_suitability}).<br/>
+          <strong style="color:var(--text-primary);">Recommendation: ${fin.zone_id} ✓</strong> — better effective opportunity with less crowding.
+        </div>`;
+    } else if (fin) {
+      const cand = fc.candidates.find((c:any)=>c.is_recommended) || fin;
+      header = `
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+          <span style="font-weight:600;font-size:13px;">Fleet-checked recommendation: ${cand.zone_id} ✓</span>
+          ${simBadge}
+        </div>`;
+    } else {
+      header = `<div style="font-weight:600;font-size:13px;margin-bottom:8px;">Fleet Convergence — ${fc.status}${simBadge}</div>`;
+    }
+
+    const rows = fc.candidates.map((c:any) => `
+      <div class="fleet-candidate-row" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border:1px solid ${c.is_recommended ? 'var(--primary)' : 'var(--border-default)'};border-radius:6px;background:${c.is_recommended ? 'rgba(34,197,94,0.08)' : 'var(--bg-card)'};margin-bottom:4px;">
+        <div style="display:flex;flex-direction:column;">
+          <span style="font-weight:700;font-size:12px;">${c.zone_id} ${c.is_recommended ? '✓ Recommended' : ''}</span>
+          <span style="font-size:11px;color:var(--text-tertiary);">${c.distance_km}km ${c.bearing_deg}° • SST ${c.sst_celsius}°C</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);">Base</div>
+            <div style="font-weight:700;font-size:13px;">${c.base_suitability}</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);">Fleet</div>
+            <div style="font-weight:700;font-size:13px;">${c.fleet_count}</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);">Adj</div>
+            <div style="font-weight:700;font-size:13px;color:${c.is_recommended ? 'var(--status-safe)' : 'var(--text-primary)'};">${c.adjusted_suitability}</div>
+          </div>
+          <div style="font-size:11px;">${c.crowding_label || ''}</div>
+        </div>
+      </div>
+    `).join('');
+
+    return `
+      <div class="fleet-hud-card" style="margin-top:10px;padding:12px;border:1px solid var(--border-default);border-radius:8px;background:var(--bg-surface);">
+        ${header}
+        <div class="fleet-candidates-grid">
+          ${rows}
+        </div>
+        <div style="font-size:10px;color:var(--text-tertiary);margin-top:6px;">Window ${fc.window_hours}h • Crowding-adjusted suitability = base × (1 − penalty) • CPUE-inspired, not official CMFRI</div>
+      </div>`;
   }
 
   private attachEvents(): void {

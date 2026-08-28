@@ -723,6 +723,7 @@ class AppStore {
         attachments,
         queryMode: this.queryMode,
         targetAgent: this.directAgentKey || undefined,
+        fleetDemoLevel: (OrcaApiService as any).getFleetDemoLevel ? (OrcaApiService as any).getFleetDemoLevel() : null,
         voiceBlob: voice?.blob,
         speakReply: Boolean(voice),
         abortSignal: this.currentAbortController.signal,
@@ -772,6 +773,9 @@ class AppStore {
               if (total) {
                 assistantMsg.modelUsed = `${assistantMsg.modelUsed} · ${total}ms`;
               }
+            }
+            if ((chunk as any).fleetConvergence) {
+              (assistantMsg as any).fleetConvergence = (chunk as any).fleetConvergence;
             }
             if (!(chunk as any).content && assistantMsg.content) {
             } else if ((chunk as any).content && !assistantMsg.content) {
