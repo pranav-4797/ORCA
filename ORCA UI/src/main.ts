@@ -9,6 +9,7 @@ import { AppShell } from './components/layout/AppShell';
 import { initShaderBackground } from './utils/shaderBackground';
 
 import { OrcaApiService } from './services/orcaApiService';
+import { HistoryRouter } from './services/historyRouter';
 
 document.addEventListener('DOMContentLoaded', () => {
   const root = document.getElementById('app');
@@ -19,5 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initShaderBackground('app');
     // Acquire live device GPS for coastal forecasting & 'Where am I?' queries
     void OrcaApiService.acquireLiveGps();
+    // Initialize Browser Back-Button and Route History Manager
+    HistoryRouter.getInstance();
   }
 });

@@ -143,15 +143,29 @@ class AppStore {
         try {
           const remoteData = await loadUserSessionsFromFirestore(user.uid);
           if (remoteData && remoteData.chats.length > 0) {
-            this.chats = remoteData.chats;
-            this.messages = remoteData.messages;
+            // Merge remote chats with any local chats created while offline/guest
+            const remoteIds = new Set(remoteData.chats.map(c => c.id));
+            const localUnsynced = this.chats.filter(c => !remoteIds.has(c.id));
+
+            this.chats = [...remoteData.chats, ...localUnsynced];
+            this.messages = { ...this.messages, ...remoteData.messages };
+
+            // Upload any localUnsynced guest chats to the cloud
+            for (const chat of localUnsynced) {
+              void saveUserChatToFirestore(user.uid, chat);
+              const msgs = this.messages[chat.id] || [];
+              for (const msg of msgs) {
+                void saveUserMessageToFirestore(user.uid, chat.id, msg);
+              }
+            }
+
             if (!this.activeChatId || !this.chats.some(c => c.id === this.activeChatId)) {
               this.activeChatId = this.chats[0].id;
             }
             this.notify();
             showToast(`Synced ${this.chats.length} mission sessions from cloud`, 'info');
           } else {
-            // New user or no remote sessions: sync current initial chats to Firestore
+            // New user or no remote sessions: sync current local/guest chats to Firestore
             for (const chat of this.chats) {
               void saveUserChatToFirestore(user.uid, chat);
               const msgs = this.messages[chat.id] || [];
@@ -186,8 +200,9 @@ class AppStore {
     try {
       await logoutUser();
       this.currentUser = null;
+      this.loadFromStorage();
       this.notify();
-      showToast('Signed out of ORCA workstation.', 'info');
+      showToast('Signed out of ORCA workstation. Local storage active.', 'info');
     } catch (err: any) {
       console.error('Sign Out Error:', err);
       showToast('Error during sign out.', 'error');
