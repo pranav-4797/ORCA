@@ -1,0 +1,302 @@
+/* =========================================================================
+   MARITIME RESPONSIVE DESIGN (Desktop, Tablet, Mobile)
+   ========================================================================= */
+
+/* Desktop Screens (1280px+) */
+@media (min-width: 1280px) {
+  .btn-mobile-menu {
+    display: none !important;
+  }
+}
+
+/* Tablet Layout (768px - 1279px) */
+@media (max-width: 1279px) {
+  .agent-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 320px;
+    max-width: 85vw;
+    box-shadow: var(--shadow-lg);
+    transform: translateX(100%);
+    transition: transform var(--transition-normal);
+    z-index: var(--z-modal);
+  }
+
+  .agent-panel.drawer-open {
+    display: flex !important;
+    transform: translateX(0);
+  }
+
+  .agent-panel:not(.drawer-open) {
+    display: none;
+  }
+
+  .operational-telemetry-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Tablet Specific Sidebar (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .sidebar {
+    width: var(--sidebar-collapsed-width);
+  }
+
+  .sidebar .brand-text-col,
+  .sidebar .btn-new-chat span.label,
+  .sidebar .search-trigger-btn span.label,
+  .sidebar .search-trigger-btn kbd,
+  .sidebar .sidebar-section-title,
+  .sidebar .chat-item-title,
+  .sidebar .chat-item-actions,
+  .sidebar .user-details,
+  .sidebar .tab-label {
+    display: none;
+  }
+
+  .sidebar .btn-new-chat,
+  .sidebar .search-trigger-btn,
+  .sidebar .chat-item,
+  .sidebar .nav-tab-btn {
+    justify-content: center;
+    padding: var(--space-2);
+  }
+}
+
+/* =========================================================================
+   MOBILE LAYOUT (320px - 767px) - TOUCH OPTIMIZED & COMFORTABLE
+   ========================================================================= */
+@media (max-width: 767px) {
+  /* Full height with dynamic viewport height support for mobile browsers */
+  #app, .app-layout {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* Left Navigation becomes full-height slide-out drawer */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 290px;
+    max-width: 85vw;
+    box-shadow: 4px 0 24px rgba(11, 34, 57, 0.25);
+    transform: translateX(-100%);
+    transition: transform var(--transition-normal);
+    z-index: var(--z-modal);
+    background-color: var(--bg-sidebar);
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  /* Workspace takes 100% viewport width */
+  .main-workspace {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  /* Header adjustments on mobile */
+  .top-header {
+    height: 52px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .orca-brand-title {
+    font-size: 16px;
+  }
+
+  .orca-region-label {
+    font-size: 11px;
+  }
+
+  .header-active-brief-title {
+    display: none; /* Hide in compact header to keep clean */
+  }
+
+  .orca-status-chip {
+    padding: 2px 7px;
+    font-size: 10px;
+  }
+
+  .officer-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+
+  .icon-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  /* Chat viewport on mobile */
+  .chat-scroll-container {
+    padding: 10px 10px 0;
+  }
+
+  .chat-content-inner {
+    gap: 14px;
+    padding-bottom: 12px;
+  }
+
+  /* Hero Navigation Prompt & Pills */
+  .orca-workspace-hero {
+    padding: 16px 0 8px;
+    gap: 16px;
+  }
+
+  .hero-main-title {
+    font-size: 20px;
+    line-height: 1.3;
+    padding: 0 8px;
+  }
+
+  .quick-inquiry-pills {
+    flex-direction: column;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .inquiry-pill-btn {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Operational Indicators stack vertically on mobile */
+  .operational-telemetry-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .telemetry-card {
+    padding: 12px 14px;
+  }
+
+  .telemetry-main-val {
+    font-size: 18px;
+  }
+
+  /* Messages & Documents on mobile */
+  .message-wrapper {
+    gap: 8px;
+  }
+
+  .message-avatar {
+    width: 26px;
+    height: 26px;
+  }
+
+  .message-bubble-user {
+    max-width: 90%;
+    padding: 10px 12px;
+    font-size: 13.5px;
+  }
+
+  .message-workspace-ai {
+    padding: 12px 14px;
+    font-size: 13.5px;
+    border-radius: var(--radius-sm);
+  }
+
+  .message-meta-header {
+    font-size: 11px;
+    padding-bottom: 6px;
+  }
+
+  .message-sender-name {
+    font-size: 12.5px;
+  }
+
+  .code-block-pre {
+    padding: 10px 12px;
+    font-size: 11.5px;
+  }
+
+  .table-wrapper {
+    margin: 8px 0;
+  }
+
+  .md-table th, .md-table td {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  /* Pinned Bottom Composer on Mobile */
+  .composer-outer-container {
+    padding: 0 8px 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .composer-box {
+    border-radius: var(--radius-md);
+  }
+
+  .composer-textarea {
+    font-size: 13.5px;
+    min-height: 38px;
+    padding: 4px 6px;
+  }
+
+  .composer-toolbar {
+    padding: 4px 8px;
+  }
+
+  .pill-selector {
+    padding: 2px 6px;
+    font-size: 11px;
+  }
+
+  .btn-send-message, .btn-stop-message {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Right Inspector Panel Drawer */
+  .agent-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 310px;
+    max-width: 88vw;
+    box-shadow: -4px 0 24px rgba(11, 34, 57, 0.25);
+    transform: translateX(100%);
+    transition: transform var(--transition-normal);
+    z-index: var(--z-modal);
+    background-color: var(--bg-surface);
+  }
+
+  .agent-panel.drawer-open {
+    display: flex !important;
+    transform: translateX(0);
+  }
+
+  .agent-panel:not(.drawer-open) {
+    display: none;
+  }
+}
+
+/* Extra Small Screens (<= 360px) */
+@media (max-width: 360px) {
+  .top-header {
+    padding: 0 6px;
+  }
+
+  .orca-region-divider, .orca-region-label {
+    display: none;
+  }
+
+  .hero-main-title {
+    font-size: 18px;
+  }
+}

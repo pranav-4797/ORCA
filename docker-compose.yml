@@ -1,0 +1,25 @@
+# ORCA stack: FastAPI multi-agent backend + Vite-built chat UI on nginx.
+#
+#   docker compose up --build
+#     UI      -> http://localhost:3000
+#     Backend -> http://localhost:8000  (docs at /docs)
+#
+# The browser talks to the backend directly at localhost:8000 (the UI's
+# default BACKEND_URL), so both ports must stay mapped to the host.
+
+services:
+  backend:
+    build: ./ORCA_Backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./ORCA_Backend/.env      # GROQ_API_KEY etc. (create from .env.example)
+    restart: unless-stopped
+
+  web:
+    build: ./ORCA UI
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

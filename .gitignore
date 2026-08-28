@@ -1,0 +1,26 @@
+# ---- Secrets (NEVER commit) ----
+.env
+.env.local
+*.key
+env.yaml
+*-firebase-adminsdk-*.json
+*service_account*.json
+*service-account*.json
+
+# ---- Python (ORCA_Backend) ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ---- Node (ORCA UI) ----
+node_modules/
+dist/
+*.local
+
+# ---- Logs / OS junk ----
+*.log
+.DS_Store
+Thumbs.db

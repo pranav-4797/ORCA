@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User profile document and all subcollections (chats, messages, telemetry history)
+    match /users/{userId} {
+      // Users can only read and write their own profile
+      allow read, write: if isOwner(userId);
+
+      // Users can read, write, update, and delete their own mission brief chats
+      match /chats/{chatId} {
+        allow read, write: if isOwner(userId);
+
+        // Users can read and write all messages in their chats
+        match /messages/{messageId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
+
+      // Catch-all for any other nested subcollections under user's UID
+      match /{allSubcollections=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Public or broadcast maritime bulletins (if any)
+    match /public_bulletins/{bulletinId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

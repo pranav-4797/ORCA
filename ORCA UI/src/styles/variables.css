@@ -1,0 +1,186 @@
+:root {
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace;
+
+  /* Typography Scale */
+  --text-xs: 0.75rem;     /* 12px */
+  --text-sm: 0.875rem;    /* 14px */
+  --text-base: 0.9375rem; /* 15px */
+  --text-md: 1rem;        /* 16px */
+  --text-lg: 1.125rem;    /* 18px */
+  --text-xl: 1.375rem;    /* 22px */
+  --text-2xl: 1.75rem;    /* 28px */
+
+  /* Spacing Grid — DESIGN.md strict 8px */
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --space-6: 48px;
+  --space-8: 64px;
+  --gutter: 16px;
+  --margin-mobile: 16px;
+  --margin-desktop: 32px;
+  --container-max: 1440px;
+
+  /* Radii — DESIGN.md 4/6/8/12/16/24 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Layout Dimensions */
+  --header-height: 54px;
+  --sidebar-width: 250px;
+  --sidebar-collapsed-width: 60px;
+  --agent-panel-width: 320px;
+  --composer-max-width: 800px;
+  --chat-max-width: 840px;
+
+  /* Transitions */
+  --transition-fast: 120ms ease;
+  --transition-normal: 200ms ease;
+
+  /* Z-Index */
+  --z-base: 1;
+  --z-sticky: 20;
+  --z-drawer: 40;
+  --z-modal: 50;
+  --z-toast: 70;
+
+  /* =========================================================================
+      LIGHT MARITIME PALETTE — DESIGN.md Maritime Precision (Teal)
+      L0 #EDF1F4 base, L1 #FFFFFF + 1px #D1D5DB
+      ========================================================================= */
+  --bg-app: #f6fafd;
+  --bg-sidebar: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f0f4f7;
+  --bg-surface-active: #eaeef1;
+  --bg-input: #f8fafb;
+  --bg-code: #0f1c29;
+  --bg-code-header: #192a3b;
+  --bg-card: #ffffff;
+  --bg-badge: #ddfbff;
+  --bg-overlay: rgba(15, 28, 41, 0.45);
+
+  /* Typography Colors — DESIGN.md on-surface hierarchy */
+  --text-primary: #171c1f;
+  --text-secondary: #3e494a;
+  --text-tertiary: #6e797a;
+  --text-code: #f0f7fc;
+
+  /* Flat Structural Tiers — 1px #D1D5DB */
+  --border-subtle: #e5e9ec;
+  --border-default: #d1d5db;
+  --border-strong: #6e797a;
+  --border-focus: #0e7c86;
+  --card-border: #d1d5db;
+
+  /* Primary — DESIGN.md Teal */
+  --primary: #00626a;
+  --primary-hover: #004f56;
+  --primary-subtle: rgba(0, 98, 106, 0.10);
+  --primary-text: #ffffff;
+  --primary-container: #0e7c86;
+  --on-primary-container: #ddfbff;
+  --inverse-primary: #7cd4df;
+
+  /* Semantic Status Colors */
+  --status-safe: #10b981;
+  --status-safe-bg: rgba(16, 185, 129, 0.10);
+  --status-safe-border: rgba(16, 185, 129, 0.28);
+  --status-safe-glow: 0 0 16px rgba(16, 185, 129, 0.25);
+
+  --status-caution: #f59e0b;
+  --status-caution-bg: rgba(245, 158, 11, 0.12);
+  --status-caution-border: rgba(245, 158, 11, 0.32);
+  --status-caution-glow: 0 0 16px rgba(245, 158, 11, 0.25);
+
+  --status-critical: #ef4444;
+  --status-critical-bg: rgba(239, 68, 68, 0.12);
+  --status-critical-border: rgba(239, 68, 68, 0.35);
+  --status-critical-glow: 0 0 16px rgba(239, 68, 68, 0.30);
+
+  --status-info: #06b6d4;
+  --status-info-bg: rgba(6, 182, 212, 0.10);
+  --status-info-border: rgba(6, 182, 212, 0.28);
+  --status-info-glow: 0 0 16px rgba(6, 182, 212, 0.22);
+
+  --color-success: #10b981;
+  --color-success-subtle: rgba(16, 185, 129, 0.12);
+  --color-warning: #f59e0b;
+  --color-warning-subtle: rgba(245, 158, 11, 0.14);
+  --color-error: #ef4444;
+  --color-error-subtle: rgba(239, 68, 68, 0.14);
+  --color-info: #06b6d4;
+  --color-info-subtle: rgba(6, 182, 212, 0.12);
+
+  /* Elevation Shadows & Radar Glows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.06);
+}
+
+/* =========================================================================
+   DARK NAVAL / ECDIS NIGHT MODE
+   ========================================================================= */
+:root[data-theme='dark'],
+.dark {
+  --bg-app: #060e14;
+  --bg-sidebar: #09151e;
+  --bg-surface: #0e1d27;
+  --bg-surface-hover: #142835;
+  --bg-surface-active: #1a3446;
+  --bg-input: #09151e;
+  --bg-code: #04090d;
+  --bg-code-header: #0a1722;
+  --bg-card: #0e1d27;
+  --bg-badge: rgba(6, 182, 212, 0.16);
+  --bg-overlay: rgba(3, 8, 12, 0.85);
+
+  --text-primary: #f0f6fc;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-code: #f1f5f9;
+
+  --border-subtle: rgba(56, 189, 248, 0.12);
+  --border-default: rgba(56, 189, 248, 0.22);
+  --border-strong: rgba(56, 189, 248, 0.40);
+  --border-focus: #38bdf8;
+  --card-border: rgba(56, 189, 248, 0.18);
+
+  --primary: #38bdf8;
+  --primary-hover: #7dd3fc;
+  --primary-subtle: rgba(56, 189, 248, 0.15);
+  --primary-text: #03141f;
+
+  --status-safe: #34d399;
+  --status-safe-bg: rgba(52, 211, 153, 0.15);
+  --status-safe-border: rgba(52, 211, 153, 0.35);
+  --status-safe-glow: 0 0 20px rgba(52, 211, 153, 0.30);
+
+  --status-caution: #fbbf24;
+  --status-caution-bg: rgba(251, 191, 36, 0.16);
+  --status-caution-border: rgba(251, 191, 36, 0.40);
+  --status-caution-glow: 0 0 20px rgba(251, 191, 36, 0.30);
+
+  --status-critical: #f87171;
+  --status-critical-bg: rgba(248, 113, 113, 0.18);
+  --status-critical-border: rgba(248, 113, 113, 0.45);
+  --status-critical-glow: 0 0 24px rgba(248, 113, 113, 0.35);
+
+  --status-info: #38bdf8;
+  --status-info-bg: rgba(56, 189, 248, 0.15);
+  --status-info-border: rgba(56, 189, 248, 0.35);
+  --status-info-glow: 0 0 20px rgba(56, 189, 248, 0.28);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 30px rgba(0, 0, 0, 0.55);
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
+}

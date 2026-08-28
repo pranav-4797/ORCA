@@ -1,0 +1,21 @@
+{
+  "name": "ai-chat-workspace",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:backend": "python -m uvicorn main:app --port 8000 --reload",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.22",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  },
+  "dependencies": {
+    "firebase": "^12.18.0",
+    "leaflet": "^1.9.4"
+  }
+}

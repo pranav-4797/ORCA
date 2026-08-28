@@ -1,0 +1,114 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "tier": "2 -- real but static/simplified",
+    "description": "Marine restricted boundaries for ORCA's Geospatial Reasoning Agent. IMBL segments are simplified digitizations of coordinates published in bilateral maritime boundary agreements (India-Sri Lanka 1974/1976; India-Pakistan 1968 Sir Creek/seaward extension). MPA polygons are simplified outer-buffer approximations of officially notified protected areas. Coordinates are adequate for hackathon-grade geofence demos; verify against official survey charts before any production or navigational use.",
+    "disclaimer": "NOT FOR NAVIGATION. Simplified geometry; nearest-boundary distances are approximate."
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "India-Sri Lanka IMBL (Palk Strait segment)",
+        "zone_type": "IMBL",
+        "source": "Indo-Sri Lankan Maritime Boundary Agreement 1974 (simplified)",
+        "treaty_reference": "Agreement between India and Sri Lanka on the Maritime Boundary between the two countries in the Palk Strait and adjacent areas, Colombo, 26 June 1974"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [80.050, 10.133],
+          [79.950, 9.930],
+          [79.900, 9.700],
+          [79.850, 9.480],
+          [79.800, 9.280],
+          [79.750, 9.100],
+          [79.650, 8.970]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "India-Sri Lanka IMBL (Gulf of Mannar segment)",
+        "zone_type": "IMBL",
+        "source": "Indo-Sri Lankan Maritime Boundary Agreement 1976 (simplified)",
+        "treaty_reference": "Agreement between India and Sri Lanka on the Maritime Boundary in the Gulf of Mannar and Bay of Bengal, Colombo, 23 March 1976"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [79.600, 8.900],
+          [79.300, 8.620],
+          [78.950, 8.320],
+          [78.620, 8.010],
+          [78.300, 7.720],
+          [78.000, 7.450]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "India-Pakistan IMBL (Sir Creek seaward extension, simplified)",
+        "zone_type": "IMBL",
+        "source": "India-Pakistan boundary settlement 1968 + Sir Creek discussions (simplified seaward midline approximation)",
+        "treaty_reference": "Indo-West Pakistan Boundary Agreement 1968; Sir Creek standing talks"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [68.250, 23.950],
+          [67.900, 23.200],
+          [67.550, 22.400],
+          [67.150, 21.600],
+          [66.800, 20.900]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Gulf of Mannar Marine National Park (buffer approximation)",
+        "zone_type": "MPA",
+        "source": "Govt. of India / Tamil Nadu Forest Dept. notified area, simplified outer buffer",
+        "treaty_reference": "Gulf of Mannar Marine National Park & Biosphere Reserve (India)"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [78.180, 9.350],
+          [78.900, 9.320],
+          [79.150, 9.000],
+          [79.100, 8.700],
+          [78.850, 8.500],
+          [78.400, 8.560],
+          [78.120, 8.900],
+          [78.100, 9.150],
+          [78.180, 9.350]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Malvan (Marine) Sanctuary buffer approximation",
+        "zone_type": "MPA",
+        "source": "Maharashtra Forest Dept. notified area, simplified offshore buffer",
+        "treaty_reference": "Malvan Marine Sanctuary, Sindhudurg district (India)"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [73.420, 16.130],
+          [73.560, 16.110],
+          [73.610, 16.000],
+          [73.550, 15.920],
+          [73.430, 15.940],
+          [73.380, 16.040],
+          [73.420, 16.130]
+        ]]
+      }
+    }
+  ]
+}

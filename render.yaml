@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: orca-backend
+    runtime: docker
+    rootDir: ORCA_Backend
+    plan: free
+    region: singapore
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: LLM_MODEL
+        value: openai/gpt-oss-120b
+      - key: CORS_ORIGINS
+        value: https://orca-2530.web.app,https://orca-2530.firebaseapp.com
