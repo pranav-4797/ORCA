@@ -283,3 +283,7 @@ class OrchestratorResponse:
     # Region-scan avoid list (P1 #12): combined hazard+geofence zones to stay
     # clear of, each as {"zone", "reason", "distance_km"}.
     avoid_zones: list = field(default_factory=list)
+    # Latency telemetry (ms) — total and per-stage breakdown, for optimization verification
+    timings: dict = field(default_factory=dict)
+    # Auto routing explainability (which agents were selected and why)
+    routing: dict = field(default_factory=dict)

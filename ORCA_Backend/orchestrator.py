@@ -55,9 +55,10 @@ the identical sequential calls. The demo never hard-crashes.
 from __future__ import annotations
 
 import operator
+import os
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Annotated, List, Optional, TypedDict
 
 import llm_client
@@ -83,6 +84,21 @@ from models import (
     RoutePlan,
     SafetyStatus,
 )
+
+# Auto Router (fast deterministic intent -> fallback LLM)
+try:
+    import auto_router
+    _AUTO_ROUTER_AVAILABLE = True
+except Exception:
+    _AUTO_ROUTER_AVAILABLE = False
+    auto_router = None  # type: ignore
+
+# Query depth policy: auto | fast | standard | deep (env-overridable)
+QUERY_DEPTH = os.getenv("ORCA_QUERY_DEPTH", "auto").strip().lower() or "auto"
+# TTLs (env-overridable) — short for live safety, longer for geocoding
+OCEAN_TTL_S = int(os.getenv("ORCA_OCEAN_TTL_S", "120").strip() or 120)
+RESPONSE_CACHE_TTL_S = int(os.getenv("ORCA_RESPONSE_CACHE_TTL_S", "60").strip() or 60)
+GEOCODE_TTL_S = int(os.getenv("ORCA_GEOCODE_TTL_S", "86400").strip() or 86400)
 
 try:
     from langgraph.graph import END, START, StateGraph
@@ -292,7 +308,7 @@ class Intent:
     UNKNOWN = "unknown"
 
 
-class ORCAGraphState(TypedDict):
+class ORCAGraphState(TypedDict, total=False):
     """Shared state flowing through the graph.
 
     `traces` is an add-only channel: every node appends its own AgentTrace
@@ -310,6 +326,10 @@ class ORCAGraphState(TypedDict):
     language: str
     plan: dict
     plan_mode: str
+    # Routing explainability (auto mode)
+    routing_mode: str  # fast-rules | llm-planner | rules
+    routing_reason: str
+    complexity: str  # fast | standard | deep
     location: Location
     context: QueryContext
 
@@ -324,6 +344,10 @@ class ORCAGraphState(TypedDict):
 
     response: Optional[OrchestratorResponse]
     traces: Annotated[List[AgentTrace], operator.add]
+    # Latency telemetry (ms) — populated per node, total at end
+    timings: dict
+    query_depth: str
+    mode: str  # auto | panel | agent
 
 
 class Orchestrator:
@@ -408,7 +432,50 @@ class Orchestrator:
         return nodes
 
     # ------------------------------------------------------------------
-    # Public entrypoint
+    # Helper: should we run discussion / synthesis LLM for this query?
+    # ------------------------------------------------------------------
+    def _should_run_discussion(self, state: ORCAGraphState) -> bool:
+        mode = (state.get("mode") or "auto").lower()
+        # Panel = full deliberation demo — always discuss
+        if mode == "panel":
+            return True
+        # Agent direct = never discuss
+        if mode == "agent":
+            return False
+        # Auto mode: decision based on complexity + query_depth policy
+        complexity = (state.get("complexity") or state.get("plan", {}).get("complexity") or "fast")
+        # Respect env override: force fast/standard/deep
+        depth_policy = (state.get("query_depth") or QUERY_DEPTH).lower()
+        if depth_policy == "fast":
+            return False
+        if depth_policy == "deep":
+            return True
+        # auto: fast/standard -> no discussion, deep/complex -> discuss
+        if complexity in ("fast", "standard"):
+            return False
+        return True  # deep
+
+    def _should_use_synthesis_llm(self, state: ORCAGraphState) -> bool:
+        mode = (state.get("mode") or "auto").lower()
+        if mode == "panel":
+            return True
+        if mode == "agent":
+            return False
+        # Auto: only use LLM synthesis when conflict or deep complexity
+        complexity = (state.get("complexity") or state.get("plan", {}).get("complexity") or "fast")
+        depth_policy = (state.get("query_depth") or QUERY_DEPTH).lower()
+        if depth_policy == "fast":
+            return False
+        if depth_policy == "deep":
+            return True
+        # Check if multiple specialists disagree (risk vs pfz tension)
+        # For auto, use deterministic synthesis when 0-1 conflicts and complexity not deep
+        if complexity in ("fast", "standard"):
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Public entrypoint — now supports auto | panel | agent
     # ------------------------------------------------------------------
     def handle_query(
         self,
@@ -416,10 +483,15 @@ class Orchestrator:
         session_id: str | None = None,
         device_gps: tuple | None = None,
         destination: Location | None = None,
-        mode: str = "panel",
+        mode: str = "auto",
         target_agent: str | None = None,
         vessel_class: str | None = None,
+        query_depth: str | None = None,
     ) -> OrchestratorResponse:
+        # Normalize mode (backwards compat: panel default previously)
+        mode_norm = (mode or "auto").strip().lower()
+        if mode_norm not in ("auto", "panel", "agent"):
+            mode_norm = "auto"
         session_id = session_id or str(uuid.uuid4())
         initial: ORCAGraphState = {
             "raw_query": raw_query,
@@ -427,23 +499,110 @@ class Orchestrator:
             "device_gps": device_gps,
             "destination": destination,
             "vessel_class": vessel_class or "small_fishing_boat",
+            "mode": mode_norm,
+            "query_depth": (query_depth or QUERY_DEPTH).strip().lower() if query_depth else QUERY_DEPTH,
+            "timings": {},
             "traces": [],
         }
-        if mode == "agent" and target_agent in SPECIALIST_REGISTRY:
+        if mode_norm == "agent" and target_agent in SPECIALIST_REGISTRY:
             return self._handle_single_agent(initial, target_agent)
-        return self._handle_query_panel(initial)
+        if mode_norm == "panel":
+            return self._handle_query_panel(initial)
+        # auto is default
+        return self._handle_query_auto(initial)
+
+    # ------------------------------------------------------------------
+    # Auto mode — fast intelligent orchestration, discussion only when needed
+    # ------------------------------------------------------------------
+    def _handle_query_auto(self, initial: dict) -> OrchestratorResponse:
+        # Use graph if available (nodes internally gate discussion/synthesis LLM)
+        if self.app is not None:
+            t0 = time.perf_counter()
+            final_state = self.app.invoke(initial)
+            response = final_state["response"]
+            total_ms = (time.perf_counter() - t0) * 1000
+            response.mode = "auto"
+            # Explain which agents auto-selected
+            plan = final_state.get("plan", {})
+            agents = self._selected_specialists(plan, live_position=bool(initial.get("device_gps") or initial.get("destination")))
+            routing_mode = final_state.get("routing_mode", "fast-rules")
+            complexity = final_state.get("complexity", "fast")
+            response.answered_by = f"AUTO SELECT → {' + '.join(a.replace('Agent','').strip() for a in agents) or 'no specialist'} ({routing_mode}, {complexity})"
+            # Attach latency trace
+            timings = final_state.get("timings", {})
+            timings["total_ms"] = round(total_ms, 1)
+            response = self._attach_latency_trace(response, timings, final_state.get("traces", []))
+            # Safety clamp: LLM must not override deterministic UNSAFE
+            response = self._enforce_safety_clamp(response, final_state)
+            # expose timings optionally
+            if hasattr(response, "timings"):
+                response.timings = timings  # type: ignore
+            return response
+        # No langgraph fallback — sequential with same gating
+        return self._handle_query_auto_sequential(initial)
+
+    def _handle_query_auto_sequential(self, initial: dict) -> OrchestratorResponse:
+        t0 = time.perf_counter()
+        response = self._handle_query_sequential(initial, auto_mode=True)
+        total_ms = (time.perf_counter() - t0) * 1000
+        response.mode = "auto"
+        # Ensure timings dict exists on response
+        if not hasattr(response, "timings") or getattr(response, "timings", None) is None:
+            response.timings = {"total_ms": round(total_ms, 1)}  # type: ignore
+        else:
+            response.timings["total_ms"] = round(total_ms, 1)  # type: ignore
+        response = self._attach_latency_trace(response, getattr(response, "timings", {}), response.trace)
+        return response
+
+    def _attach_latency_trace(self, response: OrchestratorResponse, timings: dict, existing_traces: list) -> OrchestratorResponse:
+        total = timings.get("total_ms", 0)
+        breakdown = ", ".join(f"{k}={v:.0f}ms" for k, v in sorted(timings.items()) if k != "total_ms")
+        detail = f"ORCA completed in {total:.0f} ms" + (f" ({breakdown})" if breakdown else "")
+        # Add Auto Router selection explainability if available
+        auto_bits = []
+        for t in existing_traces:
+            if "Auto Router" in t.action or "Routing mode" in t.result_summary:
+                auto_bits.append(t.result_summary[:200])
+        if auto_bits:
+            detail += " | " + " | ".join(auto_bits[:2])
+        trace = AgentTrace(
+            agent_name="Orchestrator",
+            action="Latency telemetry",
+            result_summary=detail,
+            data_sources=[],
+            duration_ms=float(total),
+        )
+        response.trace.append(trace)
+        return response
+
+    def _enforce_safety_clamp(self, response: OrchestratorResponse, state: dict) -> OrchestratorResponse:
+        """LLM must NEVER override deterministic UNSAFE. If hazard says UNSAFE, response stays UNSAFE."""
+        risk = state.get("risk")
+        if risk is not None and hasattr(risk, "status") and risk.status.value == "UNSAFE":
+            if response.status.value != "UNSAFE":
+                response.status = risk.status
+                response.reasoning = getattr(risk, "reasoning", []) or response.reasoning
+        return response
 
     # ------------------------------------------------------------------
     # Panel mode: full graph incl. the round-table discussion
     # ------------------------------------------------------------------
     def _handle_query_panel(self, initial: dict) -> OrchestratorResponse:
         if self.app is not None:
+            t0 = time.perf_counter()
             final_state = self.app.invoke(initial)
             response = final_state["response"]
+            total_ms = (time.perf_counter() - t0) * 1000
             response.mode = "panel"
             response.answered_by = (
                 "ORCA panel (specialists discussed before answering)"
             )
+            timings = final_state.get("timings", {})
+            timings["total_ms"] = round(total_ms, 1)
+            response = self._attach_latency_trace(response, timings, final_state.get("traces", []))
+            response = self._enforce_safety_clamp(response, final_state)
+            if hasattr(response, "timings"):
+                response.timings = timings  # type: ignore
             return response
         response = self._handle_query_sequential(initial)
         response.mode = "panel"
@@ -455,35 +614,52 @@ class Orchestrator:
     # graph path and the no-langgraph fallback share one code path.
     # ------------------------------------------------------------------
     def _node_language(self, state: ORCAGraphState) -> dict:
+        t0 = time.perf_counter()
         result, trace = self.language_agent.run(state["raw_query"])
+        timings = dict(state.get("timings") or {})
+        timings["language_ms"] = round((time.perf_counter() - t0) * 1000, 1)
         return {
             "normalized_query": result["normalized_query"],
             "language": result["language"],
+            "timings": timings,
             "traces": [trace],
         }
 
     def _node_planning(self, state: ORCAGraphState) -> dict:
+        t0 = time.perf_counter()
         plan, plan_mode, location, context, trace = self._step_plan(
             state["normalized_query"], state["raw_query"], state
         )
+        timings = dict(state.get("timings") or {})
+        timings["planning_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        # Also store routing specifics in timings
+        timings["routing_ms"] = round(float(plan.get("duration_ms", 0)), 1)
+        routing_mode = plan.get("routing_mode", plan_mode)
+        complexity = plan.get("complexity", "fast")
         return {
             "plan": plan,
             "plan_mode": plan_mode,
+            "routing_mode": routing_mode,
+            "routing_reason": plan.get("why", ""),
+            "complexity": complexity,
             "location": location,
             "context": context,
+            "timings": timings,
             "traces": [trace],
         }
 
     def _node_dispatch(self, state: ORCAGraphState) -> dict:
-        """Run every selected specialist agent.
+        """Run every selected specialist agent with maximal parallelism.
 
-        Phase 1 (parallel): Ocean-State -> Hazard chain AND PFZ.
-        Phase 2 (after phase 1): Geospatial, so the route planner can avoid
-        the zones Hazard just flagged (P1 #7) -- it is pure geometry (<10 ms),
-        so serialising it costs nothing while making routes weather-aware.
-        All AgentTrace entries land on the add-only traces channel. One
-        specialist failing never kills the query -- it is logged and skipped.
+        Optimized pipeline (latency-tuned):
+        - Phase 1 (concurrent): Ocean-State, PFZ, Geofence, Trend all start together.
+        - Hazard depends on Ocean-State: launched as soon as ocean completes,
+          overlapping with remaining PFZ/Geofence work.
+        - Route planning (if destination) runs after both hazard and geofence are ready,
+          so it can avoid hazard-flagged zones.
+        All timings recorded for telemetry; one specialist failing never kills the query.
         """
+        t_dispatch0 = time.perf_counter()
         plan = state["plan"]
         ctx = state["context"]
         location = state["location"]
@@ -491,103 +667,213 @@ class Orchestrator:
             plan,
             live_position=bool(state.get("device_gps") or state.get("destination")),
         )
-        results: dict = {}
+        # Determine which agents are truly needed (including implicit hazard)
+        needs_ocean = "ocean_state" in selected
+        needs_pfz = "pfz" in selected
+        needs_geo = "geospatial" in selected
+        needs_trend = "trend" in selected
+        # Hazard is needed for most intents except pure pfz/geofence/trend
+        needs_hazard = needs_ocean and plan.get("intent") in ("safety_check", "hazard_alerts", "zone_scan", "route_plan")
+        # Also if hazard explicitly requested via agents_needed
+        if "HazardAgent" in set(plan.get("agents_needed") or []):
+            needs_hazard = True
+            needs_ocean = True
+
         hour = plan.get("target_hour")
+        timings = dict(state.get("timings") or {})
+        results: dict = {}
+        traces: list[AgentTrace] = []
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futures = {}
+        import logging
+        logger = logging.getLogger("orca.orchestrator")
 
-            def _ocean_then_hazard():
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures: dict[str, object] = {}
+            # Launch independent specialists immediately
+            t_ocean0 = None
+            if needs_ocean:
                 thr = get_thresholds(ctx.vessel_class)
-                reading, t1 = self.ocean_state_agent.run(
-                    location, plan["time_window"], target_hour=hour,
-                    thresholds=thr,
-                )
-                risk, t2 = self.hazard_agent.run(reading, ctx.vessel_class)
-                return (reading, t1), (risk, t2)
-
-            if "trend" in selected:
-                months = int(plan.get("months_back") or 6)
-                futures["trend"] = pool.submit(
-                    self.trend_agent.run, location, months
-                )
-            if "ocean_state" in selected:
-                futures["ocean_hazard"] = pool.submit(_ocean_then_hazard)
-            if "pfz" in selected:
-                futures["pfz"] = pool.submit(
-                    self.pfz_agent.run, location, None,
-                    plan["time_window"]
-                )
-
-            # ---- phase 1 ----
-            for key in ("trend", "ocean_hazard", "pfz"):
-                if key in futures:
-                    try:
-                        results[key] = futures[key].result(timeout=240)
-                    except Exception as exc:
-                        import logging
-
-                        logging.getLogger("orca.orchestrator").warning(
-                            "%s failed (%s: %s); continuing without it",
-                            key, type(exc).__name__, exc,
-                        )
-                        results[key] = None
-                    del futures[key]
-
-            # ---- phase 2: geospatial now knows hazard flags ----
-            if "geospatial" in selected:
-                ocean_hazard = results.get("ocean_hazard")
-                risk = ocean_hazard[1][0] if ocean_hazard else None
-                hazard_labels = (
-                    [f.label for f in risk.flags] if risk else []
-                )
-                exceedance = (
-                    getattr(risk, "exceedance_windows", []) if risk else []
-                )
-                for w in exceedance or []:
-                    hazard_labels.append(f"{w.metric} > {w.threshold}{w.unit} "
-                                         f"{w.start_local}..{w.end_local}")
-                try:
-                    results["geospatial"] = pool.submit(
-                        self.geospatial_agent.run,
-                        location,
-                        device_gps=ctx.device_gps,
-                        destination=ctx.destination,
-                        hazard_zone_names=hazard_labels,
-                    ).result(timeout=180)
-                except Exception as exc:
-                    import logging
-
-                    logging.getLogger("orca.orchestrator").warning(
-                        "geospatial failed (%s: %s); continuing without it",
-                        type(exc).__name__, exc,
+                def _run_ocean():
+                    return self.ocean_state_agent.run(
+                        location, plan["time_window"], target_hour=hour, thresholds=thr,
                     )
-                    results["geospatial"] = None
+                futures["ocean"] = pool.submit(_run_ocean)
+                t_ocean0 = time.perf_counter()
+            if needs_pfz:
+                futures["pfz"] = pool.submit(
+                    self.pfz_agent.run, location, None, plan["time_window"]
+                )
+            if needs_geo:
+                # Geofence check is pure geometry (<10ms) — run independently now;
+                # route will be handled later after hazard is known.
+                def _run_geofence():
+                    # Use the agent's internal geofence logic directly to avoid LLM overhead
+                    ref_lat, ref_lon = (ctx.device_gps or (location.lat, location.lon))
+                    # Direct call to avoid double geofence+route; route handled separately
+                    gf = self.geospatial_agent._check_geofence(ref_lat, ref_lon, location)
+                    # Create a minimal trace for geofence-only part
+                    tr = AgentTrace(
+                        agent_name=self.geospatial_agent.name,
+                        action="Checked boundaries (geofence)",
+                        result_summary=f"Geofence checked: {'clear' if gf.clear else f'{len(gf.hits)} hit(s)'}",
+                        data_sources=[],
+                        duration_ms=0.0,
+                    )
+                    return (gf, None), tr
+                futures["geofence"] = pool.submit(_run_geofence)
+            if needs_trend:
+                months = int(plan.get("months_back") or 6)
+                futures["trend"] = pool.submit(self.trend_agent.run, location, months)
 
-        update: dict = {"traces": []}
-        if results.get("ocean_hazard"):
-            (reading, o_trace), (risk, h_trace) = results["ocean_hazard"]
-            update["ocean_state"] = reading
-            update["risk"] = risk
-            update["traces"].extend([o_trace, h_trace])
-        if results.get("pfz"):
-            pfz, p_trace = results["pfz"]
-            update["pfz"] = pfz
-            update["traces"].append(p_trace)
-        if results.get("geospatial"):
-            (geofence, route), g_trace = results["geospatial"]
-            update["geofence"] = geofence
-            if route is not None:
-                update["route"] = route
-            update["traces"].append(g_trace)
-        if results.get("trend"):
-            trend, tr_trace = results["trend"]
-            update["trend"] = trend
-            update["traces"].append(tr_trace)
+            # Wait for ocean first, then launch hazard (if needed) while others still running
+            # Timeout env-configurable: fast fail to simulated fallback rather than hanging 30s
+            ocean_reading = None
+            ocean_trace = None
+            _OCEAN_FUTURE_TIMEOUT = float(os.getenv("ORCA_OCEAN_FUTURE_TIMEOUT_S", "12").strip() or 12)
+            if "ocean" in futures:
+                try:
+                    ocean_reading, ocean_trace = futures["ocean"].result(timeout=_OCEAN_FUTURE_TIMEOUT)  # type: ignore
+                    if t_ocean0 is not None:
+                        timings["ocean_ms"] = round((time.perf_counter() - t_ocean0) * 1000, 1)
+                    traces.append(ocean_trace)
+                    results["ocean_state"] = ocean_reading
+                except Exception as exc:
+                    logger.warning("ocean_state failed (%s: %s); continuing without it", type(exc).__name__, exc)
+                    try:
+                        futures["ocean"].result(timeout=0)  # ensure exception consumed
+                    except:  # noqa
+                        pass
+                finally:
+                    futures.pop("ocean", None)
+
+            # Launch hazard as soon as ocean is ready (overlaps with pfz/geofence)
+            haz_future = None
+            t_haz0 = None
+            if needs_hazard and ocean_reading is not None:
+                t_haz0 = time.perf_counter()
+                haz_future = pool.submit(self.hazard_agent.run, ocean_reading, ctx.vessel_class)
+
+            # Collect remaining independents while hazard runs
+            pfz_res = None
+            geo_res = None
+            trend_res = None
+            for key in ("pfz", "geofence", "trend"):
+                if key in futures:
+                    # Shorter timeouts: geofence is <10ms, pfz ~1s, trend may be longer (network heavy)
+                    _to = 15.0 if key in ("pfz","geofence") else 25.0
+                    try:
+                        val = futures[key].result(timeout=_to)  # type: ignore
+                        if key == "pfz":
+                            pfz_res = val
+                            traces.append(val[1])
+                            results["pfz"] = val[0]
+                            timings["pfz_ms"] = round(val[1].duration_ms, 1)
+                        elif key == "geofence":
+                            (gf, _rt), tr = val
+                            # Fix trace duration if needed
+                            traces.append(tr)
+                            results["geofence"] = gf
+                            # Keep RoutePlan placeholder None for now; route added later if needed
+                            timings["geospatial_ms"] = round(tr.duration_ms, 1) if tr.duration_ms else 0.0
+                            geo_res = gf
+                        elif key == "trend":
+                            trend_res = val
+                            traces.append(val[1])
+                            results["trend"] = val[0]
+                            timings["trend_ms"] = round(val[1].duration_ms, 1)
+                    except Exception as exc:
+                        logger.warning("%s failed (%s: %s); continuing without it", key, type(exc).__name__, exc)
+                    finally:
+                        futures.pop(key, None)
+
+            # Collect hazard (IMD CAP 60s cache, should be <2s after cache)
+            if haz_future is not None:
+                try:
+                    risk, h_trace = haz_future.result(timeout=12)  # type: ignore
+                    if t_haz0 is not None:
+                        timings["hazard_ms"] = round((time.perf_counter() - t_haz0) * 1000, 1)
+                    else:
+                        timings["hazard_ms"] = round(h_trace.duration_ms, 1)
+                    traces.append(h_trace)
+                    results["risk"] = risk
+                    # If geofence was not launched independently (e.g., destination-only case), run it now
+                except Exception as exc:
+                    logger.warning("hazard failed (%s: %s); continuing without it", type(exc).__name__, exc)
+
+            # Route planning — needs hazard + geofence + destination
+            if needs_geo and ctx.destination is not None:
+                try:
+                    t_route0 = time.perf_counter()
+                    risk = results.get("risk")
+                    hazard_labels = [f.label for f in risk.flags] if risk else []
+                    exceedance = getattr(risk, "exceedance_windows", []) if risk else []
+                    for w in exceedance or []:
+                        hazard_labels.append(f"{w.metric} > {w.threshold}{w.unit} {w.start_local}..{w.end_local}")
+                    geofence = results.get("geofence")
+                    # If geofence wasn't run (edge), run it now
+                    if geofence is None:
+                        ref_lat, ref_lon = (ctx.device_gps or (location.lat, location.lon))
+                        geofence = self.geospatial_agent._check_geofence(ref_lat, ref_lon, location)
+                        results["geofence"] = geofence
+                    # Now plan route avoiding both restricted and hazard zones
+                    route = self.geospatial_agent._plan_route(
+                        (ctx.device_gps[0] if ctx.device_gps else location.lat),
+                        (ctx.device_gps[1] if ctx.device_gps else location.lon),
+                        ctx.destination.lat, ctx.destination.lon,
+                        restricted=[h.zone_name for h in (geofence.hits if geofence else [])],
+                        hazard_names=hazard_labels,
+                    )
+                    results["route"] = route
+                    # Create trace for route
+                    r_trace = AgentTrace(
+                        agent_name=self.geospatial_agent.name,
+                        action="Planned safe route (geofence+hazard aware)",
+                        result_summary=f"Route {route.estimated_distance_km:.0f} km [{route.algorithm}] avoiding {len(route.avoided_zones)} zone(s)",
+                        data_sources=[],
+                        duration_ms=(time.perf_counter() - t_route0) * 1000,
+                    )
+                    traces.append(r_trace)
+                    timings["route_ms"] = round(r_trace.duration_ms, 1)
+                    # Also enrich geofence trace with route note
+                    if geofence is not None:
+                        geofence.reasoning_note = f"Route planned to {ctx.destination.name} avoiding {len(route.avoided_zones)} zone(s)."
+                except Exception as exc:
+                    logger.warning("route planning failed (%s: %s)", type(exc).__name__, exc)
+            elif needs_geo and not needs_trend and not needs_ocean and not needs_pfz:
+                # Pure geofence-only query without ocean/hazard: ensure we still have geofence timing
+                pass
+
+        timings["dispatch_ms"] = round((time.perf_counter() - t_dispatch0) * 1000, 1)
+        # Merge results into update dict
+        update: dict = {"traces": traces, "timings": timings}
+        if "ocean_state" in results:
+            update["ocean_state"] = results["ocean_state"]
+        if "risk" in results:
+            update["risk"] = results["risk"]
+        if "pfz" in results:
+            update["pfz"] = results["pfz"]
+        if "geofence" in results:
+            update["geofence"] = results["geofence"]
+        if "route" in results:
+            update["route"] = results["route"]
+        if "trend" in results:
+            update["trend"] = results["trend"]
         return update
 
     def _node_discussion(self, state: ORCAGraphState) -> dict:
-        """Round-table: specialists read each other's findings and debate."""
+        """Round-table: specialists read each other's findings and debate. Skipped for FAST mode."""
+        t0 = time.perf_counter()
+        if not self._should_run_discussion(state):
+            trace = AgentTrace(
+                agent_name="DiscussionAgent",
+                action="Skipped round-table (fast path — no conflict/complexity)",
+                result_summary="Discussion disabled for fast/standard query; deterministic synthesis will be used.",
+                data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            timings = dict(state.get("timings") or {})
+            timings["discussion_ms"] = round(trace.duration_ms, 1)
+            return {"discussion": {"turns": [], "consensus": ""}, "traces": [trace], "timings": timings}
         transcript, trace = self.discussion_agent.run(
             state["context"],
             ocean_state=state.get("ocean_state"),
@@ -597,9 +883,27 @@ class Orchestrator:
             route=state.get("route"),
             trend=state.get("trend"),
         )
-        return {"discussion": transcript, "traces": [trace]}
+        timings = dict(state.get("timings") or {})
+        timings["discussion_ms"] = round(trace.duration_ms, 1)
+        return {"discussion": transcript, "traces": [trace], "timings": timings}
 
     def _node_synthesis(self, state: ORCAGraphState) -> dict:
+        t0 = time.perf_counter()
+        # Gating: use deterministic synthesis when LLM not needed
+        if not self._should_use_synthesis_llm(state):
+            # Deterministic verdict pass-through — no LLM call
+            risk = state.get("risk")
+            deterministic = self.synthesis_agent._fallback_verdict(risk)  # type: ignore
+            trace = AgentTrace(
+                agent_name="SynthesisAgent",
+                action="Deterministic synthesis (fast path — no LLM reconciliation needed)",
+                result_summary=f"Verdict '{deterministic['verdict']}' (deterministic); single specialist/no conflict.",
+                data_sources=list(risk.evidence_sources) if risk else [],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            timings = dict(state.get("timings") or {})
+            timings["synthesis_ms"] = round(trace.duration_ms, 1)
+            return {"synthesis": deterministic, "traces": [trace], "timings": timings}
         synthesis, synth_trace = self.synthesis_agent.run(
             state["context"],
             state.get("ocean_state"),
@@ -610,22 +914,98 @@ class Orchestrator:
             trend=state.get("trend"),
             discussion=state.get("discussion") or {},
         )
-        return {"synthesis": synthesis, "traces": [synth_trace]}
+        timings = dict(state.get("timings") or {})
+        timings["synthesis_ms"] = round(synth_trace.duration_ms, 1)
+        return {"synthesis": synthesis, "traces": [synth_trace], "timings": timings}
 
     def _node_response(self, state: ORCAGraphState) -> dict:
-        answer, resp_trace = self.response_agent.run(
-            state["context"], state["synthesis"],
-            ocean_state=state.get("ocean_state"),
-            risk=state.get("risk"),
-            pfz=state.get("pfz"),
-            geofence=state.get("geofence"),
-            route=state.get("route"),
-            trend=state.get("trend"),
-            discussion=state.get("discussion") or {},
+        t0 = time.perf_counter()
+        # For fast auto queries with single authoritative hazard verdict, use deterministic template (no LLM call)
+        mode = (state.get("mode") or "auto").lower()
+        complexity = (state.get("complexity") or state.get("plan", {}).get("complexity") or "fast")
+        risk = state.get("risk")
+        # Fast path: safety_check / hazard_alerts with deterministic verdict -> no LLM
+        depth_policy = (state.get("query_depth") or QUERY_DEPTH).lower()
+        use_deterministic = (
+            mode == "auto" and complexity in ("fast", "standard") and depth_policy != "deep"
+            and (risk is not None or state.get("pfz") is not None or state.get("geofence") is not None)
         )
+        # But if synthesis required LLM (deep), allow response LLM
+        if use_deterministic and not self._should_use_synthesis_llm(state):
+            # Deterministic concise answer (no LLM)
+            answer = self._deterministic_answer(state)
+            resp_trace = AgentTrace(
+                agent_name="ResponseAgent",
+                action="Composed deterministic answer (fast path — no LLM)",
+                result_summary=f"Answer written deterministically ({len(answer)} chars) — verdict {risk.status.value if risk else 'N/A'}",
+                data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+        else:
+            answer, resp_trace = self.response_agent.run(
+                state["context"], state["synthesis"],
+                ocean_state=state.get("ocean_state"),
+                risk=state.get("risk"),
+                pfz=state.get("pfz"),
+                geofence=state.get("geofence"),
+                route=state.get("route"),
+                trend=state.get("trend"),
+                discussion=state.get("discussion") or {},
+            )
+            # Enforce safety clamp on answer text? Verdict already clamped in _assemble_response, but also ensure answer reflects UNSAFE
+            if risk is not None and risk.status.value == "UNSAFE" and "UNSAFE" not in answer.upper() and "DO NOT" not in answer.upper():
+                answer = f"UNSAFE: {risk.headline} " + answer
+        timings = dict(state.get("timings") or {})
+        timings["response_ms"] = round(resp_trace.duration_ms, 1)
         response = self._assemble_response(state, answer)
         response.trace.append(resp_trace)
-        return {"response": response, "traces": [resp_trace]}
+        return {"response": response, "traces": [resp_trace], "timings": timings}
+
+    def _deterministic_answer(self, state: ORCAGraphState) -> str:
+        """Cheap deterministic response template for simple safety/PFZ/geofence queries — no LLM."""
+        risk = state.get("risk")
+        ocean = state.get("ocean_state")
+        pfz = state.get("pfz")
+        geofence = state.get("geofence")
+        route = state.get("route")
+        context = state.get("context")
+        parts: list[str] = []
+        # Verdict line is authoritative and already rendered as HUD; answer complements it concisely.
+        if risk is not None:
+            if risk.status.value == "UNSAFE":
+                # Include dominant threshold reason
+                flag_txt = "; ".join(f"{f.label}: {f.detail}" for f in risk.flags[:2]) if risk.flags else risk.headline
+                wave_txt = ""
+                if ocean is not None:
+                    wave_txt = f" Wave height {ocean.wave_height_m} m, wind gusts {ocean.wind_gust_kmh} km/h."
+                parts.append(f"UNSAFE: {flag_txt}.{wave_txt} Do not venture out. {risk.headline}")
+            elif risk.status.value == "CAUTION":
+                parts.append(f"CAUTION: {risk.headline} Wave {ocean.wave_height_m if ocean else '?'} m / gusts {ocean.wind_gust_kmh if ocean else '?'} km/h borderline.")
+            else:
+                parts.append(f"SAFE: {risk.headline} Wave {ocean.wave_height_m if ocean else '?'} m and wind moderate.")
+            # Exceedance windows
+            for w in getattr(risk, "exceedance_windows", [])[:1]:
+                parts.append(f"Conditions worsen {w.start_local}–{w.end_local} (peak {w.peak_value}{w.unit}).")
+            # Marine bulletins
+            for m in getattr(risk, "marine_bulletins", [])[:1]:
+                parts.append(m)
+        if pfz is not None:
+            parts.append(f"Nearest PFZ {pfz.distance_from_reference_km:.1f} km away at {pfz.bearing_deg:.0f}° bearing (SST {pfz.sst_at_zone_celsius}°C).")
+        if geofence is not None and not geofence.clear:
+            for h in geofence.hits[:1]:
+                parts.append(f"Boundary alert: {h.zone_name} {'inside' if h.inside_zone else f'{h.distance_to_boundary_km} km away'}.")
+        elif geofence is not None and geofence.clear:
+            # Only mention geofence clear for geofence intents, not for every safety check (reduces noise)
+            if state.get("plan", {}).get("intent") == "geofence_check":
+                parts.append("No restricted boundary within alert buffer.")
+        if route is not None:
+            parts.append(f"Route {route.estimated_distance_km:.0f} km via {len(route.waypoints)} waypoints avoiding {', '.join(route.avoided_zones) or 'nothing'}.")
+        # Ensure language? For now English deterministic; LLM path handles i18n. Fast path keeps English concise.
+        answer = " ".join(parts) if parts else (risk.headline if risk else "Assessment complete.")
+        # Add provenance hint for simulated fields
+        if ocean is not None and ocean.source.value == "simulated":
+            answer += " [Note: some fields simulated due to live feed unavailability.]"
+        return answer[:900]
 
     def _node_unsupported(self, state: ORCAGraphState) -> dict:
         trace = AgentTrace(
@@ -722,13 +1102,22 @@ class Orchestrator:
             ])
             or "(no specialist agents)"
         )
+        routing_mode = plan.get("routing_mode", plan_mode)
+        complexity = plan.get("complexity", "fast")
+        # Explainability for AUTO mode: which agents were selected and why (required by spec)
+        auto_explain = ""
+        if routing_mode == "fast-rules":
+            selected_agents = self._selected_specialists(plan, live_position=bool(state.get("device_gps") or state.get("destination")))
+            # Human readable agent names
+            agent_names = [a.replace("_", " ").title() for a in selected_agents]
+            auto_explain = f" | Auto Router selected: {' + '.join(agent_names) or '(none)'} — Reason: {plan.get('why','')} (complexity={complexity}, conf={plan.get('confidence', 0):.2f})"
         trace = AgentTrace(
             agent_name="PlanningAgent",
             action=(
-                f"Parsed query [mode={plan_mode}] intent='{plan['intent']}', "
+                f"Parsed query [mode={plan_mode} routing={routing_mode} complexity={complexity}] intent='{plan['intent']}', "
                 f"location='{location.name}', time_window='{plan['time_window']}'"
             ),
-            result_summary=f"{plan['why']} Dispatching to {dispatch_chain}.",
+            result_summary=f"{plan['why']} Dispatching to {dispatch_chain}.{auto_explain}",
             data_sources=[],
             duration_ms=plan["duration_ms"],
         )
@@ -837,6 +1226,16 @@ class Orchestrator:
 
         conflicts = list(state.get("synthesis", {}).get("conflicts", []))
         confidence_score, evidence_tiers = self._score_and_tiers(state, conflicts)
+        # Timings and routing explainability (for frontend Auto Select display + telemetry)
+        timings = dict(state.get("timings") or {})
+        routing = {
+            "intent": state.get("plan", {}).get("intent", "unknown"),
+            "agents": self._selected_specialists(state.get("plan", {}), live_position=bool(state.get("device_gps") or state.get("destination"))),
+            "routing_mode": state.get("routing_mode") or state.get("plan", {}).get("routing_mode", "rules"),
+            "complexity": state.get("complexity") or state.get("plan", {}).get("complexity", "fast"),
+            "reason": state.get("plan", {}).get("why", ""),
+            "confidence": state.get("plan", {}).get("confidence", 0.0),
+        }
 
         return OrchestratorResponse(
             answer=answer,
@@ -856,6 +1255,8 @@ class Orchestrator:
             avoid_zones=avoid_zones,
             confidence_score=confidence_score,
             evidence_tiers=evidence_tiers,
+            timings=timings,
+            routing=routing,
         )
 
     @staticmethod
@@ -878,19 +1279,30 @@ class Orchestrator:
 
     # ------------------------------------------------------------------
     # No-langgraph fallback: same flow via direct sequential calls
+    # Optimized: supports auto fast-path gating (conditional discussion/synthesis LLM)
     # ------------------------------------------------------------------
-    def _handle_query_sequential(self, initial: dict) -> OrchestratorResponse:
+    def _handle_query_sequential(self, initial: dict, auto_mode: bool = False) -> OrchestratorResponse:
         state: ORCAGraphState = dict(initial)
         trace: list[AgentTrace] = []
-
+        timings: dict = {}
+        t_lang0 = time.perf_counter()
         lang_result, t = self.language_agent.run(state["raw_query"])
+        timings["language_ms"] = round((time.perf_counter() - t_lang0) * 1000, 1)
         state.update(lang_result)
         trace.append(t)
 
+        t_plan0 = time.perf_counter()
         plan, plan_mode, location, context, t = self._step_plan(
             state["normalized_query"], state["raw_query"], state
         )
-        state.update({"plan": plan, "location": location, "context": context})
+        timings["planning_ms"] = round((time.perf_counter() - t_plan0) * 1000, 1)
+        timings["routing_ms"] = round(float(plan.get("duration_ms", 0)), 1)
+        # Propagate routing/complexity into state for gating decisions
+        state.update({"plan": plan, "location": location, "context": context,
+                      "routing_mode": plan.get("routing_mode", plan_mode),
+                      "complexity": plan.get("complexity", "fast"),
+                      "query_depth": state.get("query_depth", QUERY_DEPTH),
+                      "mode": state.get("mode", "auto" if auto_mode else "panel")})
         trace.append(t)
 
         specialists = self._selected_specialists(
@@ -902,71 +1314,86 @@ class Orchestrator:
             unsupported.trace = trace + unsupported.trace
             return unsupported
 
-        if "trend" in specialists:
-            trend, t = self.trend_agent.run(
-                location, int(state["plan"].get("months_back") or 6)
-            )
-            state["trend"] = trend
-            trace.append(t)
+        # Specialists — parallel where possible even in sequential fallback (use threads for independent fetches)
+        # For simplicity in fallback, run ocean->hazard sequentially, but PFZ+geofence concurrent
+        # Use same parallel dispatch as graph node for consistency
+        # We reuse _node_dispatch logic by constructing a mini-state
+        tmp_state: ORCAGraphState = {
+            "plan": plan, "context": context, "location": location,
+            "device_gps": state.get("device_gps"), "destination": state.get("destination"),
+            "timings": timings, "traces": trace,
+            "mode": state.get("mode", "panel"), "complexity": state.get("complexity", "fast"),
+            "query_depth": state.get("query_depth", QUERY_DEPTH)
+        }
+        dispatch_out = self._node_dispatch(tmp_state)  # type: ignore
+        # Merge dispatch results
+        for k in ("ocean_state", "risk", "pfz", "geofence", "route", "trend"):
+            if k in dispatch_out:
+                state[k] = dispatch_out[k]
+        trace.extend(dispatch_out.get("traces", []))
+        timings.update(dispatch_out.get("timings", {}))
 
-        if "ocean_state" in specialists:
-            reading, t = self.ocean_state_agent.run(
-                location, state["plan"]["time_window"],
-                target_hour=state["plan"].get("target_hour"),
-                thresholds=get_thresholds(state.get("vessel_class") or "small_fishing_boat"),
+        # Discussion gating
+        t_disc0 = time.perf_counter()
+        if auto_mode and not self._should_run_discussion(state):
+            transcript = {"turns": [], "consensus": ""}
+            t = AgentTrace(agent_name="DiscussionAgent", action="Skipped round-table (fast path)", result_summary="No discussion for fast query", data_sources=[], duration_ms=(time.perf_counter() - t_disc0)*1000)
+            timings["discussion_ms"] = round(t.duration_ms, 1)
+        else:
+            transcript, t = self.discussion_agent.run(
+                context, ocean_state=state.get("ocean_state"),
+                risk=state.get("risk"), pfz=state.get("pfz"),
+                geofence=state.get("geofence"), route=state.get("route"),
+                trend=state.get("trend"),
             )
-            state["ocean_state"] = reading
-            trace.append(t)
-            risk, t = self.hazard_agent.run(
-                reading, state.get("vessel_class") or "small_fishing_boat"
-            )
-            state["risk"] = risk
-            trace.append(t)
-        if "pfz" in specialists:
-            pfz, t = self.pfz_agent.run(location, state.get("ocean_state"), plan["time_window"])
-            state["pfz"] = pfz
-            trace.append(t)
-        if "geospatial" in specialists:
-            hazard_labels = (
-                [f.label for f in state["risk"].flags] if state.get("risk") else []
-            )
-            (gf, rt), t = self.geospatial_agent.run(
-                location, context.device_gps, context.destination,
-                hazard_zone_names=hazard_labels,
-            )
-            state["geofence"] = gf
-            if rt is not None:
-                state["route"] = rt
-            trace.append(t)
-
-        transcript, t = self.discussion_agent.run(
-            context, ocean_state=state.get("ocean_state"),
-            risk=state.get("risk"), pfz=state.get("pfz"),
-            geofence=state.get("geofence"), route=state.get("route"),
-            trend=state.get("trend"),
-        )
+            timings["discussion_ms"] = round(t.duration_ms, 1)
         state["discussion"] = transcript
         trace.append(t)
 
-        synthesis, t = self.synthesis_agent.run(
-            context, state.get("ocean_state"), state.get("risk"),
-            pfz=state.get("pfz"), geofence=state.get("geofence"),
-            route=state.get("route"), trend=state.get("trend"),
-            discussion=transcript,
-        )
+        # Synthesis gating
+        t_synth0 = time.perf_counter()
+        use_llm_synth = (not auto_mode) or self._should_use_synthesis_llm(state)
+        if auto_mode and not use_llm_synth:
+            synthesis = self.synthesis_agent._fallback_verdict(state.get("risk"))  # type: ignore
+            t = AgentTrace(agent_name="SynthesisAgent", action="Deterministic synthesis (fast path)", result_summary=f"Verdict '{synthesis['verdict']}' deterministic", data_sources=[], duration_ms=(time.perf_counter()-t_synth0)*1000)
+            timings["synthesis_ms"] = round(t.duration_ms, 1)
+        else:
+            synthesis, t = self.synthesis_agent.run(
+                context, state.get("ocean_state"), state.get("risk"),
+                pfz=state.get("pfz"), geofence=state.get("geofence"),
+                route=state.get("route"), trend=state.get("trend"),
+                discussion=transcript,
+            )
+            timings["synthesis_ms"] = round(t.duration_ms, 1)
         state["synthesis"] = synthesis
         trace.append(t)
 
-        answer, t = self.response_agent.run(
-            context, synthesis,
-            ocean_state=state.get("ocean_state"), risk=state.get("risk"),
-            pfz=state.get("pfz"), geofence=state.get("geofence"),
-            route=state.get("route"), trend=state.get("trend"),
-            discussion=transcript,
-        )
+        # Response gating — deterministic for fast auto queries
+        t_resp0 = time.perf_counter()
+        use_deterministic = auto_mode and state.get("complexity") in ("fast", "standard") and state.get("query_depth") != "deep" and state.get("risk") is not None and not use_llm_synth
+        if use_deterministic:
+            answer = self._deterministic_answer(state)  # type: ignore
+            t = AgentTrace(agent_name="ResponseAgent", action="Composed deterministic answer (fast path)", result_summary=f"Answer {len(answer)} chars deterministic", data_sources=[], duration_ms=(time.perf_counter()-t_resp0)*1000)
+            timings["response_ms"] = round(t.duration_ms, 1)
+        else:
+            answer, t = self.response_agent.run(
+                context, synthesis,
+                ocean_state=state.get("ocean_state"), risk=state.get("risk"),
+                pfz=state.get("pfz"), geofence=state.get("geofence"),
+                route=state.get("route"), trend=state.get("trend"),
+                discussion=transcript,
+            )
+            timings["response_ms"] = round(t.duration_ms, 1)
         state["traces"] = trace[:-1]  # response node appends its own
+        state["timings"] = timings
         response = self._assemble_response(state, answer)
         response.trace = trace
+        # Attach timings to response for telemetry serialization
+        response.timings = timings  # type: ignore
+        # Safety clamp
+        risk = state.get("risk")
+        if risk is not None and risk.status.value == "UNSAFE" and response.status.value != "UNSAFE":
+            response.status = risk.status
         return response
 
     # ------------------------------------------------------------------
@@ -1075,11 +1502,47 @@ class Orchestrator:
         return response
 
     # ------------------------------------------------------------------
-    # Planning -- LLM first, deterministic rules as fallback
+    # Planning — FAST deterministic router first, LLM as fallback only when uncertain
     # ------------------------------------------------------------------
     def _plan(self, normalized_query: str, prior=None) -> tuple[dict, str]:
+        """
+        Routing pipeline optimized for latency:
+        1. FAST deterministic router (0 LLM calls, <1ms) — handles obvious intents.
+        2. LLM planner (1 structured call, low max_tokens, fast timeout) — only if fast router uncertain.
+        3. Deterministic rule fallback — if LLM unavailable/failed.
+        """
         start = time.perf_counter()
 
+        # 1. Try fast deterministic router FIRST
+        fast_decision = None
+        if _AUTO_ROUTER_AVAILABLE and auto_router is not None:
+            try:
+                fast_decision = auto_router.fast_route(normalized_query)
+            except Exception:
+                fast_decision = None
+
+        if fast_decision is not None and not auto_router.should_use_llm_fallback(fast_decision, normalized_query):  # type: ignore
+            # Confident fast routing — no LLM needed (0-1 LLM calls saved)
+            plan = {
+                "intent": fast_decision.intent,
+                "location_name": self._extract_place_name(normalized_query),
+                "time_window": self._extract_time_window(normalized_query),
+                "target_hour": self._extract_target_hour(normalized_query),
+                "months_back": 6 if fast_decision.intent == Intent.TREND_ANALYSIS else None,
+                "agents_needed": fast_decision.agents,
+                "why": f"[fast-rules] {fast_decision.reason}",
+                "duration_ms": (time.perf_counter() - start) * 1000,
+                "routing_mode": fast_decision.routing_mode,
+                "complexity": fast_decision.complexity,
+                "confidence": fast_decision.confidence,
+            }
+            # Memory override for "same place" — copy prior location
+            if prior is not None and prior.location_name and plan["location_name"] in ("unknown", "", "same"):
+                plan["location_name"] = prior.location_name
+                plan["why"] += " (location inherited from conversation memory)"
+            return plan, "fast-rules"
+
+        # 2. Fallback: LLM planner (only when fast router uncertain or unavailable)
         if llm_client.is_available():
             try:
                 memory_line = ""
@@ -1090,6 +1553,9 @@ class Orchestrator:
                         "the user says 'same place'/'there', copy that location "
                         "name verbatim into location_name."
                     )
+                # For fast routing fallback, use low budget (fast timeout, few tokens, no retry)
+                # For ambiguous queries we still want the LLM, but we don't want to wait for a retry.
+                is_fallback = fast_decision is None
                 args = llm_client.complete_structured(
                     system_prompt=(
                         "You are the Planning Agent of ORCA, a marine-intelligence "
@@ -1111,6 +1577,9 @@ class Orchestrator:
                         "window, needed specialist agents, and rationale."
                     ),
                     schema=PLANNING_TOOL_SCHEMA,
+                    max_tokens=llm_client.LLM_MAX_TOKENS_ROUTING,
+                    timeout=llm_client.LLM_TIMEOUT_FAST_S,
+                    attempts=1,  # no retry — fall back to rules instantly rather than wait
                 )
                 plan = {
                     "intent": args.get("intent", Intent.UNKNOWN),
@@ -1121,22 +1590,33 @@ class Orchestrator:
                     "agents_needed": args.get("agents_needed", []),
                     "why": args.get("why", ""),
                     "duration_ms": (time.perf_counter() - start) * 1000,
+                    "routing_mode": "llm-planner",
+                    "complexity": "standard",
                 }
-                return plan, "llm"
+                # Infer complexity for LLM-planned query
+                if plan["intent"] == Intent.TREND_ANALYSIS:
+                    plan["complexity"] = "deep"
+                elif plan["intent"] in (Intent.ZONE_SCAN, Intent.ROUTE_PLAN) and len(plan.get("agents_needed") or []) >= 4:
+                    plan["complexity"] = "complex"
+                return plan, "llm-planner"
             except llm_client.LLMUnavailableError:
                 pass  # fall through to rule-based planning
 
-        # Deterministic fallback (original rule-based logic, extended)
+        # 3. Deterministic rule fallback (no LLM)
+        # If fast router gave a low-confidence hint, reuse its intent to avoid re-parsing
+        fallback_intent = (fast_decision.intent if fast_decision is not None else self._route_intent(normalized_query))
         plan = {
-            "intent": self._route_intent(normalized_query),
+            "intent": fallback_intent,
             "location_name": self._extract_place_name(normalized_query),
             "time_window": self._extract_time_window(normalized_query),
             "target_hour": self._extract_target_hour(normalized_query),
             "months_back": 6 if "trend" in normalized_query.lower() or
                             "declined" in normalized_query.lower() else None,
-            "agents_needed": [],
-            "why": "[llm_unavailable] Rule-based keyword parsing used.",
+            "agents_needed": (fast_decision.agents if fast_decision is not None else []),
+            "why": "[rules] Rule-based keyword parsing used (fast router uncertain, LLM unavailable).",
             "duration_ms": (time.perf_counter() - start) * 1000,
+            "routing_mode": "rules",
+            "complexity": (fast_decision.complexity if fast_decision is not None else "fast"),
         }
         return plan, "rules"
 

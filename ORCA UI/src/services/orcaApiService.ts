@@ -38,15 +38,24 @@ export interface OrcaSpecialist {
 
 export interface OrcaQueryResponse {
   answer: string;
-  status?: 'SAFE' | 'CAUTION' | 'UNSAFE' | 'INFO';
+  status?: 'SAFE' | 'CAUTION' | 'UNSAFE' | 'CRITICAL' | 'INFO';
   language?: string;
   conflicts?: string[];
   reasoning?: string[];
   session_id?: string;
   trace?: OrcaTraceEntry[];
   discussion?: OrcaDiscussionTurn[];
-  mode?: 'panel' | 'agent';
+  mode?: 'auto' | 'panel' | 'agent';
   answered_by?: string;
+  timings?: Record<string, number>;
+  routing?: {
+    intent: string;
+    agents: string[];
+    routing_mode: string;
+    complexity: string;
+    reason: string;
+    confidence: number;
+  };
 }
 
 /** Addressable specialists for direct-agent queries (backend registry). */
@@ -142,22 +151,25 @@ export class OrcaApiService implements IAIService {
   public async sendMessage(options: SendMessageOptions): Promise<string> {
     const { chatId, prompt, onChunk, abortSignal } = options;
 
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
     // ---- Phase 1: dispatch status ------------------------------------
-    const mode = options.queryMode === 'agent' ? 'agent' : 'panel';
+    // AUTO is default — fast intelligent routing; panel only when explicitly chosen.
+    const mode: 'auto' | 'panel' | 'agent' = (options.queryMode as any) || 'auto';
+    const resolvedMode = mode === 'agent' ? 'agent' : mode === 'panel' ? 'panel' : 'auto';
+    const modeLabel = resolvedMode === 'agent'
+      ? `Dispatching directly to ${options.targetAgent || 'specialist'} agent`
+      : resolvedMode === 'panel'
+      ? 'Dispatching to ORCA multi-agent panel (full deliberation)'
+      : 'Auto-routing — ORCA picks best specialist(s)';
     onChunk({
       type: 'activity',
       activityStep: this.step(
         'dispatch',
         options.voiceBlob
           ? 'Uploading voice message for transcription'
-          : mode === 'agent'
-            ? `Dispatching directly to ${options.targetAgent || 'specialist'} agent`
-            : 'Dispatching to ORCA multi-agent panel',
+          : modeLabel,
         options.voiceBlob
           ? `${BACKEND_URL}/query/voice (Whisper STT)`
-          : `${BACKEND_URL}/query  (mode=${mode})`,
+          : `${BACKEND_URL}/query  (mode=${resolvedMode})`,
         'in_progress'),
     });
 
@@ -172,8 +184,8 @@ export class OrcaApiService implements IAIService {
               query: prompt,
               session_id: chatId,
               device_gps: OrcaApiService.demoGps(),
-              mode,
-              agent: mode === 'agent' ? options.targetAgent : undefined,
+              mode: resolvedMode,
+              agent: resolvedMode === 'agent' ? options.targetAgent : undefined,
             }),
           });
     } catch (err: any) {
@@ -189,7 +201,9 @@ export class OrcaApiService implements IAIService {
       return '';
     }
 
-    // ---- Phase 2: real agent trace -> activity steps ------------------
+    // ---- Phase 2: real agent trace -> activity steps (emit immediately, no artificial delay) ---
+    // Activity trace is for explainability — must NOT delay the final answer.
+    // Previously this loop had sleep(60) between entries and sleep(8-18ms) per token which artificially inflated latency.
     const steps = data.trace || [];
     for (let i = 0; i < steps.length; i++) {
       const t = steps[i];
@@ -202,14 +216,42 @@ export class OrcaApiService implements IAIService {
         timestamp: Date.now(),
       };
       onChunk({ type: 'activity', activityStep: step });
-      await sleep(60); // let the UI breathe between entries
       if (abortSignal?.aborted) {
         onChunk({ type: 'error', error: 'Generation stopped by user.' });
         return '';
       }
     }
 
-    // ---- Phase 2b: round-table discussion -> activity steps ------------
+    // AUTO routing explainability — show which specialists were selected
+    if (data.routing) {
+      const agentsLabel = (data.routing.agents || []).map((a: string) => a.replace('Agent','').trim()).join(' + ') || 'auto';
+      onChunk({
+        type: 'activity',
+        activityStep: this.step(
+          `auto-routing-${Date.now()}`,
+          `Auto Router selected: ${agentsLabel}`,
+          `Reason: ${data.routing.reason || 'fast intent match'} (${data.routing.routing_mode}, ${data.routing.complexity}, conf ${(data.routing.confidence||0).toFixed(2)})`,
+          'completed',
+        ),
+      });
+    }
+
+    // Latency telemetry (if backend provided)
+    if (data.timings && typeof (data.timings as any).total_ms === 'number') {
+      const total = (data.timings as any).total_ms;
+      const breakdown = Object.entries(data.timings).filter(([k])=>k!=='total_ms').map(([k,v])=>`${k}=${v}ms`).join(', ');
+      onChunk({
+        type: 'activity',
+        activityStep: this.step(
+          `latency-${Date.now()}`,
+          `ORCA completed in ${total} ms`,
+          breakdown || undefined,
+          'completed',
+        ),
+      });
+    }
+
+    // ---- Phase 2b: round-table discussion -> activity steps (only when present; no delay) ------------
     const STANCE_ICON: Record<string, string> = {
       challenge: '\u26a1', clarify: '\u2139\ufe0f', agree: '\u2705', concede: '\ud83e\udd1d',
     };
@@ -235,14 +277,13 @@ export class OrcaApiService implements IAIService {
           ),
         });
       }
-      await sleep(60);
       if (abortSignal?.aborted) {
         onChunk({ type: 'error', error: 'Generation stopped by user.' });
         return '';
       }
     }
 
-    // ---- Phase 3: verdict callout + simulated token streaming ---------
+    // ---- Phase 3: verdict callout — render immediately (no fake per-token sleep) ---------
     const verdict = STATUS_CALLOUT[data.status || ''] ||
       `⚪ VERDICT: ${(data.status || 'info').toUpperCase()}`;
     const fullText = `> [!IMPORTANT]\n> ${verdict}\n\n${data.answer}`;
@@ -259,24 +300,26 @@ export class OrcaApiService implements IAIService {
       });
     }
 
-    const chunks = fullText.match(/(\s+|[^\s\w]+|\w+)/g) || [fullText];
-    let streamed = '';
-    for (const chunk of chunks) {
-      if (abortSignal?.aborted) break;
-      streamed += chunk;
-      onChunk({ type: 'token', content: chunk });
-      await sleep(8 + Math.random() * 10);
-    }
-
+    // Immediate rendering: emit full response as one token (no artificial streaming delay).
+    // The backend already spent time on live data + LLM; we must not add fake latency.
+    // If you want streaming, implement true SSE backend streaming, not sleep().
+    let streamed = fullText;
+    onChunk({ type: 'token', content: fullText });
+    // Propagate structured status/routing to the message model so HUD uses authoritative backend status, not text parsing fallback.
     onChunk({
       type: 'done',
+      content: fullText,
+      // @ts-ignore — extended done chunk carries structured fields for appState to set on the Message
+      status: data.status,
+      routing: data.routing,
+      timings: data.timings,
       tokens: {
         promptTokens: Math.ceil(prompt.length / 4),
         completionTokens: Math.ceil(fullText.length / 4),
-        totalTokens:
-          Math.ceil((prompt.length + fullText.length) / 4),
+        totalTokens: Math.ceil((prompt.length + fullText.length) / 4),
       },
-    });
+    } as any);
+
     if (options.speakReply) {
       OrcaApiService.speak(fullText, data.language);
     }
@@ -288,9 +331,14 @@ export class OrcaApiService implements IAIService {
     const form = new FormData();
     form.append('audio', options.voiceBlob!, 'speech.webm');
     if (options.chatId) form.append('session_id', options.chatId);
-    if (options.queryMode === 'agent' && options.targetAgent) {
+    const mode = (options.queryMode as any) || 'auto';
+    if (mode === 'agent' && options.targetAgent) {
       form.append('mode', 'agent');
       form.append('agent', options.targetAgent);
+    } else if (mode === 'panel') {
+      form.append('mode', 'panel');
+    } else {
+      form.append('mode', 'auto');
     }
     const res = await fetch(`${BACKEND_URL}/query/voice`, {
       method: 'POST',

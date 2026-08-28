@@ -28,6 +28,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+import os as _os
+
 import llm_client
 from models import (
     AgentTrace,
@@ -38,6 +40,7 @@ from models import (
 )
 
 logger = logging.getLogger("orca.trend")
+_ENABLE_LLM_NOTE = _os.getenv("ORCA_ENABLE_LLM_REASONING", "").strip().lower() in ("1", "true", "yes")
 
 _SERVER = "https://coastwatch.pfeg.noaa.gov/erddap"
 _SST_DS, _SST_VAR = "jplMURSST41mday", "sst"          # monthly mean
@@ -204,6 +207,19 @@ class TrendAgent:
 
     # ------------------------------------------------------------------
     def _note(self, t: TrendAnalysis) -> str:
+        # Deterministic interpretation first
+        interp = ""
+        if t.sst_trend_per_month > 0 and t.chl_trend_per_month < 0:
+            interp = "Warming coincides with declining chlorophyll."
+        elif t.sst_trend_per_month < 0 and t.chl_trend_per_month > 0:
+            interp = "Cooling coincides with rising chlorophyll."
+        else:
+            interp = "No clear inverse relationship this window."
+        deterministic = (f"{interp} SST {t.sst_trend_per_month:+.3f} "
+                f"C/mo, chlorophyll {t.chl_trend_per_month:+.3f} mg/m3/mo, "
+                f"r={t.sst_chl_correlation}.")
+        if not _ENABLE_LLM_NOTE:
+            return deterministic
         facts = (
             f"Location: {t.location_name}, window: {t.window_months} months.\n"
             f"- SST trend: {t.sst_trend_per_month:+.4f} degC/month\n"
@@ -223,16 +239,8 @@ class TrendAgent:
                 ),
                 user_prompt=facts + "\nWrite your interpretation.",
                 temperature=0.3,
-                max_tokens=300,
+                max_tokens=250,
+                timeout=7, attempts=1,
             )
         except llm_client.LLMUnavailableError:
-            interp = ""
-            if t.sst_trend_per_month > 0 and t.chl_trend_per_month < 0:
-                interp = "Warming coincides with declining chlorophyll."
-            elif t.sst_trend_per_month < 0 and t.chl_trend_per_month > 0:
-                interp = "Cooling coincides with rising chlorophyll."
-            else:
-                interp = "No clear inverse relationship this window."
-            return (f"[llm_unavailable] {interp} SST {t.sst_trend_per_month:+.3f} "
-                    f"C/mo, chlorophyll {t.chl_trend_per_month:+.3f} mg/m3/mo, "
-                    f"r={t.sst_chl_correlation}.")
+            return deterministic

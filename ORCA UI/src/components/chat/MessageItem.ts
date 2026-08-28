@@ -75,11 +75,35 @@ export class MessageItem {
   private parseVerdict(rawContent: string): VerdictData | null {
     if (!rawContent) return null;
 
+    // 1) PREFER structured status from backend if available (authoritative, no text inference).
+    // MessageItem is called with this.message which now carries .status; check it first.
+    const structuredStatus = (this.message as any)?.status as string | undefined;
+    if (structuredStatus) {
+      const norm = structuredStatus.trim().toUpperCase();
+      // Exact normalized matching — NEVER substring match SAFE inside UNSAFE.
+      const exactTitleAndStatus = this.statusToVerdict(norm, rawContent);
+      if (exactTitleAndStatus) return exactTitleAndStatus;
+    }
+
     // Detect verdict patterns: e.g. > [!IMPORTANT] > 🟢 **VERDICT: SAFE** — ...
     const verdictRegex = /(?:>\s*\[!IMPORTANT\]\s*\n>\s*)?(?:[🟢🟠🔴⚪ℹ️●]\s*)?\*{0,2}(?:VERDICT|Overall\s*Status):\s*(SAFE(?:\s*TO\s*SAIL)?(?:\s*\(ALL\s*CLEAR\))?|CAUTION|UNSAFE|CRITICAL|INFO)\*{0,2}(?:\s*—\s*([^\n\r]+))?/i;
     const match = rawContent.match(verdictRegex);
 
     if (!match) {
+      // Fallback: only trigger on explicit full phrase, but still avoid UNSAFE->SAFE misclass.
+      // Require that UNSAFE not appear near SAFE TO SAIL.
+      const upper = rawContent.toUpperCase();
+      const hasUnsafe = /\bUNSAFE\b/.test(upper) || /\bCRITICAL\b/.test(upper);
+      if (hasUnsafe) {
+        return {
+          status: 'critical',
+          title: '🔴 CRITICAL HAZARD · DO NOT VENTURE',
+          summary: 'Hazardous conditions detected — do not venture out.',
+          metrics: this.extractMetrics(rawContent),
+          provenance: this.extractProvenance(rawContent),
+          cleanContent: rawContent.replace(/(?:>\s*\[!IMPORTANT\]\s*\n(?:>\s*[^\n]+\n*)+)/i, '').trim() || rawContent,
+        };
+      }
       if (/SAFE\s*TO\s*SAIL/i.test(rawContent)) {
         return {
           status: 'safe',
@@ -93,19 +117,42 @@ export class MessageItem {
       return null;
     }
 
-    const matchedStr = match[1].toUpperCase();
+    // Normalize matched status: strip extra qualifiers for exact comparison
+    const rawMatched = match[1].toUpperCase().trim().replace(/\s+/g, ' ');
+    // Exact matching first — order matters: UNSAFE/CRITICAL before SAFE to avoid substring bug.
+    // "UNSAFE".includes("SAFE") === true, so we never use includes() for SAFE.
     let status: 'safe' | 'caution' | 'critical' | 'unsafe' | 'info' = 'info';
     let title = 'MISSION ADVISORY';
 
-    if (matchedStr.includes('SAFE')) {
-      status = 'safe';
-      title = '🟢 ALL CLEAR · SAFE TO SAIL';
-    } else if (matchedStr.includes('CAUTION')) {
-      status = 'caution';
-      title = '🟠 CAUTION · MARGINAL CONDITIONS';
-    } else if (matchedStr.includes('UNSAFE') || matchedStr.includes('CRITICAL')) {
+    // Use exact equality checks against normalized variants
+    const isUnsafe = rawMatched === 'UNSAFE' || rawMatched === 'CRITICAL';
+    const isCaution = rawMatched === 'CAUTION';
+    const isSafe = rawMatched === 'SAFE' || rawMatched === 'SAFE TO SAIL' || rawMatched === 'SAFE TO SAIL (ALL CLEAR)' || rawMatched === 'SAFE (ALL CLEAR)';
+
+    if (isUnsafe) {
       status = 'critical';
       title = '🔴 CRITICAL HAZARD · DO NOT VENTURE';
+    } else if (isCaution) {
+      status = 'caution';
+      title = '🟠 CAUTION · MARGINAL CONDITIONS';
+    } else if (isSafe) {
+      status = 'safe';
+      title = '🟢 ALL CLEAR · SAFE TO SAIL';
+    } else {
+      // Fallback: handle slight variants but still avoid substring SAFE-in-UNSAFE by word boundary
+      const hasUnsafeWord = /\bUNSAFE\b/.test(rawMatched) || /\bCRITICAL\b/.test(rawMatched);
+      const hasCautionWord = /\bCAUTION\b/.test(rawMatched);
+      const hasSafeWord = /\bSAFE\b/.test(rawMatched);
+      if (hasUnsafeWord) {
+        status = 'critical';
+        title = '🔴 CRITICAL HAZARD · DO NOT VENTURE';
+      } else if (hasCautionWord) {
+        status = 'caution';
+        title = '🟠 CAUTION · MARGINAL CONDITIONS';
+      } else if (hasSafeWord) {
+        status = 'safe';
+        title = '🟢 ALL CLEAR · SAFE TO SAIL';
+      }
     }
 
     const summary = match[2] ? match[2].trim() : 'Operational assessment from multi-agent ocean telemetry.';
@@ -117,6 +164,45 @@ export class MessageItem {
       status,
       title,
       summary,
+      metrics: this.extractMetrics(rawContent),
+      provenance: this.extractProvenance(rawContent),
+      cleanContent,
+    };
+  }
+
+  private statusToVerdict(normalized: string, rawContent: string): VerdictData | null {
+    // Exact matching for structured status — authoritative
+    const upper = normalized.trim().toUpperCase();
+    let status: 'safe' | 'caution' | 'critical' | 'unsafe' | 'info' = 'info';
+    let title = 'MISSION ADVISORY';
+    if (upper === 'UNSAFE' || upper === 'CRITICAL') {
+      status = 'critical';
+      title = '🔴 CRITICAL HAZARD · DO NOT VENTURE';
+    } else if (upper === 'CAUTION') {
+      status = 'caution';
+      title = '🟠 CAUTION · MARGINAL CONDITIONS';
+    } else if (upper === 'SAFE' || upper === 'SAFE TO SAIL' || upper === 'SAFE TO SAIL (ALL CLEAR)' || upper === 'SAFE_TO_SAIL') {
+      status = 'safe';
+      title = '🟢 ALL CLEAR · SAFE TO SAIL';
+    } else if (upper === 'INFO') {
+      status = 'info';
+      title = 'ℹ️ MISSION ADVISORY';
+    } else {
+      return null;
+    }
+    // For structured verdict, summary comes from first line of content or generic
+    const verdictLine = rawContent.match(/(?:VERDICT|Overall\s*Status):\s*[^\n]+/i);
+    const summary = verdictLine ? verdictLine[0].replace(/.*?:\s*/,'').replace(/\*{1,2}/g,'').trim().slice(0,160) : (
+      status === 'safe' ? 'Conditions within safe thresholds.' :
+      status === 'caution' ? 'Borderline conditions — proceed with caution.' :
+      status === 'critical' ? 'Hazardous conditions — do not venture out.' :
+      'Operational assessment.'
+    );
+    let cleanContent = rawContent.replace(/(?:>\s*\[!IMPORTANT\]\s*\n(?:>\s*[^\n]+\n*)+)/i, '').trim() || rawContent;
+    return {
+      status,
+      title,
+      summary: summary || 'Operational assessment from multi-agent ocean telemetry.',
       metrics: this.extractMetrics(rawContent),
       provenance: this.extractProvenance(rawContent),
       cleanContent,
@@ -168,13 +254,35 @@ export class MessageItem {
     const formattedTime = formatTime(this.message.timestamp);
     const modelPill = this.message.modelUsed || agent.defaultModel;
 
+    // Pure Minimalist Animation while awaiting response (no card/panel box) — friend's UI improvement, preserved
+    if ((!this.message.content || !this.message.content.trim()) && isStreaming) {
+      this.element.innerHTML = `
+        <div class="message-avatar orca-brand-avatar">
+          <img src="/favicon.svg" alt="ORCA" class="message-avatar-favicon" />
+        </div>
+
+        <div class="orca-pure-loader animate-fade-in">
+          <dotlottie-player
+            src="/loading.lottie"
+            background="transparent"
+            speed="1"
+            style="width: 38px; height: 38px;"
+            loop
+            autoplay>
+          </dotlottie-player>
+          <div class="orca-sonar-spinner" aria-hidden="true"></div>
+        </div>
+      `;
+      return;
+    }
+
     const verdictData = this.parseVerdict(this.message.content);
     const displayContent = verdictData ? verdictData.cleanContent : this.message.content;
     const renderedHtml = renderMarkdown(displayContent);
 
     this.element.innerHTML = `
-      <div class="message-avatar" style="background-color:${agent.avatarBg};color:${agent.avatarColor};">
-        ${ICONS[agent.icon] || ICONS.bot}
+      <div class="message-avatar orca-brand-avatar">
+        <img src="/favicon.svg" alt="ORCA" class="message-avatar-favicon" />
       </div>
 
       <div class="message-workspace-ai">
@@ -364,4 +472,26 @@ export class MessageItem {
       }
     });
   }
+}
+
+// Exported helpers for unit testing — exact matching logic, no substring SAFE-in-UNSAFE bug.
+export function parseVerdictForTest(rawContent: string, structuredStatus?: string): VerdictData | null {
+  const dummy = new MessageItem({
+    id: 'test',
+    chatId: 'test',
+    role: 'assistant',
+    content: rawContent,
+    timestamp: Date.now(),
+    status: structuredStatus as any,
+  } as any);
+  // Use the instance's parseVerdict via private access (type-cast)
+  return (dummy as any).parseVerdict(rawContent) as VerdictData | null;
+}
+
+export function verdictStatusFromStructured(status: string): 'safe' | 'caution' | 'critical' | 'info' {
+  const u = status.trim().toUpperCase();
+  if (u === 'UNSAFE' || u === 'CRITICAL') return 'critical';
+  if (u === 'CAUTION') return 'caution';
+  if (u === 'SAFE' || u === 'SAFE TO SAIL' || u === 'SAFE TO SAIL (ALL CLEAR)') return 'safe';
+  return 'info';
 }

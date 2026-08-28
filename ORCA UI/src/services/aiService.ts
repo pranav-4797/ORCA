@@ -6,6 +6,9 @@ export interface StreamChunk {
   content?: string;
   activityStep?: AgentActivityStep;
   error?: string;
+  status?: 'SAFE' | 'CAUTION' | 'UNSAFE' | 'CRITICAL' | 'INFO';
+  routing?: { intent: string; agents: string[]; routing_mode: string; complexity: string; reason: string; confidence: number };
+  timings?: Record<string, number>;
   tokens?: {
     promptTokens: number;
     completionTokens: number;
@@ -20,8 +23,8 @@ export interface SendMessageOptions {
   model: string;
   temperature?: number;
   attachments?: Attachment[];
-  /** 'panel' = all agents discuss (default); 'agent' = one specialist directly. */
-  queryMode?: 'panel' | 'agent';
+  /** 'auto' = ORCA picks best specialist(s) (default), 'panel' = full deliberation demo, 'agent' = one specialist directly. */
+  queryMode?: 'auto' | 'panel' | 'agent';
   /** Specialist key for queryMode='agent' (see backend GET /agents). */
   targetAgent?: string;
   /** When set, the prompt is carried as mic audio -> /query/voice (STT). */

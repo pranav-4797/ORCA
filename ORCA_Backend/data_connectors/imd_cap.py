@@ -205,7 +205,8 @@ def _parse_cap_alert(xml_bytes: bytes) -> dict | None:
 
 _alerts_cache: list[dict] | None = None
 _alerts_cache_time: float = 0.0
-_ALERTS_CACHE_TTL_S = 60.0
+import os as _os
+_ALERTS_CACHE_TTL_S = float(_os.getenv("ORCA_HAZARD_TTL_S", "60").strip() or 60)
 
 
 def fetch_active_alerts() -> list[dict]:

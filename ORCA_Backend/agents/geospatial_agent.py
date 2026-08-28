@@ -35,6 +35,7 @@ from models import (
     RestrictedZoneHit,
     RoutePlan,
 )
+_ENABLE_LLM_NOTE = os.getenv("ORCA_ENABLE_LLM_REASONING", "").strip().lower() in ("1", "true", "yes")
 
 logger = logging.getLogger("orca.geospatial")
 
@@ -463,6 +464,12 @@ class GeospatialAgent:
             )
             if gf.hits else "none within buffer"
         )
+        # Deterministic note by default
+        base = f"Nearest restricted boundary {gf.nearest_boundary_km} km; flags: {hits_text}. Boundary data is static/simplified treaty lines."
+        if route:
+            base += f" Route {route.estimated_distance_km} km via {len(route.waypoints)} waypoints avoiding {', '.join(route.avoided_zones) or 'nothing'}."
+        if not _ENABLE_LLM_NOTE:
+            return base
         route_text = (
             f"\nRoute planned: {route.estimated_distance_km} km via "
             f"{len(route.waypoints)} waypoints; avoiding: "
@@ -482,9 +489,7 @@ class GeospatialAgent:
             f"Flags: {hits_text}.{route_text}\n\nWrite your note."
         )
         try:
-            return llm_client.complete(system_prompt, user_prompt, temperature=0.4, max_tokens=400)
+            return llm_client.complete(system_prompt, user_prompt, temperature=0.4, max_tokens=250,
+                                       timeout=7, attempts=1)
         except llm_client.LLMUnavailableError:
-            base = f"[llm_unavailable] Nearest restricted boundary {gf.nearest_boundary_km} km; flags: {hits_text}."
-            if route:
-                base += f" Route {route.estimated_distance_km} km avoiding {len(route.avoided_zones)} zone(s)."
             return base

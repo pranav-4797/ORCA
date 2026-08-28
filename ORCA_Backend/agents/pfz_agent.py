@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import time
 import urllib.parse
 import urllib.request
@@ -39,6 +40,7 @@ from models import (
     OceanStateReading,
     PFZRecommendation,
 )
+_ENABLE_LLM_NOTE = os.getenv("ORCA_ENABLE_LLM_REASONING", "").strip().lower() in ("1", "true", "yes")
 
 USE_LIVE_BHUVAN_PFZ = False  # enable after verifying Bhuvan WMS endpoint/auth
 
@@ -50,6 +52,10 @@ _HTTP_TIMEOUT_S = 10.0
 
 # Front-sampling geometry: rings around the reference point (km).
 _SAMPLE_RINGS_KM = [12.0, 25.0, 40.0]
+
+# PFZ calculation cache (expensive ring sampling) — short TTL, env-overridable
+_PFZ_TTL_S = int(os.getenv("ORCA_PFZ_TTL_S", "120").strip() or 120)
+_pfz_cache: dict[tuple, tuple[float, "PFZRecommendation"]] = {}
 
 # Compass bearings -> plain words, so notes read naturally.
 _BEARS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
@@ -69,6 +75,21 @@ class PFZAgent:
         time_window: str = "today",
     ) -> tuple[PFZRecommendation, AgentTrace]:
         start = time.perf_counter()
+
+        # Check PFZ cache (same location + time_window within TTL)
+        cache_key = (location.name, round(location.lat, 3), round(location.lon, 3), time_window)
+        hit = _pfz_cache.get(cache_key)
+        if hit is not None and time.monotonic() - hit[0] < _PFZ_TTL_S:
+            pfz = hit[1]
+            trace = AgentTrace(
+                agent_name=self.name,
+                action=f"Located nearest potential fishing zone for {location.name}",
+                result_summary=f"CACHED ({_PFZ_TTL_S//60} min TTL): {pfz.distance_from_reference_km:.1f} km {_bearing_word(pfz.bearing_deg)} of {location.name}",
+                data_sources=[pfz.source],
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            pfz.reasoning_note = self._generate_reasoning_note(pfz)
+            return pfz, trace
 
         degraded_reason: str | None = None
         if USE_LIVE_BHUVAN_PFZ:
@@ -103,6 +124,9 @@ class PFZAgent:
             data_sources=[pfz.source],
             duration_ms=duration_ms,
         )
+        # Cache only live-derived zones (simulated fallback already tagged)
+        if pfz.source != DataSource.SIMULATED:
+            _pfz_cache[cache_key] = (time.monotonic(), pfz)
         return pfz, trace
 
     # ------------------------------------------------------------------
@@ -337,9 +361,20 @@ class PFZAgent:
         return dist, (math.degrees(math.atan2(y, x)) + 360) % 360
 
     # ------------------------------------------------------------------
-    # LLM note: report to the Synthesis Agent like a colleague would.
+    # Deterministic note by default — no LLM needed for distance/bearing facts.
     # ------------------------------------------------------------------
     def _generate_reasoning_note(self, pfz: PFZRecommendation) -> str:
+        kind = "derived from live SST field" \
+            if pfz.source == DataSource.DERIVED_LIVE else "simulated"
+        deterministic = (
+            f"{kind.capitalize()} zone {pfz.distance_from_reference_km} km away at "
+            f"{pfz.bearing_deg:.1f}° bearing; "
+            f"SST {pfz.sst_at_zone_celsius} °C, chlorophyll "
+            f"{pfz.chlorophyll_at_zone_mg_m3} mg/m³."
+            + (" Derived from live satellite-model SST thermal front, not an official INCOIS/Bhuvan advisory." if pfz.source == DataSource.DERIVED_LIVE else "")
+        )
+        if not _ENABLE_LLM_NOTE:
+            return deterministic
         sources = ", ".join(f"{k.replace('_', ' ')} = {v}" for k, v in sorted(pfz.field_sources.items()))
         system_prompt = (
             "You are the PFZ Agent in a marine multi-agent system. You just located "
@@ -361,13 +396,7 @@ class PFZAgent:
             "Write your note."
         )
         try:
-            return llm_client.complete(system_prompt, user_prompt, temperature=0.4, max_tokens=400)
+            return llm_client.complete(system_prompt, user_prompt, temperature=0.4, max_tokens=250,
+                                       timeout=7, attempts=1)
         except llm_client.LLMUnavailableError:
-            kind = "derived from live SST field" \
-                if pfz.source == DataSource.DERIVED_LIVE else "simulated"
-            return (
-                f"[llm_unavailable] {kind.capitalize()} zone "
-                f"{pfz.distance_from_reference_km} km away; "
-                f"SST {pfz.sst_at_zone_celsius} C, chlorophyll "
-                f"{pfz.chlorophyll_at_zone_mg_m3} mg/m3."
-            )
+            return deterministic

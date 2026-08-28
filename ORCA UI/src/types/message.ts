@@ -33,4 +33,13 @@ export interface Message {
     completionTokens?: number;
     totalTokens?: number;
   };
+  /** Structured safety verdict from backend (authoritative). Takes priority over text parsing. */
+  status?: 'SAFE' | 'CAUTION' | 'UNSAFE' | 'CRITICAL' | 'INFO';
+  /** Auto-routing explainability (which agents were selected and why). */
+  autoRouting?: {
+    intent: string;
+    agents: string[];
+    routing_mode: string;
+    reason: string;
+  };
 }

@@ -2,12 +2,20 @@ import { PROMPT_STARTERS } from '../../data/promptStarters';
 import { store } from '../../store/appState';
 import { ICONS } from '../../utils/icons';
 
+/**
+ * EmptyState — landing/demo state shown ONLY when no live query has been executed.
+ * This is static placeholder telemetry for visual design, NOT live safety data.
+ * Live query verdict MUST come from backend message.status / MessageItem HUD.
+ * Never reuse this static "ALL CLEAR" as the answer for a real query.
+ */
 export class EmptyState {
   private element: HTMLElement;
 
   constructor() {
     this.element = document.createElement('div');
     this.element.className = 'orca-workspace-hero animate-fade-in';
+    this.element.setAttribute('data-demo-state', 'true');
+    this.element.setAttribute('aria-label', 'Demo empty state — not live telemetry');
     this.render();
   }
 
@@ -31,14 +39,14 @@ export class EmptyState {
         </div>
       </div>
 
-      <!-- Primary Operational Indicators (from DESIGN.md & code (7).html) -->
-      <div class="operational-telemetry-grid">
-        <!-- Safety Status Card -->
-        <div class="telemetry-card">
+      <!-- DEMO ONLY — static placeholder, never used as live query result -->
+      <div class="operational-telemetry-grid" data-demo-telemetry="true" title="Demo placeholder — live verdict appears after you ask a question">
+        <!-- Safety Status Card (DEMO) -->
+        <div class="telemetry-card" data-demo-card="safety">
           <div class="telemetry-card-header">
             <div class="telemetry-title">
               <span class="card-icon">${ICONS.shield}</span>
-              <span class="label-caps">SAFETY STATUS</span>
+              <span class="label-caps">SAFETY STATUS — DEMO</span>
             </div>
             <div class="status-pill safe">
               <span class="dot"></span>

@@ -93,15 +93,16 @@ class QueryRequest(BaseModel):
     # Optional live inputs from the client's own device (Tier 1 data).
     device_gps: list[float] | None = None            # [lat, lon]
     destination: dict | None = None                  # {"lat": .., "lon": .., "name": optional}
-    # "panel"  -> full pipeline: specialists run, hold a round-table
-    #             discussion, then reconcile (default).
-    # "agent"  -> one specialist answers directly (see GET /agents), no
-    #             discussion round.
-    mode: str = "panel"
+    # "auto"  -> fast intelligent routing, only needed specialists, no round-table unless complex (default).
+    # "panel" -> full pipeline: specialists run, hold a round-table discussion, then reconcile (demo).
+    # "agent" -> one specialist answers directly (see GET /agents), no discussion round.
+    mode: str = "auto"
     agent: str | None = None                         # specialist key for mode="agent"
     # Vessel class selects the safety-threshold envelope (hazard agent):
     # small_fishing_boat (default) | mechanized_trawler | coastal_cargo
     vessel_class: str | None = None
+    # Query depth policy for auto mode: auto | fast | standard | deep (overrides ORCA_QUERY_DEPTH)
+    query_depth: str | None = None
 
 
 class RegisterRequest(BaseModel):
@@ -129,11 +130,16 @@ async def health():
 
 @app.get("/agents")
 def agents_registry():
-    """Addressable specialists for mode='agent' queries."""
+    """Addressable specialists for mode='agent' queries. Also describes auto/panel semantics."""
     from orchestrator import SPECIALIST_REGISTRY
 
     return {
-        "default_mode": "panel",
+        "default_mode": "auto",
+        "modes": {
+            "auto": "Fast intelligent routing — ORCA picks needed specialists, skips round-table unless complex",
+            "panel": "Full multi-agent deliberation — discussion + synthesis (demo/deep analysis)",
+            "agent": "One specialist answers directly, no discussion",
+        },
         "agents": [
             {
                 "key": key,
@@ -166,10 +172,13 @@ def query(request: QueryRequest):
 
     # Short-TTL cache of identical repeat requests (UI retries / double
     # taps): same query+params within the TTL returns the stored payload.
+    # TTL from env ORCA_RESPONSE_CACHE_TTL_S (default 60s for live safety, shorter than session).
+    import os as _os
+    _ttl = int(_os.getenv("ORCA_RESPONSE_CACHE_TTL_S", "60").strip() or 60)
     cache_key_src = "|".join([
         request.query.strip().lower(), request.mode, request.agent or "",
         request.vessel_class or "", str(device_gps), str(destination),
-        session_id,
+        session_id, request.query_depth or "",
     ])
     cache_key = hashlib.sha256(cache_key_src.encode()).hexdigest()
     cached = storage.response_cache.get(cache_key)
@@ -184,12 +193,13 @@ def query(request: QueryRequest):
         mode=request.mode,
         target_agent=request.agent,
         vessel_class=request.vessel_class,
+        query_depth=request.query_depth,
     )
     _last_responses[session_id] = response
     payload = _serialize(response)
     if isinstance(payload, dict):
         payload["session_id"] = session_id
-        storage.response_cache.set(cache_key, payload, ttl_s=120)
+        storage.response_cache.set(cache_key, payload, ttl_s=_ttl)
     return payload
 
 

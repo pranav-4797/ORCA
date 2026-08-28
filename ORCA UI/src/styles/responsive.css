@@ -66,7 +66,7 @@
 }
 
 /* =========================================================================
-   MOBILE LAYOUT (320px - 767px) - TOUCH OPTIMIZED & COMFORTABLE
+   MOBILE LAYOUT (320px - 767px) - TOUCH OPTIMIZED, CLEAN & UNCLUTTERED
    ========================================================================= */
 @media (max-width: 767px) {
   /* Full height with dynamic viewport height support for mobile browsers */
@@ -81,7 +81,7 @@
     top: 0;
     left: 0;
     bottom: 0;
-    width: 290px;
+    width: 280px;
     max-width: 85vw;
     box-shadow: 4px 0 24px rgba(11, 34, 57, 0.25);
     transform: translateX(-100%);
@@ -101,65 +101,75 @@
     max-width: 100vw;
   }
 
-  /* Header adjustments on mobile */
+  /* Header uncluttering on mobile */
   .top-header {
-    height: 52px;
-    padding: 0 10px;
-    gap: 6px;
+    height: 48px;
+    padding: 0 8px;
+    gap: 4px;
   }
 
   .orca-brand-title {
-    font-size: 16px;
+    font-size: 15px;
+    font-weight: 700;
   }
 
-  .orca-region-label {
-    font-size: 11px;
-  }
-
-  .header-active-brief-title {
-    display: none; /* Hide in compact header to keep clean */
+  .orca-region-divider,
+  .orca-region-label,
+  .header-active-brief-title,
+  .btn-share {
+    display: none !important; /* Remove non-essential items on small screens */
   }
 
   .orca-status-chip {
-    padding: 2px 7px;
-    font-size: 10px;
+    padding: 1px 6px;
+    font-size: 9.5px;
+    gap: 4px;
+  }
+
+  .btn-header-login {
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    height: 28px !important;
   }
 
   .officer-avatar {
-    width: 28px;
-    height: 28px;
-    font-size: 11px;
+    width: 26px;
+    height: 26px;
+    font-size: 10px;
   }
 
   .icon-btn {
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
+    padding: 4px;
   }
 
   /* Chat viewport on mobile */
   .chat-scroll-container {
-    padding: 10px 10px 0;
+    padding: 6px 8px 0;
   }
 
   .chat-content-inner {
-    gap: 14px;
-    padding-bottom: 12px;
+    gap: 10px;
+    padding-bottom: 8px;
   }
 
-  /* Hero Navigation Prompt & Pills */
+  /* Hero Navigation Prompt & Pills on Mobile */
   .orca-workspace-hero {
-    padding: 16px 0 8px;
-    gap: 16px;
+    padding: 10px 0 4px;
+    gap: 10px;
   }
 
   .hero-main-title {
-    font-size: 20px;
-    line-height: 1.3;
-    padding: 0 8px;
+    font-size: 16px;
+    line-height: 1.25;
+    padding: 0 4px;
+    margin-bottom: 6px;
   }
 
   .quick-inquiry-pills {
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
     width: 100%;
     gap: 6px;
   }
@@ -167,98 +177,182 @@
   .inquiry-pill-btn {
     width: 100%;
     justify-content: flex-start;
-    padding: 10px 14px;
-    font-size: 12.5px;
+    padding: 7px 10px;
+    font-size: 11.5px;
     border-radius: var(--radius-sm);
+    gap: 6px;
   }
 
-  /* Operational Indicators stack vertically on mobile */
+  .inquiry-pill-btn .pill-icon {
+    font-size: 13px;
+  }
+
+  /* Telemetry Indicators on Mobile: Compact Swipeable Row */
   .operational-telemetry-grid {
-    grid-template-columns: 1fr;
-    gap: 10px;
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 8px;
+    padding-bottom: 4px;
+    width: 100%;
+  }
+
+  .operational-telemetry-grid::-webkit-scrollbar {
+    display: none;
   }
 
   .telemetry-card {
-    padding: 12px 14px;
+    min-width: 220px;
+    flex: 0 0 75%;
+    scroll-snap-align: start;
+    padding: 10px 12px;
+    gap: 4px;
   }
 
   .telemetry-main-val {
-    font-size: 18px;
+    font-size: 16px;
+  }
+
+  .telemetry-meta {
+    font-size: 11px;
+    line-height: 1.3;
   }
 
   /* Messages & Documents on mobile */
   .message-wrapper {
-    gap: 8px;
+    gap: 6px;
   }
 
   .message-avatar {
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+    margin-top: 1px;
   }
 
   .message-bubble-user {
     max-width: 90%;
-    padding: 10px 12px;
-    font-size: 13.5px;
+    padding: 8px 12px;
+    font-size: 13px;
   }
 
   .message-workspace-ai {
-    padding: 12px 14px;
-    font-size: 13.5px;
+    padding: 10px 12px;
+    font-size: 13px;
     border-radius: var(--radius-sm);
+    gap: 8px;
   }
 
   .message-meta-header {
-    font-size: 11px;
-    padding-bottom: 6px;
+    font-size: 10.5px;
+    padding-bottom: 4px;
   }
 
   .message-sender-name {
-    font-size: 12.5px;
-  }
-
-  .code-block-pre {
-    padding: 10px 12px;
-    font-size: 11.5px;
-  }
-
-  .table-wrapper {
-    margin: 8px 0;
-  }
-
-  .md-table th, .md-table td {
-    padding: 6px 8px;
     font-size: 12px;
+    gap: 4px;
   }
 
-  /* Pinned Bottom Composer on Mobile */
-  .composer-outer-container {
-    padding: 0 8px 8px;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  .message-model-pill {
+    font-size: 9.5px;
+    padding: 1px 5px;
   }
 
-  .composer-box {
-    border-radius: var(--radius-md);
+  .verdict-hud-card {
+    padding: 10px 12px;
+    gap: 6px;
   }
 
-  .composer-textarea {
-    font-size: 13.5px;
-    min-height: 38px;
-    padding: 4px 6px;
+  .verdict-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
   }
 
-  .composer-toolbar {
+  .verdict-metric-item {
     padding: 4px 8px;
   }
 
-  .pill-selector {
-    padding: 2px 6px;
+  .verdict-metric-item .metric-label {
+    font-size: 9.5px;
+  }
+
+  .verdict-metric-item .metric-val {
+    font-size: 12px;
+  }
+
+  .message-actions-toolbar {
+    margin-top: 4px;
+    gap: 4px;
+  }
+
+  .msg-action-btn {
+    padding: 3px 6px;
+    font-size: 10.5px;
+  }
+
+  /* Clean Uncluttered Pinned Bottom Composer on Mobile */
+  .composer-outer-container {
+    padding: 0 6px 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .fisherman-deck-scroll {
+    gap: 4px;
+    padding: 2px 0 4px;
+    margin-bottom: 2px;
+  }
+
+  .fisherman-quick-chip {
+    padding: 3px 8px;
+    font-size: 10.5px;
+    border-radius: 12px;
+    gap: 4px;
+  }
+
+  .fisherman-quick-chip .chip-icon {
     font-size: 11px;
   }
 
+  .composer-box {
+    border-radius: var(--radius-sm);
+    padding: 4px 6px;
+  }
+
+  .composer-textarea {
+    font-size: 13px;
+    min-height: 32px;
+    max-height: 90px;
+    padding: 2px 4px;
+  }
+
+  .composer-toolbar {
+    padding: 2px 2px 0;
+    gap: 4px;
+  }
+
+  .pill-selector {
+    padding: 2px 5px;
+    font-size: 10px;
+    max-width: 110px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .btn-send-message, .btn-stop-message {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
+  }
+
+  .btn-send-message svg, .btn-stop-message svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .btn-voice-record {
+    width: 28px;
+    height: 28px;
   }
 
   /* Right Inspector Panel Drawer */
@@ -267,7 +361,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: 310px;
+    width: 290px;
     max-width: 88vw;
     box-shadow: -4px 0 24px rgba(11, 34, 57, 0.25);
     transform: translateX(100%);
@@ -289,14 +383,18 @@
 /* Extra Small Screens (<= 360px) */
 @media (max-width: 360px) {
   .top-header {
-    padding: 0 6px;
-  }
-
-  .orca-region-divider, .orca-region-label {
-    display: none;
+    padding: 0 4px;
   }
 
   .hero-main-title {
-    font-size: 18px;
+    font-size: 14.5px;
+  }
+
+  .quick-inquiry-pills {
+    grid-template-columns: 1fr;
+  }
+
+  .pill-selector {
+    max-width: 85px;
   }
 }

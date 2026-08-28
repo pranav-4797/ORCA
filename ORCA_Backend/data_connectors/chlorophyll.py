@@ -115,10 +115,8 @@ def fetch_chlorophyll(lat: float, lon: float) -> dict:
         try:
             # The snapped cell can legitimately hold no data (land mask /
             # unreconstructed coastal cell). Retry a small cross of nearby
-            # wet cells before giving up on this source.
-            for dlat, dlon in [(0.0, 0.0), (0.15, 0.0), (-0.15, 0.0),
-                               (0.0, 0.15), (0.0, -0.15),
-                               (0.15, 0.15), (-0.15, -0.15)]:
+            # wet cells before giving up on this source. Reduced to 3 offsets for latency (was 7).
+            for dlat, dlon in [(0.0, 0.0), (0.15, 0.0), (-0.15, 0.0)]:
                 try:
                     value, url = _fetch_pixel(
                         server, dataset, lat + dlat, lon + dlon

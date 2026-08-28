@@ -50,10 +50,10 @@ export class AgentPanel {
         <!-- Operational picture: live map + hourly series for the last answer -->
         <div id="map-container"></div>
 
-        <!-- Live AIS Vessel Telemetry Widget -->
-        <div class="orca-telemetry-widget">
+        <!-- Live AIS Vessel Telemetry Widget — STATIC DEMO placeholders, not live query state -->
+        <div class="orca-telemetry-widget" data-demo-widget="ais-telemetry" title="Static demo telemetry — live ocean state appears in message HUD after query">
           <div class="widget-section-header">
-            <span class="label-caps">LIVE AIS TELEMETRY</span>
+            <span class="label-caps">LIVE AIS TELEMETRY — DEMO</span>
             <span class="status-pill safe">
               <span class="dot"></span>
               <span class="data-mono-bold">ACTIVE</span>
@@ -88,11 +88,11 @@ export class AgentPanel {
           </div>
         </div>
 
-        <!-- Environmental & Oceanographic Sensor Ingestion -->
-        <div class="orca-telemetry-widget">
+        <!-- Environmental & Oceanographic Sensor Ingestion — STATIC DEMO -->
+        <div class="orca-telemetry-widget" data-demo-widget="ocean-sensors" title="Static demo — see message verdict for live data">
           <div class="widget-section-header">
-            <span class="label-caps">INCOIS / IMD OCEAN SENSORS</span>
-            <span class="data-mono-sm" style="color:var(--text-tertiary);">UPDATED 2M AGO</span>
+            <span class="label-caps">INCOIS / IMD OCEAN SENSORS — DEMO</span>
+            <span class="data-mono-sm" style="color:var(--text-tertiary);">STATIC DEMO</span>
           </div>
 
           <div class="telemetry-data-grid">

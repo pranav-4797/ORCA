@@ -194,8 +194,13 @@ class ResponseAgent:
             + debate_block
             + "\n\nWrite the final answer now."
         )
+        # Optimized: concise answers need few tokens; fast timeout with no retry for latency
+        import os
+        max_tok = int(os.getenv("LLM_MAX_TOKENS_RESPONSE", "350").strip() or 350)
+        timeout = float(os.getenv("LLM_TIMEOUT_FAST_S", "7").strip() or 7)
         return llm_client.complete(
-            system_prompt, user_prompt, temperature=0.4, max_tokens=700
+            system_prompt, user_prompt, temperature=0.4, max_tokens=max_tok,
+            timeout=timeout, attempts=1
         )
 
     # ------------------------------------------------------------------

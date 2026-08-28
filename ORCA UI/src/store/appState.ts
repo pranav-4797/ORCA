@@ -69,9 +69,10 @@ class AppStore {
   public mapPanelOpen: boolean = true;
   public activityPanelOpen: boolean = false;
 
-  // Query routing: 'panel' = all specialists discuss then reconcile;
+  // Query routing: 'auto' = ORCA picks best specialist(s) (default, fast);
+  // 'panel' = all specialists discuss then reconcile (demo/deep);
   // 'agent' = one named specialist answers directly (no discussion).
-  public queryMode: 'panel' | 'agent' = 'panel';
+  public queryMode: 'auto' | 'panel' | 'agent' = 'auto';
   public directAgentKey: string = '';
   public backendAgents: OrcaSpecialist[] = [
     {
@@ -143,40 +144,38 @@ class AppStore {
         try {
           const remoteData = await loadUserSessionsFromFirestore(user.uid);
           if (remoteData && remoteData.chats.length > 0) {
-            // Merge remote chats with any local chats created while offline/guest
-            const remoteIds = new Set(remoteData.chats.map(c => c.id));
-            const localUnsynced = this.chats.filter(c => !remoteIds.has(c.id));
-
-            this.chats = [...remoteData.chats, ...localUnsynced];
-            this.messages = { ...this.messages, ...remoteData.messages };
-
-            // Upload any localUnsynced guest chats to the cloud
-            for (const chat of localUnsynced) {
-              void saveUserChatToFirestore(user.uid, chat);
-              const msgs = this.messages[chat.id] || [];
-              for (const msg of msgs) {
-                void saveUserMessageToFirestore(user.uid, chat.id, msg);
-              }
-            }
+            this.chats = remoteData.chats;
+            this.messages = remoteData.messages;
 
             if (!this.activeChatId || !this.chats.some(c => c.id === this.activeChatId)) {
               this.activeChatId = this.chats[0].id;
             }
             this.notify();
-            showToast(`Synced ${this.chats.length} mission sessions from cloud`, 'info');
+            showToast(`Loaded ${this.chats.length} chat sessions from Firestore`, 'success');
           } else {
-            // New user or no remote sessions: sync current local/guest chats to Firestore
-            for (const chat of this.chats) {
-              void saveUserChatToFirestore(user.uid, chat);
-              const msgs = this.messages[chat.id] || [];
-              for (const msg of msgs) {
-                void saveUserMessageToFirestore(user.uid, chat.id, msg);
-              }
-            }
+            // First time login: create clean session in cloud
+            const initialChat: Chat = {
+              id: generateId('chat'),
+              title: 'Mission Briefing',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              agentId: 'orca-nav',
+              model: 'llama-3.3-70b-versatile',
+              messageCount: 0,
+              pinned: false,
+            };
+            this.chats = [initialChat];
+            this.messages = { [initialChat.id]: [] };
+            this.activeChatId = initialChat.id;
+            void saveUserChatToFirestore(user.uid, initialChat);
+            this.notify();
           }
         } catch (e) {
           console.warn('[Firestore] Sync initialization error:', e);
         }
+      } else {
+        // Not logged in (Guest/Demo): strictly local memory/temporary storage, never in Firestore
+        this.loadFromStorage();
       }
       this.notify();
     });
@@ -200,9 +199,13 @@ class AppStore {
     try {
       await logoutUser();
       this.currentUser = null;
-      this.loadFromStorage();
+      this.chats = [...INITIAL_CHATS];
+      this.messages = { ...INITIAL_MESSAGES };
+      this.activeChatId = this.chats[0]?.id || null;
+      localStorage.removeItem('ai_workspace_chats');
+      localStorage.removeItem('ai_workspace_messages');
       this.notify();
-      showToast('Signed out of ORCA workstation. Local storage active.', 'info');
+      showToast('Signed out. Switched to guest mode.', 'info');
     } catch (err: any) {
       console.error('Sign Out Error:', err);
       showToast('Error during sign out.', 'error');
@@ -276,10 +279,23 @@ class AppStore {
       const spec = this.backendAgents.find(a => a.key === this.directAgentKey);
       return spec ? spec.name : 'Direct agent';
     }
+    if (this.queryMode === 'auto') {
+      return 'AUTO SELECT';
+    }
     return 'ORCA Panel';
   }
 
-  public setQueryMode(mode: 'panel' | 'agent'): void {
+  public getAutoRoutingLabel(): string | null {
+    if (this.queryMode !== 'auto' || !this.activeChatId) return null;
+    const msgs = this.messages[this.activeChatId] || [];
+    const last = [...msgs].reverse().find(m => m.role === 'assistant' && (m as any).autoRouting);
+    const routing: any = (last as any)?.autoRouting;
+    if (!routing) return null;
+    const agents = (routing.agents || []).map((a: string) => a.replace('Agent','').trim()).join(' + ');
+    return agents ? `AUTO → ${agents}` : null;
+  }
+
+  public setQueryMode(mode: 'auto' | 'panel' | 'agent'): void {
     this.queryMode = mode;
     this.notify();
   }
@@ -536,6 +552,10 @@ class AppStore {
     const chat = this.chats.find(c => c.id === chatId);
     if (chat) {
       chat.pinned = !chat.pinned;
+      chat.updatedAt = Date.now();
+      if (this.currentUser) {
+        void saveUserChatToFirestore(this.currentUser.uid, chat);
+      }
       this.notify();
     }
   }
@@ -577,6 +597,19 @@ class AppStore {
     this.notify();
   }
 
+  public getGuestUserMessageCount(): number {
+    let count = 0;
+    for (const msgs of Object.values(this.messages)) {
+      count += msgs.filter(m => m.role === 'user').length;
+    }
+    return count;
+  }
+
+  public isGuestLimitReached(): boolean {
+    if (this.currentUser) return false;
+    return this.getGuestUserMessageCount() >= 3;
+  }
+
   // Messaging & Simulated Streaming
   public async sendMessage(
     prompt: string,
@@ -585,6 +618,13 @@ class AppStore {
   ): Promise<void> {
     if (!prompt.trim() && attachments.length === 0 && !voice) return;
     if (this.isStreaming) return;
+
+    // Enforce Mandatory Google Sign-In after 3 guest messages
+    if (!this.currentUser && this.isGuestLimitReached()) {
+      this.toggleAuthModal(true);
+      showToast('Guest limit reached (3/3 free queries). Please sign in with Google to continue.', 'error');
+      return;
+    }
 
     let chatId = this.activeChatId;
     let isNew = false;
@@ -602,7 +642,7 @@ class AppStore {
       id: generateId('msg-user'),
       chatId,
       role: 'user',
-      content: prompt.trim() || '\ud83c\udf99\ufe0f *voice message*',
+      content: prompt.trim() || '🎙️ *voice message*',
       timestamp: Date.now(),
       attachments: attachments.length > 0 ? attachments : undefined
     };
@@ -631,6 +671,8 @@ class AppStore {
     const answeringPath =
       this.queryMode === 'agent'
         ? `${this.getQueryModeLabel()} (direct)`
+        : this.queryMode === 'auto'
+        ? 'AUTO SELECT — ORCA picks best specialist(s)'
         : 'ORCA Panel — agents discussed';
     const assistantMsg: Message = {
       id: assistantMsgId,
@@ -700,13 +742,41 @@ class AppStore {
             assistantMsg.activitySteps = [...this.executionState.steps];
             this.notify();
           } else if (chunk.type === 'token' && chunk.content) {
-            assistantMsg.content += chunk.content;
+            // Immediate rendering path sends full answer as one token; avoid += duplication if already full
+            if (chunk.content.length > 200 && assistantMsg.content.length === 0) {
+              assistantMsg.content = chunk.content;
+            } else {
+              assistantMsg.content += chunk.content;
+            }
             this.executionState.state = 'executing';
             this.executionState.currentAction = 'Generating structured response...';
             this.notify();
           } else if (chunk.type === 'done') {
             assistantMsg.isStreaming = false;
             assistantMsg.tokens = chunk.tokens;
+            // Structured status takes priority for HUD (fixes UNSAFE→SAFE bug) — merged with guest limit
+            if ((chunk as any).status) {
+              (assistantMsg as any).status = (chunk as any).status;
+            } else if ((chunk as any).content) {
+              if (!assistantMsg.content) assistantMsg.content = (chunk as any).content;
+            }
+            if ((chunk as any).routing) {
+              (assistantMsg as any).autoRouting = (chunk as any).routing;
+              const agents = ((chunk as any).routing.agents || []).map((a: string) => a.replace('Agent','').trim()).join(' + ');
+              if (agents && this.queryMode === 'auto') {
+                assistantMsg.modelUsed = `AUTO SELECT → ${agents}`;
+              }
+            }
+            if ((chunk as any).timings) {
+              const total = (chunk as any).timings.total_ms;
+              if (total) {
+                assistantMsg.modelUsed = `${assistantMsg.modelUsed} · ${total}ms`;
+              }
+            }
+            if (!(chunk as any).content && assistantMsg.content) {
+            } else if ((chunk as any).content && !assistantMsg.content) {
+              assistantMsg.content = (chunk as any).content;
+            }
             this.executionState.state = 'completed';
             this.executionState.currentAction = 'Completed response';
             this.executionState.finishedAt = Date.now();
@@ -716,12 +786,14 @@ class AppStore {
               void saveUserChatToFirestore(this.currentUser.uid, currentChat);
               void saveUserMessageToFirestore(this.currentUser.uid, chatId, assistantMsg);
             } else {
-              // User is not logged in: pop up login screen after their first chat
-              setTimeout(() => {
-                if (!this.currentUser) {
-                  this.toggleAuthModal(true);
-                }
-              }, 1200);
+              // Check if guest limit is reached after this 3rd message
+              if (this.isGuestLimitReached()) {
+                setTimeout(() => {
+                  if (!this.currentUser) {
+                    this.toggleAuthModal(true);
+                  }
+                }, 1000);
+              }
             }
             void this.loadViz(chatId); // refresh map + charts for this answer
           } else if (chunk.type === 'error') {
@@ -796,6 +868,9 @@ class AppStore {
       } else {
         msg.reactions = { type: reaction };
       }
+      if (this.currentUser) {
+        void saveUserMessageToFirestore(this.currentUser.uid, this.activeChatId, msg);
+      }
       this.notify();
     }
   }
@@ -812,6 +887,10 @@ class AppStore {
 
     msg.content = newContent;
     msg.isEdited = true;
+
+    if (this.currentUser) {
+      void saveUserMessageToFirestore(this.currentUser.uid, this.activeChatId, msg);
+    }
 
     // If it's a user message, truncate everything after and re-generate
     if (msg.role === 'user') {

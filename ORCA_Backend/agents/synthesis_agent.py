@@ -242,7 +242,9 @@ class SynthesisAgent:
                 "required": ["verdict", "confidence", "conflicts_resolved", "conflicts", "key_points"],
             },
             temperature=0.2,
-            max_tokens=700,
+            max_tokens=500,
+            timeout=7,
+            attempts=1,
         )
         return {
             "verdict": str(args.get("verdict", "CAUTION")),
