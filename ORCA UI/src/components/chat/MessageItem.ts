@@ -175,17 +175,18 @@ export class MessageItem {
           ${ICONS[agent.icon] || ICONS.bot}
         </div>
 
-        <div class="message-workspace-ai orca-thinking-card animate-fade-in">
+        <div class="orca-thinking-card animate-fade-in">
           <div class="orca-loading-container">
             <div class="orca-loading-lottie">
               <dotlottie-player
                 src="/loading.lottie"
                 background="transparent"
                 speed="1"
-                style="width: 34px; height: 34px;"
+                style="width: 32px; height: 32px;"
                 loop
                 autoplay>
               </dotlottie-player>
+              <div class="orca-sonar-spinner" aria-hidden="true"></div>
             </div>
             <div class="orca-loading-text">
               <div class="orca-loading-title">

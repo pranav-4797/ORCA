@@ -1619,28 +1619,57 @@
    ORCA COMPACT DOTLOTTIE LOADING STATE (Replaces empty odd box)
    ========================================================================= */
 .orca-thinking-card {
-  padding: 8px 14px !important;
-  background: var(--bg-surface) !important;
-  border: 1px solid var(--border-subtle) !important;
-  border-radius: var(--radius-sm) !important;
+  display: inline-flex !important;
+  width: auto !important;
   max-width: fit-content !important;
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: var(--radius-sm) !important;
+  padding: 8px 14px !important;
   box-shadow: var(--shadow-sm) !important;
-  gap: 0 !important;
+  align-items: center !important;
+  margin: 0 !important;
 }
 
 .orca-loading-container {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 10px;
 }
 
 .orca-loading-lottie {
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
+  position: relative;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.orca-loading-lottie dotlottie-player {
+  position: relative;
+  z-index: 2;
+  width: 32px !important;
+  height: 32px !important;
+}
+
+.orca-sonar-spinner {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid rgba(14, 124, 134, 0.2);
+  border-top: 2.5px solid var(--primary);
+  border-radius: 50%;
+  animation: orcaSonarSpin 0.8s linear infinite;
+  z-index: 1;
+}
+
+@keyframes orcaSonarSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .orca-loading-text {
