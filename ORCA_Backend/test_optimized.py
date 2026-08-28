@@ -7,6 +7,7 @@ All tests are deterministic and do NOT require live API keys or network.
 """
 import time
 import sys
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 # Ensure imports work when run from ORCA_Backend/
@@ -271,8 +272,24 @@ def test_17_cached_repeated_query_is_faster():
 def test_18_frontend_streaming_no_delay():
     # Verify that orcaApiService no longer has sleep between trace entries
     # Read the file and assert no 'await sleep(60)' and no 'await sleep(8'
-    with open("D:/ORCA/ORCA UI/src/services/orcaApiService.ts", "r", encoding="utf-8") as f:
-        content = f.read()
+    # Resolve relative to repo root so test passes on any machine/OS
+    _here = Path(__file__).resolve().parent
+    _repo_root = _here.parent
+    _candidate = _repo_root / "ORCA UI" / "src" / "services" / "orcaApiService.ts"
+    # Fallback: walk up parents if repo layout differs (e.g. nested checkout)
+    if not _candidate.exists():
+        for parent in Path(__file__).resolve().parents:
+            cand = parent / "ORCA UI" / "src" / "services" / "orcaApiService.ts"
+            if cand.exists():
+                _candidate = cand
+                break
+            # also try without space variant if checked out differently
+            cand2 = parent / "ORCA_UI" / "src" / "services" / "orcaApiService.ts"
+            if cand2.exists():
+                _candidate = cand2
+                break
+    assert _candidate.exists(), f"orcaApiService.ts not found (looked at {_candidate})"
+    content = _candidate.read_text(encoding="utf-8")
     assert "await sleep(60)" not in content, "Frontend still has artificial 60ms delay between activity entries"
     assert "await sleep(8" not in content, "Frontend still has fake per-token streaming delay"
     assert "emit full response as one token" in content.lower() or "immediate rendering" in content.lower()
