@@ -171,8 +171,8 @@ export class MessageItem {
     // Pure Minimalist Animation while awaiting response (no card/panel box)
     if ((!this.message.content || !this.message.content.trim()) && isStreaming) {
       this.element.innerHTML = `
-        <div class="message-avatar" style="background-color:${agent.avatarBg};color:${agent.avatarColor};">
-          ${ICONS[agent.icon] || ICONS.bot}
+        <div class="message-avatar orca-brand-avatar">
+          <img src="/favicon.svg" alt="ORCA" class="message-avatar-favicon" />
         </div>
 
         <div class="orca-pure-loader animate-fade-in">
@@ -195,8 +195,8 @@ export class MessageItem {
     const renderedHtml = renderMarkdown(displayContent);
 
     this.element.innerHTML = `
-      <div class="message-avatar" style="background-color:${agent.avatarBg};color:${agent.avatarColor};">
-        ${ICONS[agent.icon] || ICONS.bot}
+      <div class="message-avatar orca-brand-avatar">
+        <img src="/favicon.svg" alt="ORCA" class="message-avatar-favicon" />
       </div>
 
       <div class="message-workspace-ai">
