@@ -1,0 +1,342 @@
+[
+  {
+    "id": "safety_01",
+    "query": "Is it safe to fish near Kochi tomorrow?",
+    "expected_intent": "safety_check"
+  },
+  {
+    "id": "safety_02",
+    "query": "Can I go fishing off Ratnagiri today? Is the sea safe?",
+    "expected_intent": "safety_check"
+  },
+  {
+    "id": "safety_03",
+    "query": "Should I venture into the sea near Visakhapatnam tomorrow morning?",
+    "expected_intent": "safety_check"
+  },
+  {
+    "id": "safety_04",
+    "query": "Is it risky to go out near Goa tonight?",
+    "expected_intent": "safety_check"
+  },
+  {
+    "id": "safety_05",
+    "query": "Is there any danger for small boats near Chennai today?",
+    "expected_intent": "safety_check"
+  },
+  {
+    "id": "safety_06",
+    "query": "Safety check for fishing near Puri tomorrow",
+    "expected_intent": "safety_check"
+  },
+  {
+    "id": "safety_07",
+    "query": "Is the sea safe for venturing near Kochi at 6 am tomorrow?",
+    "expected_intent": "safety_check"
+  },
+  {
+    "id": "safety_08",
+    "query": "Can we venture out for fishing near Veraval today?",
+    "expected_intent": "safety_check"
+  },
+  {
+    "id": "pfz_01",
+    "query": "Where is the nearest fishing zone near Kochi?",
+    "expected_intent": "pfz_lookup"
+  },
+  {
+    "id": "pfz_02",
+    "query": "Show me the potential fishing zones off Ratnagiri",
+    "expected_intent": "pfz_lookup"
+  },
+  {
+    "id": "pfz_03",
+    "query": "PFZ location near Visakhapatnam today?",
+    "expected_intent": "pfz_lookup"
+  },
+  {
+    "id": "pfz_04",
+    "query": "Any productive zone for fishing around Puri?",
+    "expected_intent": "pfz_lookup"
+  },
+  {
+    "id": "pfz_05",
+    "query": "Where to fish near Mumbai tomorrow?",
+    "expected_intent": "pfz_lookup"
+  },
+  {
+    "id": "pfz_06",
+    "query": "Find fish zone near Kochi for tonight",
+    "expected_intent": "pfz_lookup"
+  },
+  {
+    "id": "pfz_07",
+    "query": "Nearest fishing zone from Veraval for tomorrow?",
+    "expected_intent": "pfz_lookup"
+  },
+  {
+    "id": "pfz_08",
+    "query": "Potential fishing zone near Chennai coast",
+    "expected_intent": "pfz_lookup"
+  },
+  {
+    "id": "hazard_01",
+    "query": "Any cyclone warning near Ratnagiri?",
+    "expected_intent": "hazard_alerts"
+  },
+  {
+    "id": "hazard_02",
+    "query": "Is there a storm alert off Odisha coast?",
+    "expected_intent": "hazard_alerts"
+  },
+  {
+    "id": "hazard_03",
+    "query": "Check for squall warning near Kochi today",
+    "expected_intent": "hazard_alerts"
+  },
+  {
+    "id": "hazard_04",
+    "query": "Are there rough sea warnings near Chennai?",
+    "expected_intent": "hazard_alerts"
+  },
+  {
+    "id": "hazard_05",
+    "query": "Any lightning or thunderstorm alert near Goa?",
+    "expected_intent": "hazard_alerts"
+  },
+  {
+    "id": "hazard_06",
+    "query": "Is there a depression alert in Bay of Bengal near Visakhapatnam?",
+    "expected_intent": "hazard_alerts"
+  },
+  {
+    "id": "hazard_07",
+    "query": "Hazard alert for fishermen near Kochi tomorrow",
+    "expected_intent": "hazard_alerts"
+  },
+  {
+    "id": "hazard_08",
+    "query": "Any cyclone or storm warning off Kochi coast?",
+    "expected_intent": "hazard_alerts"
+  },
+  {
+    "id": "route_01",
+    "query": "Give me a safe route from Ratnagiri to Goa avoiding hazards",
+    "expected_intent": "route_plan"
+  },
+  {
+    "id": "route_02",
+    "query": "Navigate from Chennai to Visakhapatnam safely",
+    "expected_intent": "route_plan"
+  },
+  {
+    "id": "route_03",
+    "query": "Plan a route from Kochi to Lakshadweep",
+    "expected_intent": "route_plan"
+  },
+  {
+    "id": "route_04",
+    "query": "Safest passage from Mumbai to Kochi for tomorrow",
+    "expected_intent": "route_plan"
+  },
+  {
+    "id": "route_05",
+    "query": "How do I get from Veraval to Kochi safely by boat?",
+    "expected_intent": "route_plan"
+  },
+  {
+    "id": "route_06",
+    "query": "Waypoints for a route from Puri to Paradip",
+    "expected_intent": "route_plan"
+  },
+  {
+    "id": "route_07",
+    "query": "Safest path from Kochi to Colombo tomorrow",
+    "expected_intent": "route_plan"
+  },
+  {
+    "id": "route_08",
+    "query": "Plan my safe route to Kochi with waypoints",
+    "expected_intent": "route_plan"
+  },
+  {
+    "id": "geofence_01",
+    "query": "Am I near a restricted area off Kochi?",
+    "expected_intent": "geofence_check"
+  },
+  {
+    "id": "geofence_02",
+    "query": "Is my boat inside an MPA near Goa?",
+    "expected_intent": "geofence_check"
+  },
+  {
+    "id": "geofence_03",
+    "query": "Check IMBL boundary distance near Ratnagiri",
+    "expected_intent": "geofence_check"
+  },
+  {
+    "id": "geofence_04",
+    "query": "Am I inside a protected area near Lakshadweep?",
+    "expected_intent": "geofence_check"
+  },
+  {
+    "id": "geofence_05",
+    "query": "Any restricted zone near my current position?",
+    "expected_intent": "geofence_check"
+  },
+  {
+    "id": "geofence_06",
+    "query": "Geofence check for EEZ limit near Kochi",
+    "expected_intent": "geofence_check"
+  },
+  {
+    "id": "geofence_07",
+    "query": "How far am I from the border near Odisha?",
+    "expected_intent": "geofence_check"
+  },
+  {
+    "id": "geofence_08",
+    "query": "Is there an MPA boundary close to my boat near Chennai?",
+    "expected_intent": "geofence_check"
+  },
+  {
+    "id": "trend_01",
+    "query": "Why has SST changed over the last 6 months near Kochi?",
+    "expected_intent": "trend_analysis"
+  },
+  {
+    "id": "trend_02",
+    "query": "Trend of chlorophyll over last 12 months off Ratnagiri",
+    "expected_intent": "trend_analysis"
+  },
+  {
+    "id": "trend_03",
+    "query": "Why is fish productivity declined near Kochi compared to last year?",
+    "expected_intent": "trend_analysis"
+  },
+  {
+    "id": "trend_04",
+    "query": "Correlation between SST and chlorophyll over the last 6 months near Goa",
+    "expected_intent": "trend_analysis"
+  },
+  {
+    "id": "trend_05",
+    "query": "How has SST changed over the last year near Chennai?",
+    "expected_intent": "trend_analysis"
+  },
+  {
+    "id": "trend_06",
+    "query": "Why has chlorophyll productivity changed over the last 3 months near Visakhapatnam?",
+    "expected_intent": "trend_analysis"
+  },
+  {
+    "id": "trend_07",
+    "query": "SST trend and months of productivity data for Kochi coast show correlation?",
+    "expected_intent": "trend_analysis"
+  },
+  {
+    "id": "trend_08",
+    "query": "Over the last 9 months, why has SST correlation with fish catch changed?",
+    "expected_intent": "trend_analysis"
+  },
+  {
+    "id": "zone_01",
+    "query": "Which zones should I avoid near Kochi?",
+    "expected_intent": "zone_scan"
+  },
+  {
+    "id": "zone_02",
+    "query": "Rank the fishing zones near Ratnagiri by suitability",
+    "expected_intent": "zone_scan"
+  },
+  {
+    "id": "zone_03",
+    "query": "Which regions are good zones for fishing off Visakhapatnam?",
+    "expected_intent": "zone_scan"
+  },
+  {
+    "id": "zone_04",
+    "query": "Where should I fish to avoid restricted zones near Kochi?",
+    "expected_intent": "zone_scan"
+  },
+  {
+    "id": "zone_05",
+    "query": "Show me which zones to seek and which to avoid near Puri",
+    "expected_intent": "zone_scan"
+  },
+  {
+    "id": "zone_06",
+    "query": "Rank zones to seek near Kochi based on SST and chlorophyll",
+    "expected_intent": "zone_scan"
+  },
+  {
+    "id": "zone_07",
+    "query": "Which zones are best to avoid due to crowding near Kochi?",
+    "expected_intent": "zone_scan"
+  },
+  {
+    "id": "zone_08",
+    "query": "Which regions should I seek for fishing and which to avoid near Goa?",
+    "expected_intent": "zone_scan"
+  },
+  {
+    "id": "ambiguous_01",
+    "query": "blah blah unknown qwerty",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_02",
+    "query": "Tell me about the sea",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_03",
+    "query": "What is the weather like today?",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_04",
+    "query": "Hello there",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_05",
+    "query": "Can you help me with something?",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_06",
+    "query": "Check",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_07",
+    "query": "sea",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_08",
+    "query": "Fishing is fun",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_09",
+    "query": "Is it safe to find a fishing zone near Kochi?",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_10",
+    "query": "From today to tomorrow, is the sea okay?",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_11",
+    "query": "I want to plan a trend of safe routes",
+    "expected_intent": null
+  },
+  {
+    "id": "ambiguous_12",
+    "query": "Route and safety and cyclone and PFZ all together please",
+    "expected_intent": null
+  }
+]
