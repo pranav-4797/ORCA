@@ -41,6 +41,7 @@ from agents.proactive_monitor import (
     unregister_user,
     update_position,
 )
+from data_connectors.incois_pfz import IncoisUnavailableError, get_live_pfz
 from orchestrator import Orchestrator
 
 
@@ -164,6 +165,33 @@ def agents_registry():
             }
             for key, spec in SPECIALIST_REGISTRY.items()
         ],
+    }
+
+
+@app.get("/api/pfz/live")
+async def pfz_live():
+    """Official INCOIS / SAMUDRA PFZ feeds for the map layer:
+    - `pfz_lines`     : today's digitized PFZ zone geometry (LineStrings)
+    - `landing_centres`: all landing centres; those with `forecast=Y` carry
+                        the issued advisory (Direction/Distance/Depth/zone latlon)
+    - `advisory`      : forecast/valid dates + per-sector names
+    Result is cached server-side for 10 minutes; a failed live refresh keeps
+    serving the previous good snapshot until it expires.
+    """
+    try:
+        live = await get_live_pfz()
+    except IncoisUnavailableError as exc:
+        raise HTTPException(
+            503, f"Live PFZ data is temporarily unavailable. ({exc})"
+        )
+    return {
+        "available": live.get("available"),
+        "fetched_at": live.get("fetched_at"),
+        "forecast_date": (live.get("advisory") or {}).get("forecast_date"),
+        "valid_upto": (live.get("advisory") or {}).get("valid_upto"),
+        "pfz_lines": live.get("pfz_lines"),
+        "landing_centres": live.get("landing_centres"),
+        "sectors": (live.get("advisory") or {}).get("sectors", {}),
     }
 
 
@@ -398,6 +426,22 @@ def viz_geojson(session_id: str):
             "geometry": {"type": "Point",
                          "coordinates": [pfz.center_lon, pfz.center_lat]},
         })
+        lc = getattr(pfz, "landing_center", None)
+        if lc:
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "kind": "pfz_landing", "name": lc.get("name"),
+                    "state": lc.get("state"), "sector_id": lc.get("sector_id"),
+                    "direction": lc.get("direction"),
+                    "advisory_distance_km": lc.get("advisory_distance_km"),
+                    "advisory_depth_m": lc.get("advisory_depth_m"),
+                    "forecast_date": lc.get("forecast_date"),
+                    "valid_upto": lc.get("valid_upto"),
+                },
+                "geometry": {"type": "Point",
+                             "coordinates": [lc.get("centre_lon"), lc.get("centre_lat")]},
+            })
         for i, alt in enumerate(getattr(pfz, "alternates", []) or [], start=2):
             features.append({
                 "type": "Feature",
