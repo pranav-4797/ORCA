@@ -81,6 +81,38 @@ def geocode(query: str) -> tuple[float, float, str] | None:
     return result
 
 
+REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+
+
+def reverse_geocode(lat: float, lon: float) -> str:
+    """Reverse geocode (lat, lon) into a clean coastal location name."""
+    cache_key = f"{round(lat, 3)},{round(lon, 3)}"
+    if cache_key in _cache and isinstance(_cache[cache_key], str):
+        return _cache[cache_key]
+
+    params = {
+        "lat": lat,
+        "lon": lon,
+        "format": "jsonv2",
+    }
+    url = f"{REVERSE_URL}?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers=_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            display = payload.get("display_name", "")
+            if display:
+                parts = [p.strip() for p in display.split(",")]
+                name = parts[0]
+                if len(parts) > 1 and not any(c.isdigit() for c in parts[1]):
+                    name += f", {parts[1]}"
+                _cache[cache_key] = name
+                return name
+    except Exception:
+        pass
+    return f"Position ({lat:.3f}°N, {lon:.3f}°E)"
+
+
 if __name__ == "__main__":
     import sys
 

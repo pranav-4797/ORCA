@@ -335,9 +335,31 @@ export class OrcaApiService implements IAIService {
     return { id, title, description: desc, status, timestamp: Date.now() };
   }
 
-  /** Optional demo GPS so route/geofence intents work from the browser. */
+  public static cachedGps: [number, number] | null = null;
+
+  /** Acquire live browser GPS coordinates for high-precision local forecasting */
+  public static async acquireLiveGps(): Promise<[number, number] | null> {
+    if (!('geolocation' in navigator)) return null;
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          OrcaApiService.cachedGps = [pos.coords.latitude, pos.coords.longitude];
+          localStorage.setItem('orca_device_gps', JSON.stringify(OrcaApiService.cachedGps));
+          resolve(OrcaApiService.cachedGps);
+        },
+        () => {
+          const fallback = OrcaApiService.demoGps();
+          resolve(fallback as [number, number] | null);
+        },
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
+      );
+    });
+  }
+
+  /** Live device GPS or cached position for local sea-state forecasting */
   public static demoGps(): number[] | null {
-    const raw = localStorage.getItem('orca_demo_gps');
+    if (OrcaApiService.cachedGps) return OrcaApiService.cachedGps;
+    const raw = localStorage.getItem('orca_device_gps') || localStorage.getItem('orca_demo_gps');
     return raw ? JSON.parse(raw) : null;
   }
 

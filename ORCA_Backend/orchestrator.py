@@ -659,29 +659,29 @@ class Orchestrator:
         prior = session_store.get(state["session_id"])
         plan, plan_mode = self._plan(normalized_query, prior=prior)
 
-        # Multi-turn memory: 'same'/'unknown' location or hour falls back to
-        # what this conversation already established (P0 #3).
-        if prior is not None:
-            loc_name = str(plan.get("location_name") or "").lower()
-            if loc_name in ("", "same", "unknown", "there", "here"):
-                if prior.location_name:
-                    plan["location_name"] = prior.location_name
-            elif prior.lat is not None:
-                pass  # new explicit place wins; stored below
-            if not plan.get("target_hour") and prior.target_hour is not None \
-                    and plan["intent"] == prior.last_intent and prior.time_window == plan["time_window"]:
-                plan["target_hour"] = None  # stale hour only for identical asks
-            if prior.language and plan_mode == "llm":
-                pass  # language agent result flows via state anyway
-
-        location = resolve_location(plan["location_name"])
-
         device_gps = state.get("device_gps") or (
             tuple(prior.device_gps) if (prior and prior.device_gps) else None
         )
         destination = state.get("destination") or (
             Location(**prior.destination) if (prior and prior.destination) else None
         )
+
+        # Live Device GPS resolution (P0): if query asks about current location or names no specific town,
+        # and device_gps is available, bind to the user's live position directly and reverse-geocode it.
+        loc_name = str(plan.get("location_name") or "").strip().lower()
+        is_my_location_query = any(k in normalized_query.lower() for k in ("where am i", "my location", "my position", "current position", "here", "around me", "where i am"))
+        
+        if (loc_name in ("", "unknown", "same", "here", "there", "current", "my location", "where am i") or is_my_location_query) and device_gps:
+            try:
+                import data_connectors.geocode as geocode
+                resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
+                location = Location(name=f"Current Position ({resolved_name})", lat=device_gps[0], lon=device_gps[1])
+                plan["location_name"] = location.name
+            except Exception:
+                location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
+                plan["location_name"] = location.name
+        else:
+            location = resolve_location(plan["location_name"])
 
         context = QueryContext(
             raw_query=raw_query,
