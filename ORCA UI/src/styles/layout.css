@@ -64,12 +64,19 @@
   width: 28px;
   height: 28px;
   border-radius: var(--radius-xs);
-  background-color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
   flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.35);
+}
+
+.brand-favicon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .brand-text-col {

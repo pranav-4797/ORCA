@@ -34,7 +34,9 @@ export class Sidebar {
     this.element.innerHTML = `
       <div class="sidebar-header">
         <div class="brand-area" id="brand-home-link" title="ORCA Maritime Intelligence">
-          <div class="brand-logo">${ICONS.compass}</div>
+          <div class="brand-logo">
+            <img src="/favicon.svg" alt="ORCA Compass Emblem" class="brand-favicon-img" />
+          </div>
           <div class="brand-text-col">
             <span class="brand-text">ORCA</span>
             <span class="brand-subtext">Marine Intelligence</span>
