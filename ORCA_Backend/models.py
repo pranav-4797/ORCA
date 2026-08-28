@@ -152,10 +152,14 @@ class HazardFlag:
 class PFZRecommendation:
     """Output of the PFZ Agent: nearest potential fishing zone.
 
-    Tier 3 today: when the Bhuvan WMS GetFeatureInfo call is unavailable,
-    the zone is derived deterministically from the (simulated) chlorophyll
-    and SST fields -- every field is tagged in `field_sources` so responses
-    stay honest about what is live vs derived.
+    Tier 1/2 by default: the zone is parsed directly from the official daily
+    INCOIS / SAMUDRA advisory (landing-centre PFZ feed), so `source` is
+    DataSource.INCOIS_LIVE and `landing_center` carries the issued
+    Direction/Distance/Depth. When the INCOIS feeds are unreachable or no
+    zone is issued near the point, the zone falls back to a deterministic
+    DERIVED_LIVE (live SST front) or SIMULATED estimate -- every field is
+    tagged in `field_sources` so responses stay honest about what is live
+    vs derived vs advisory.
     """
     reference_location: Location
     center_lat: float
@@ -172,6 +176,13 @@ class PFZRecommendation:
     # {"center_lat", "center_lon", "distance_km", "bearing_deg",
     #  "sst_celsius", "rank"}.
     alternates: list = field(default_factory=list)
+    # Present only when source == INCOIS_LIVE: the nearest landing centre
+    # whose official advisory fired, with its issued direction/distance/depth.
+    landing_center: dict | None = None
+    # Nearby official PFZ zone lines (uid/length/distance_km), for context.
+    zone_lines: list = field(default_factory=list)
+    # Best-effort INCOIS sector narrative text for the matched sector.
+    advisory_text: str | None = None
 
 
 @dataclass

@@ -18,6 +18,7 @@ Two related jobs under one agent (per project documentation Section 8):
 
 from __future__ import annotations
 
+import heapq
 import json
 import logging
 import math
@@ -70,6 +71,100 @@ def _bearing_deg(lat1, lon1, lat2, lon2) -> float:
     y = math.sin(dl) * math.cos(p2)
     x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
     return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+# ---------------------------------------------------------------------------
+# Spatial index over INCOIS landing centres (KD-tree, dependency-free).
+#
+# The SAMUDRA pfzMobile feed lists ~1,223 landing centres; a linear scan is
+# fine once, but the PFZ Agent now does a nearest-centre lookup per query, so
+# we build a KD-tree once per cache refresh. numpy/scipy are deliberately not
+# required -- this stays pure-Python and well under the 10 ms target.
+# ---------------------------------------------------------------------------
+
+def _kd_build(points: list[tuple[int, tuple[float, float]]],
+              depth: int = 0):
+    """points = [(index, (lat, lon)), ...]; builds an immutable KD-tree."""
+    if not points:
+        return None
+    axis = depth % 2
+    points = sorted(points, key=lambda p: p[1][axis])
+    mid = len(points) // 2
+    return {
+        "idx": points[mid][0],
+        "pt": points[mid][1],
+        "left": _kd_build(points[:mid], depth + 1),
+        "right": _kd_build(points[mid + 1:], depth + 1),
+    }
+
+
+def _kd_knn(node, target: tuple[float, float], depth: int, k: int,
+            heap: list) -> None:
+    """Fill `heap` (max-heap on -dist^2) with the k nearest nodes."""
+    if node is None:
+        return
+    axis = depth % 2
+    dx = target[axis] - node["pt"][axis]
+    near, far = (node["left"], node["right"]) if dx < 0 \
+        else (node["right"], node["left"])
+    _kd_knn(near, target, depth + 1, k, heap)
+    dist2 = (node["pt"][0] - target[0]) ** 2 + (node["pt"][1] - target[1]) ** 2
+    if len(heap) < k:
+        heapq.heappush(heap, (-dist2, node))
+    elif dist2 < -heap[0][0]:
+        heapq.heapreplace(heap, (-dist2, node))
+    if dx * dx < -heap[0][0]:
+        _kd_knn(far, target, depth + 1, k, heap)
+
+
+class LandingCentreIndex:
+    """Nearest-landing-centre lookup for the PFZ Agent (spatial index).
+
+    Input: list of centre dicts, each with at least ``lat`` and ``lon`` keys
+    (produced by data_connectors.incois_pfz.get_pfz_mobile()).
+    """
+
+    def __init__(self, centres: list[dict]):
+        self._centres: list[dict] = list(centres)
+        built = [(i, (float(c["lat"]), float(c["lon"])))
+                 for i, c in enumerate(self._centres)
+                 if c.get("lat") is not None and c.get("lon") is not None]
+        self._tree = _kd_build(built) if built else None
+
+    def __len__(self) -> int:
+        return len(self._centres)
+
+    @property
+    def centres(self) -> list[dict]:
+        return self._centres
+
+    def nearest(self, lat: float, lon: float):
+        """Nearest centre dict or None (empty index). Also returns km distance.
+
+        Returns (centre | None, dist_km).
+        """
+        hits = self.nearest_k(lat, lon, 1)
+        if not hits:
+            return None, float("inf")
+        return hits[0]
+
+    def nearest_k(self, lat: float, lon: float, k: int = 3) -> list[dict]:
+        """The k nearest centres, ascending by distance, each enriched with
+        ``distance_km`` (haversine from the query point)."""
+        result: list[dict] = []
+        if self._tree is None or k <= 0:
+            return result
+        heap: list = []
+        _kd_knn(self._tree, (float(lat), float(lon)), 0, k, heap)
+        ordered = [(-neg, node) for neg, node in heap]
+        ordered.sort(key=lambda t: t[0])
+        for dist2, node in ordered:
+            centre = dict(self._centres[node["idx"]])
+            centre["distance_km"] = round(
+                _haversine_km(lat, lon, centre["lat"], centre["lon"]), 1
+            )
+            result.append(centre)
+        return result
 
 
 def _point_in_ring(lat, lon, ring: list[list[float]]) -> bool:
