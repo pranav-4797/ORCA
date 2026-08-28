@@ -37,11 +37,20 @@ html, body {
   background: var(--text-tertiary);
 }
 
-/* Focus — DESIGN.md 2px teal + 2px white offset */
+/* Clean Focus states */
 :focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px #ffffff;
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Typography Defaults */
