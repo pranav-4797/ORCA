@@ -231,6 +231,10 @@ export class MessageItem {
 
         ${!isStreaming && this.message.content.length > 0 ? `
           <div class="message-actions-toolbar">
+            <button class="msg-action-btn btn-speak-msg" title="Listen to spoken advisory audio">
+              <span class="speak-icon">🔊</span>
+              <span class="speak-label">Listen</span>
+            </button>
             <button class="msg-action-btn btn-copy-msg" title="Copy response">
               ${ICONS.copy}
               <span>Copy</span>
@@ -268,6 +272,50 @@ export class MessageItem {
           showToast('Code copied to clipboard', 'success');
         }
       });
+    });
+
+    // Speak / Listen audio button (Fishermen & Divers Audio HUD)
+    const speakBtn = this.element.querySelector('.btn-speak-msg');
+    speakBtn?.addEventListener('click', () => {
+      if ('speechSynthesis' in window) {
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.cancel();
+          const icon = speakBtn.querySelector('.speak-icon');
+          const label = speakBtn.querySelector('.speak-label');
+          if (icon) icon.textContent = '🔊';
+          if (label) label.textContent = 'Listen';
+          return;
+        }
+
+        const cleanText = this.message.content
+          .replace(/[#*_`~>-]/g, '')
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+          .replace(/http\S+/g, '');
+
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.rate = 0.95; // Clear maritime pace
+        utterance.pitch = 1.0;
+
+        const icon = speakBtn.querySelector('.speak-icon');
+        const label = speakBtn.querySelector('.speak-label');
+        if (icon) icon.textContent = '⏹️';
+        if (label) label.textContent = 'Stop';
+
+        utterance.onend = () => {
+          if (icon) icon.textContent = '🔊';
+          if (label) label.textContent = 'Listen';
+        };
+
+        utterance.onerror = () => {
+          if (icon) icon.textContent = '🔊';
+          if (label) label.textContent = 'Listen';
+        };
+
+        window.speechSynthesis.speak(utterance);
+        showToast('Speaking advisory aloud...', 'info');
+      } else {
+        showToast('Speech audio is not supported in this browser.', 'error');
+      }
     });
 
     // Copy full response button

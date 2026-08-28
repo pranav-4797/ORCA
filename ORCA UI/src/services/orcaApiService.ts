@@ -10,7 +10,9 @@ import { AgentActivityStep } from '../types/agent';
  */
 
 export const BACKEND_URL: string =
-  localStorage.getItem('orca_backend_url') || 'http://localhost:8000';
+  localStorage.getItem('orca_backend_url') ||
+  ((import.meta as any).env?.VITE_BACKEND_URL as string) ||
+  'https://orca-backend-1i5u.onrender.com';
 
 export interface OrcaTraceEntry {
   agent_name: string;
