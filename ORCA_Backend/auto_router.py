@@ -245,7 +245,7 @@ def fast_route(normalized_query: str) -> RoutingDecision | None:
         "route_plan": "Navigation request requires route+sea-state+hazards.",
         "geofence_check": "Boundary proximity check requires geospatial.",
         "hazard_alerts": "Cyclone/storm warning check requires current hazards.",
-        "pfz_lookup": "Fishing zone lookup requires thermal front analysis.",
+        "pfz_lookup": "Official PFZ advisory lookup via nearest INCOIS landing centre.",
         "safety_check": "Safety question requires current sea-state and hazard thresholds.",
     }
 

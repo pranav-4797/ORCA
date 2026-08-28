@@ -214,6 +214,23 @@ class PFZAgent:
             location.lat, location.lon, zone_lat, zone_lon
         )
 
+        # Prefer the nearest spot on the OFFICIAL digitized PFZ geometry
+        # (pfzLines) as the target: distance/bearing/target-coordinates all
+        # come from a haversine against the real zone lines. Fall back to the
+        # advisory's zone position when no line is nearby.
+        nearest = self._nearest_point_on_lines(
+            location.lat, location.lon,
+            (live.get("pfz_lines") or {}).get("features") or [],
+        )
+        if nearest is not None:
+            zone_lat, zone_lon = nearest["lat"], nearest["lon"]
+            distance_km, bearing_deg = nearest["distance_km"], nearest["bearing_deg"]
+        else:
+            # nearest advisory zone position (still official, from pfzMobile)
+            distance_km, bearing_deg = self._haversine_bearing(
+                location.lat, location.lon, zone_lat, zone_lon
+            )
+
         # sst/chl are not carried in the PFZ feed; reuse the ocean-state
         # reading when available (still honestly tagged from whence it came).
         sst = ocean_state.sst_celsius if ocean_state is not None else 0.0
@@ -503,19 +520,89 @@ class PFZAgent:
         x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
         return dist, (math.degrees(math.atan2(y, x)) + 360) % 360
 
+    @staticmethod
+    def _point_on_segment(lat1: float, lon1: float, lat2: float, lon2: float,
+                          plat: float, plon: float) -> tuple[float, float, float, float]:
+        """Closest point on segment (a->b) to p, in equirectangular projection.
+
+        Returns (nlat, nlon, distance_km, bearing_deg) where the distance is
+        the haversine great-circle distance from p to the projected point.
+        """
+        cos_lat = max(math.cos(math.radians((lat1 + lat2) / 2.0)), 0.2)
+        dx = (lon2 - lon1) * cos_lat
+        dy = lat2 - lat1
+        px = (plon - lon1) * cos_lat
+        py = plat - lat1
+        seg2 = dx * dx + dy * dy
+        if seg2 == 0:
+            t = 0.0
+        else:
+            t = max(0.0, min(1.0, (px * dx + py * dy) / seg2))
+        nlat = lat1 + (lat2 - lat1) * t
+        nlon = lon1 + (lon2 - lon1) * t
+        d, b = PFZAgent._haversine_bearing(plat, plon, nlat, nlon)
+        return nlat, nlon, d, b
+
+    @staticmethod
+    def _nearest_point_on_lines(lat: float, lon: float, features: list) -> dict | None:
+        """Nearest point on the official digitized PFZ LineStrings to (lat, lon).
+
+        Scans every segment of every INCOIS zone line and returns the closest
+        spot with a haversine distance + compass bearing -- i.e. the nearest
+        actual PFZ point in the official geometry. None when no usable line
+        exists near the point (caller keeps the advisory zone position).
+        """
+        best: tuple[float, float, float, float] | None = None
+        for f in features or []:
+            geom = (f.get("geometry") or {})
+            lines: list[list] = []
+            if geom.get("type") == "LineString":
+                lines = [geom.get("coordinates") or []]
+            elif geom.get("type") == "MultiLineString":
+                lines = geom.get("coordinates") or []
+            for line in lines:
+                for a, b in zip(line, line[1:]):
+                    if not a or not b or len(a) < 2 or len(b) < 2:
+                        continue
+                    try:
+                        nlat, nlon, d, br = PFZAgent._point_on_segment(
+                            float(a[1]), float(a[0]), float(b[1]), float(b[0]),
+                            float(lat), float(lon),
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    if best is None or d < best[0]:
+                        best = (d, nlat, nlon, br)
+        if best is None:
+            return None
+        d, nlat, nlon, br = best
+        return {
+            "distance_km": round(d, 1),
+            "bearing_deg": round(br, 1),
+            "lat": round(nlat, 4),
+            "lon": round(nlon, 4),
+        }
+
     # ------------------------------------------------------------------
     # Deterministic note by default — no LLM needed for distance/bearing facts.
     # ------------------------------------------------------------------
     def _generate_reasoning_note(self, pfz: PFZRecommendation) -> str:
-        kind = "derived from live SST field" \
-            if pfz.source == DataSource.DERIVED_LIVE else "simulated"
         deterministic = (
-            f"{kind.capitalize()} zone {pfz.distance_from_reference_km} km away at "
+            f"Zone {pfz.distance_from_reference_km} km away at "
             f"{pfz.bearing_deg:.1f}° bearing; "
             f"SST {pfz.sst_at_zone_celsius} °C, chlorophyll "
             f"{pfz.chlorophyll_at_zone_mg_m3} mg/m³."
-            + (" Derived from live satellite-model SST thermal front, not an official INCOIS/Bhuvan advisory." if pfz.source == DataSource.DERIVED_LIVE else "")
         )
+        if pfz.source == DataSource.INCOIS_LIVE:
+            lc = pfz.landing_center or {}
+            deterministic += (
+                f" Official INCOIS advisory via {lc.get('name') or 'landing centre'}, "
+                f"valid to {lc.get('valid_upto')}."
+            )
+        elif pfz.source == DataSource.DERIVED_LIVE:
+            deterministic += " Estimated zone — official INCOIS advisory unavailable for this spot today."
+        else:
+            deterministic += " Seeded estimate — live feeds were unreachable."
         if not _ENABLE_LLM_NOTE:
             return deterministic
         sources = ", ".join(f"{k.replace('_', ' ')} = {v}" for k, v in sorted(pfz.field_sources.items()))
@@ -535,9 +622,10 @@ class PFZAgent:
             )
         else:
             system_prompt += (
-                " The zone position is either derived from live satellite-model "
-                "SST data (a thermal-front heuristic) or simulated -- explicitly "
-                "flag that this is NOT an official INCOIS advisory."
+                " The zone is an alternative estimate because the daily official "
+                "advisory was not available for this exact spot -- say so honestly, "
+                "but keep the tone factual; the values themselves are from real "
+                "forecast data."
             )
         lc_line = (
             f"\nOfficial landing centre: {lc.get('name')} ({lc.get('state')}, "
