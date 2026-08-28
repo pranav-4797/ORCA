@@ -577,6 +577,19 @@ class AppStore {
     this.notify();
   }
 
+  public getGuestUserMessageCount(): number {
+    let count = 0;
+    for (const msgs of Object.values(this.messages)) {
+      count += msgs.filter(m => m.role === 'user').length;
+    }
+    return count;
+  }
+
+  public isGuestLimitReached(): boolean {
+    if (this.currentUser) return false;
+    return this.getGuestUserMessageCount() >= 3;
+  }
+
   // Messaging & Simulated Streaming
   public async sendMessage(
     prompt: string,
@@ -585,6 +598,13 @@ class AppStore {
   ): Promise<void> {
     if (!prompt.trim() && attachments.length === 0 && !voice) return;
     if (this.isStreaming) return;
+
+    // Enforce Mandatory Google Sign-In after 3 guest messages
+    if (!this.currentUser && this.isGuestLimitReached()) {
+      this.toggleAuthModal(true);
+      showToast('Guest limit reached (3/3 free queries). Please sign in with Google to continue.', 'error');
+      return;
+    }
 
     let chatId = this.activeChatId;
     let isNew = false;
@@ -602,7 +622,7 @@ class AppStore {
       id: generateId('msg-user'),
       chatId,
       role: 'user',
-      content: prompt.trim() || '\ud83c\udf99\ufe0f *voice message*',
+      content: prompt.trim() || '🎙️ *voice message*',
       timestamp: Date.now(),
       attachments: attachments.length > 0 ? attachments : undefined
     };
@@ -716,12 +736,14 @@ class AppStore {
               void saveUserChatToFirestore(this.currentUser.uid, currentChat);
               void saveUserMessageToFirestore(this.currentUser.uid, chatId, assistantMsg);
             } else {
-              // User is not logged in: pop up login screen after their first chat
-              setTimeout(() => {
-                if (!this.currentUser) {
-                  this.toggleAuthModal(true);
-                }
-              }, 1200);
+              // Check if guest limit is reached after this 3rd message
+              if (this.isGuestLimitReached()) {
+                setTimeout(() => {
+                  if (!this.currentUser) {
+                    this.toggleAuthModal(true);
+                  }
+                }, 1000);
+              }
             }
             void this.loadViz(chatId); // refresh map + charts for this answer
           } else if (chunk.type === 'error') {

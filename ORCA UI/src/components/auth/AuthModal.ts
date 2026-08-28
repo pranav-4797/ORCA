@@ -26,35 +26,44 @@ export class AuthModal {
   }
 
   private render(): void {
+    const isLimitReached = store.isGuestLimitReached();
+    const guestCount = store.getGuestUserMessageCount();
+
     this.element.innerHTML = `
       <div class="modal-container auth-modal-card" style="max-width: 460px;">
         <div class="modal-header">
           <div style="font-weight:700;font-size:14px;color:var(--primary);display:flex;align-items:center;gap:8px;letter-spacing:0.04em;text-transform:uppercase;">
             <span>${ICONS.shield || '⚓'}</span>
-            <span>Maritime Authentication</span>
+            <span>${isLimitReached ? 'Mandatory Sign-In' : 'Maritime Authentication'}</span>
           </div>
-          <button class="icon-btn" id="btn-close-auth-modal" title="Close" aria-label="Close Authentication Modal">
-            ${ICONS.x}
-          </button>
+          ${!isLimitReached ? `
+            <button class="icon-btn" id="btn-close-auth-modal" title="Close" aria-label="Close Authentication Modal">
+              ${ICONS.x}
+            </button>
+          ` : ''}
         </div>
 
         <div class="modal-body auth-modal-body">
           <div class="auth-hero-graphic">
             <div class="auth-radar-ring">
-              <span class="auth-radar-center">${ICONS.compass || '🧭'}</span>
+              <span class="auth-radar-center">${isLimitReached ? '🔒' : (ICONS.compass || '🧭')}</span>
             </div>
           </div>
 
-          <h3 class="auth-modal-heading">Save &amp; Protect Your Mission Briefings</h3>
+          <h3 class="auth-modal-heading">
+            ${isLimitReached ? 'Guest Limit Reached (3/3 Free Queries)' : 'Save & Protect Your Mission Briefings'}
+          </h3>
           <p class="auth-modal-subtext">
-            Sign in to automatically sync all your coastal navigation advisories, oceanographic telemetry, and custom waypoint routes across devices.
+            ${isLimitReached
+              ? 'You have completed your 3 free guest inquiries. Sign in with Google to unlock unlimited life-critical maritime forecasting, cyclone warnings, and navigational routing.'
+              : 'Sign in to automatically sync all your coastal navigation advisories, oceanographic telemetry, and custom waypoint routes across devices.'}
           </p>
 
           <div class="auth-benefits-list">
             <div class="auth-benefit-item">
               <span class="benefit-icon">☁️</span>
               <div class="benefit-text">
-                <strong>Cloud Session Access:</strong> Return anytime after days and resume your exact marine briefings.
+                <strong>Unlimited Marine Queries:</strong> Ask unlimited coastal safety &amp; oceanographic questions.
               </div>
             </div>
             <div class="auth-benefit-item">
@@ -66,7 +75,7 @@ export class AuthModal {
             <div class="auth-benefit-item">
               <span class="benefit-icon">🚢</span>
               <div class="benefit-text">
-                <strong>Vessel Profiling:</strong> Save vessel draft, speed, and preferred fishing zones.
+                <strong>Automatic Multi-Device Sync:</strong> Access your mission logs from any phone, tablet, or ship bridge.
               </div>
             </div>
           </div>
@@ -78,15 +87,17 @@ export class AuthModal {
               <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
               <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
             </svg>
-            <span>Sign in with Google</span>
+            <span>Sign in with Google to Continue</span>
           </button>
         </div>
 
-        <div class="modal-footer" style="justify-content:center;">
-          <button class="btn-guest-continue" id="btn-modal-guest-continue">
-            Continue as Guest (Temporary Session)
-          </button>
-        </div>
+        ${!isLimitReached ? `
+          <div class="modal-footer" style="justify-content:center;">
+            <button class="btn-guest-continue" id="btn-modal-guest-continue">
+              Continue as Guest (${guestCount}/3 queries used)
+            </button>
+          </div>
+        ` : ''}
       </div>
     `;
 
@@ -94,16 +105,18 @@ export class AuthModal {
   }
 
   private attachEvents(): void {
-    // Backdrop click dismisses
+    // Backdrop click dismisses only if limit NOT reached
     this.element.addEventListener('click', (e) => {
-      if (e.target === this.element) {
+      if (e.target === this.element && !store.isGuestLimitReached()) {
         store.toggleAuthModal(false);
       }
     });
 
-    // Close button
+    // Close button (only present when limit not reached)
     this.element.querySelector('#btn-close-auth-modal')?.addEventListener('click', () => {
-      store.toggleAuthModal(false);
+      if (!store.isGuestLimitReached()) {
+        store.toggleAuthModal(false);
+      }
     });
 
     // Google Sign in
