@@ -114,15 +114,14 @@ def get_depths_batch(points: list[tuple[float, float]]) -> dict[tuple[float, flo
 
     raw = None
     last_exc: Exception | None = None
-    for attempt in range(2):  # the host intermittently answers 5xx under load
+    for attempt in range(1):
         req = urllib.request.Request(url, headers=_HEADERS)
         try:
-            with urllib.request.urlopen(req, timeout=45) as resp:
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
             break
         except Exception as exc:
             last_exc = exc
-            time.sleep(1.5)
     if raw is None:
         _dead_since = time.monotonic()
         raise BathymetryUnavailableError(f"ETOPO bulk feed failed: {last_exc}")
