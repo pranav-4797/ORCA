@@ -202,28 +202,54 @@ def _parse_cap_alert(xml_bytes: bytes) -> dict | None:
 # Public fetchers
 # ---------------------------------------------------------------------------
 
-def fetch_active_alerts() -> list[dict]:
-    """All currently-active IMD CAP alerts (any category).
+_alerts_cache: list[dict] | None = None
+_alerts_cache_time: float = 0.0
+_ALERTS_CACHE_TTL_S = 60.0
 
-    Returns a list -- possibly empty when the country is quiet, which is a
-    clean result, never an error.
-    """
+
+def fetch_active_alerts() -> list[dict]:
+    """All currently-active IMD CAP alerts (any category). Cached for 60s."""
+    global _alerts_cache, _alerts_cache_time
+    now = time.monotonic()
+    if _alerts_cache is not None and (now - _alerts_cache_time) < _ALERTS_CACHE_TTL_S:
+        return _alerts_cache
+
+    from concurrent.futures import ThreadPoolExecutor
+
     raw = _get(RSS_URL)
     try:
         rss_root = ET.fromstring(raw)
     except ET.ParseError as exc:
         raise CapUnavailableError(f"CAP RSS unparseable: {exc}") from exc
 
-    alerts: list[dict] = []
+    items_to_fetch = []
     for item in rss_root.iter("item"):
         link_el = item.find("link")
         url = (link_el.text or "").strip() if link_el is not None else ""
-        if not url.startswith("http"):
-            continue
-        alert = _parse_cap_alert(_get(url))
-        if alert:
-            alert["rss_title"] = (item.findtext("title") or "").strip()
-            alerts.append(alert)
+        if url.startswith("http"):
+            title = (item.findtext("title") or "").strip()
+            items_to_fetch.append((url, title))
+
+    def _fetch_item(pair: tuple[str, str]) -> dict | None:
+        url, title = pair
+        try:
+            alert = _parse_cap_alert(_get(url))
+            if alert:
+                alert["rss_title"] = title
+                return alert
+        except Exception:
+            return None
+        return None
+
+    alerts: list[dict] = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(_fetch_item, items_to_fetch)
+        for r in results:
+            if r is not None:
+                alerts.append(r)
+
+    _alerts_cache = alerts
+    _alerts_cache_time = now
     return alerts
 
 

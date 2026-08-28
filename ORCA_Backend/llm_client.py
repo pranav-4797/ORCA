@@ -36,7 +36,7 @@ load_dotenv()
 
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "").strip()
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").strip()
-LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-oss-120b").strip()
+LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile").strip()
 # Hosted speech-to-text on the same Groq account (no extra key needed).
 STT_MODEL: str = os.getenv("STT_MODEL", "whisper-large-v3-turbo").strip()
 
@@ -60,7 +60,7 @@ def _get_client() -> OpenAI:
             "and put it in your .env file (see .env.example)."
         )
     if _client is None:
-        _client = OpenAI(api_key=GROQ_API_KEY, base_url=LLM_BASE_URL)
+        _client = OpenAI(api_key=GROQ_API_KEY, base_url=LLM_BASE_URL, timeout=12.0)
     return _client
 
 

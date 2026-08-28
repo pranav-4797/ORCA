@@ -51,7 +51,7 @@ _SOURCES = [
     },
 ]
 _VARIABLE = "chlor_a"
-_HTTP_TIMEOUT_S = 6.0          # deliberately short -- fail fast to fallback
+_HTTP_TIMEOUT_S = 2.5          # deliberately short -- fail fast to fallback
 _NEGATIVE_CACHE_TTL_S = 600.0  # remember "server unreachable" for 10 min
 
 _HEADERS = {
