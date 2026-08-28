@@ -123,6 +123,39 @@ DEFAULT_LOCATION = Location(name="Unknown Coast (default demo point)", lat=15.5,
 
 _geocode_cache: dict[str, Location] = {}
 
+# Degraded-mode messages for non-English queries when LLM translation is unavailable.
+# Each message honestly explains limited mode and suggests retry or English.
+_DEGRADED_MESSAGES: dict[str, str] = {
+    "en": "Service is running in limited mode right now, please try again shortly or ask in English.",
+    "hi": "सेवा फिलहाल सीमित मोड में चल रही है। कृपया थोड़ी देर बाद पुनः प्रयास करें या अंग्रेज़ी में पूछें।",
+    "mr": "सेवा सध्या मर्यादित मोडमध्ये चालू आहे. कृपया थोड्या वेळाने पुन्हा प्रयत्न करा किंवा इंग्रजीत विचारा.",
+    "ta": "சேவை தற்போது வரையறுக்கப்பட்ட முறையில் இயங்குகிறது. சிறிது நேரம் கழித்து மீண்டும் முயற்சிக்கவும் அல்லது ஆங்கிலத்தில் கேட்கவும்.",
+    "te": "సేవ ప్రస్తుతం పరిమిత మోడ్‌లో నడుస్తోంది. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి లేదా ఆంగ్లంలో అడగండి.",
+    "bn": "পরিষেবাটি বর্তমানে সীমিত মোডে চলছে। অনুগ্রহ করে কিছুক্ষণ পরে আবার চেষ্টা করুন বা ইংরেজিতে জিজ্ঞাসা করুন।",
+    "ml": "സേവനം ഇപ്പോൾ പരിമിത മോഡിൽ പ്രവർത്തിക്കുന്നു. ദയവായി കുറച്ച് സമയത്തിന് ശേഷം വീണ്ടും ശ്രമിക്കുക അല്ലെങ്കിൽ ഇംഗ്ലീഷിൽ ചോദിക്കുക.",
+    "kn": "ಸೇವೆ ಪ್ರಸ್ತುತ ಸೀಮಿತ ಮೋಡ್‌ನಲ್ಲಿ ಕಾರ್ಯನಿರ್ವಹಿಸುತ್ತಿದೆ. ದಯವಿಟ್ಟು ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ ಅಥವಾ ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಕೇಳಿ.",
+    "gu": "સેવા હાલમાં મર્યાદિત મોડમાં ચાલી રહી છે. કૃપા કરીને થોડા સમય પછી ફરી પ્રયાસ કરો અથવા અંગ્રેજીમાં પૂછો.",
+    "or": "ସେବା ବର୍ତ୍ତମାନ ସୀମିତ ମୋଡରେ ଚାଲୁଛି। ଦୟାକରି କିଛି ସମୟ ପରେ ପୁନର୍ବାର ଚେଷ୍ଟା କରନ୍ତୁ କିମ୍ବା ଇଂରାଜୀରେ ପଚାରନ୍ତୁ।",
+    "pa": "ਸੇਵਾ ਇਸ ਵੇਲੇ ਸੀਮਤ ਮੋਡ ਵਿੱਚ ਚੱਲ ਰਹੀ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ ਥੋੜ੍ਹੀ ਦੇਰ ਬਾਅਦ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ ਜਾਂ ਅੰਗਰੇਜ਼ੀ ਵਿੱਚ ਪੁੱਛੋ।",
+}
+
+
+def _degraded_message_for(lang: str) -> str:
+    return _DEGRADED_MESSAGES.get(lang, _DEGRADED_MESSAGES["en"])
+
+
+def _contains_indic_script(text: str) -> bool:
+    """True if text contains any Indic Unicode block (Devanagari etc.)."""
+    for ch in text or "":
+        cp = ord(ch)
+        # Devanagari 0900-097F, Bengali 0980-09FF, etc. up to Malayalam 0D7F
+        if 0x0900 <= cp <= 0x0D7F:
+            return True
+        # also Gujarati 0A80 etc. already covered, but add Odia/others
+        if 0x0A00 <= cp <= 0x0AFF or 0x0B00 <= cp <= 0x0BFF or 0x0C00 <= cp <= 0x0CFF:
+            return True
+    return False
+
 
 def resolve_location(place_name: str) -> Location:
     """Free-text place name -> Location.
@@ -325,10 +358,11 @@ class ORCAGraphState(TypedDict, total=False):
 
     normalized_query: str
     language: str
+    language_mode: str  # fast-path | llm | rules (from LanguageAgent)
     plan: dict
     plan_mode: str
     # Routing explainability (auto mode)
-    routing_mode: str  # fast-rules | llm-planner | rules
+    routing_mode: str  # fast-rules | llm-planner | rules | degraded
     routing_reason: str
     complexity: str  # fast | standard | deep
     location: Location
@@ -674,6 +708,7 @@ class Orchestrator:
         return {
             "normalized_query": result["normalized_query"],
             "language": result["language"],
+            "language_mode": result.get("mode", "unknown"),
             "timings": timings,
             "traces": [trace],
         }
@@ -1244,6 +1279,30 @@ class Orchestrator:
         return answer[:1500]
 
     def _node_unsupported(self, state: ORCAGraphState) -> dict:
+        plan = state.get("plan") or {}
+        # Handle degraded non-English + LLM outage case with honest localized message
+        if plan.get("degraded"):
+            lang = plan.get("degraded_language") or state.get("language", "en")
+            degraded_msg = plan.get("degraded_message") or _degraded_message_for(lang)
+            trace = AgentTrace(
+                agent_name="Orchestrator",
+                action=f"Degraded mode response for non-English query (lang={lang}, LLM unavailable)",
+                result_summary=f"Returned honest limited-mode message in '{lang}' instead of attempting regex on untranslated text.",
+                data_sources=[],
+                duration_ms=0.0,
+            )
+            return {
+                "response": OrchestratorResponse(
+                    answer=degraded_msg,
+                    status=SafetyStatus.CAUTION,
+                    reasoning=[f"LLM unavailable — could not translate query from '{lang}'. Service is in limited mode."],
+                    evidence_sources=[],
+                    trace=list(state.get("traces") or []) + [trace],
+                    language=lang,
+                    routing={"intent": "unknown", "agents": [], "routing_mode": "degraded", "complexity": "fast", "reason": plan.get("why",""), "confidence": 0.0},
+                ),
+                "traces": [trace],
+            }
         trace = AgentTrace(
             agent_name="Orchestrator",
             action="No specialist agent matched this intent",
@@ -1272,6 +1331,76 @@ class Orchestrator:
     # Shared step helpers (used by graph nodes AND the sequential fallback)
     # ------------------------------------------------------------------
     def _step_plan(self, normalized_query: str, raw_query: str, state: ORCAGraphState):
+        # CRITICAL CORRECTNESS GAP FIX: non-English query + full LLM outage.
+        # LanguageAgent falls back to script detection (correctly identifies language)
+        # but does NOT translate — normalized_query stays in original language.
+        # English-only regex in auto_router / _plan would produce zero hits and
+        # silently yield a wrong/empty plan. Detect this explicitly and short-
+        # circuit to a clear honest degraded-mode response in the detected language.
+        lang = state.get("language", "en")
+        lang_mode = state.get("language_mode", "")
+        # Determine if translation could not be performed
+        translation_missing = False
+        if lang != "en":
+            if lang_mode == "rules":
+                translation_missing = True
+            elif _contains_indic_script(normalized_query) or normalized_query.strip() == raw_query.strip():
+                translation_missing = True
+            elif not llm_client.is_available():
+                translation_missing = True
+        if lang != "en" and translation_missing:
+            degraded_msg = _degraded_message_for(lang)
+            plan = {
+                "intent": "unknown",
+                "location_name": "unknown",
+                "time_window": "today",
+                "target_hour": None,
+                "months_back": None,
+                "agents_needed": [],
+                "why": f"[degraded] LLM unavailable — non-English query in '{lang}' could not be translated. Returning honest limited-mode message.",
+                "duration_ms": 0.0,
+                "routing_mode": "degraded",
+                "complexity": "fast",
+                "confidence": 0.0,
+                "degraded": True,
+                "degraded_language": lang,
+                "degraded_message": degraded_msg,
+            }
+            plan_mode = "degraded"
+            location = DEFAULT_LOCATION
+            context = QueryContext(
+                raw_query=raw_query,
+                location=location,
+                time_window=plan["time_window"],
+                session_id=state["session_id"],
+                language=lang,
+                device_gps=state.get("device_gps"),
+                destination=state.get("destination"),
+                target_hour=None,
+                vessel_class=state.get("vessel_class") or "small_fishing_boat",
+            )
+            # Still persist language for next turn (but not a bogus location)
+            try:
+                session_store.upsert(
+                    state["session_id"],
+                    location_name="",
+                    lat=location.lat, lon=location.lon,
+                    time_window=plan["time_window"],
+                    language=lang,
+                    last_intent=plan["intent"],
+                    last_query=raw_query,
+                )
+            except Exception:
+                pass
+            trace = AgentTrace(
+                agent_name="PlanningAgent",
+                action=f"Degraded mode — non-English query '{lang}' with LLM unavailable [routing=degraded]",
+                result_summary=f"Service is in limited mode; translation unavailable. Returned localized degraded message for '{lang}'.",
+                data_sources=[],
+                duration_ms=0.0,
+            )
+            return plan, plan_mode, location, context, trace
+
         prior = session_store.get(state["session_id"])
         plan, plan_mode = self._plan(normalized_query, prior=prior)
 
@@ -1526,7 +1655,10 @@ class Orchestrator:
         t_lang0 = time.perf_counter()
         lang_result, t = self.language_agent.run(state["raw_query"])
         timings["language_ms"] = round((time.perf_counter() - t_lang0) * 1000, 1)
-        state.update(lang_result)
+        # Preserve orchestrator mode — language result's "mode" is language_mode (fast-path/llm/rules)
+        state["language"] = lang_result.get("language", "en")
+        state["normalized_query"] = lang_result.get("normalized_query", state["raw_query"])
+        state["language_mode"] = lang_result.get("mode", "unknown")
         trace.append(t)
 
         t_plan0 = time.perf_counter()
@@ -1740,7 +1872,9 @@ class Orchestrator:
         spec = SPECIALIST_REGISTRY[target_key]
 
         lang_result, t = self.language_agent.run(state["raw_query"])
-        state.update(lang_result)
+        state["language"] = lang_result.get("language", "en")
+        state["normalized_query"] = lang_result.get("normalized_query", state["raw_query"])
+        state["language_mode"] = lang_result.get("mode", "unknown")
         trace.append(t)
 
         plan, plan_mode, location, context, t = self._step_plan(
@@ -1748,6 +1882,13 @@ class Orchestrator:
         )
         state.update({"plan": plan, "location": location, "context": context})
         trace.append(t)
+        # Handle degraded non-English + LLM outage for direct mode as well
+        if plan.get("degraded"):
+            unsupported = self._node_unsupported(state)["response"]
+            unsupported.trace = trace + unsupported.trace
+            unsupported.mode = "agent"
+            unsupported.answered_by = f"{spec['name']} (direct -- degraded mode)"
+            return unsupported
 
         def _run_ocean():
             reading, t = self.ocean_state_agent.run(

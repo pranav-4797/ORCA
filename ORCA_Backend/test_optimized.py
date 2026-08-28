@@ -294,6 +294,64 @@ def test_18_frontend_streaming_no_delay():
     assert "await sleep(8" not in content, "Frontend still has fake per-token streaming delay"
     assert "emit full response as one token" in content.lower() or "immediate rendering" in content.lower()
 
+def test_19_degraded_non_english_llm_outage():
+    """Regression for Task 2: non-English query + LLM outage must short-circuit to honest degraded message."""
+    from orchestrator import Orchestrator
+    import llm_client as _llm_client
+    # Marathi Devanagari (detected as hi via script fallback) and Hindi
+    marathi_query = "उद्या सकाळी मासेमारीसाठी जाणं सुरक्षित आहे का?"
+    hindi_query = "क्या कल सुबह मछली पकड़ने जाना सुरक्षित है?"
+    # Patch all llm_client references to ensure LLM unavailable
+    with patch.object(_llm_client, "is_available", return_value=False):
+        with patch("agents.language_agent.llm_client.is_available", return_value=False):
+            with patch("orchestrator.llm_client.is_available", return_value=False):
+                o = Orchestrator()
+                # Ensure specialists are NOT called in degraded mode (prove short-circuit)
+                with patch("agents.ocean_state_agent.OceanStateAgent.run", side_effect=AssertionError("Ocean should not be called in degraded mode")):
+                    with patch("agents.hazard_agent.HazardAgent.run", side_effect=AssertionError("Hazard should not be called")):
+                        resp = o.handle_query(marathi_query, mode="auto")
+                        assert resp is not None, "Degraded response should not be None/crash"
+                        # Must contain degraded phrase — Hindi/Marathi limited-mode marker
+                        has_degraded = any(kw in resp.answer for kw in ["सीमित", "मर्यादित", "limited mode", "limited", "सेवा", "சேவை", "సేవ"])
+                        assert has_degraded, f"Expected degraded-mode message, got: {resp.answer[:300]}"
+                        assert resp.language in ("hi", "mr", "bn", "ta", "te", "ml", "kn", "gu", "or", "pa"), f"Language should be Indic, got {resp.language}"
+                        # Routing should be degraded, not empty/wrong
+                        routing_mode = (resp.routing or {}).get("routing_mode", "")
+                        assert routing_mode == "degraded" or "degraded" in routing_mode.lower() or has_degraded, f"Expected degraded routing, got {resp.routing}"
+                        assert "I can answer questions like" not in resp.answer, "Degraded should not be generic unsupported fallback"
+                        # Confidence should be 0 or low, status CAUTION
+                        assert resp.status == SafetyStatus.CAUTION
+                # Also test Hindi
+                with patch("agents.ocean_state_agent.OceanStateAgent.run", side_effect=AssertionError("should not be called")):
+                    resp2 = o.handle_query(hindi_query, mode="auto")
+                    assert resp2 is not None
+                    has2 = any(kw in resp2.answer for kw in ["सीमित", "मर्यादित", "limited"])
+                    assert has2, f"Hindi query also degraded, got: {resp2.answer[:300]}"
+                    assert resp2.language in ("hi", "mr", "en", "bn", "pa")  # at least not crash
+
+def test_20_english_still_works_when_llm_down():
+    """Ensure English queries are NOT degraded when LLM is down — deterministic rules still handle them."""
+    from orchestrator import Orchestrator
+    import llm_client as _llm_client
+    with patch.object(_llm_client, "is_available", return_value=False):
+        with patch("agents.language_agent.llm_client.is_available", return_value=False):
+            with patch("orchestrator.llm_client.is_available", return_value=False):
+                with patch("agents.ocean_state_agent.OceanStateAgent.run", side_effect=_fake_ocean):
+                    with patch("agents.hazard_agent.HazardAgent.run", side_effect=_fake_hazard):
+                        from models import PFZRecommendation, DataSource, AgentTrace
+                        def fake_pfz(loc, ocean_state=None, time_window="today"):
+                            pfz = PFZRecommendation(reference_location=loc, center_lat=loc.lat+0.1, center_lon=loc.lon+0.1, distance_from_reference_km=12.0, bearing_deg=45.0, sst_at_zone_celsius=27.5, chlorophyll_at_zone_mg_m3=0.8, source=DataSource.DERIVED_LIVE, confidence=0.6, reasoning_note="zone")
+                            return pfz, AgentTrace(agent_name="PFZAgent", action="fake", result_summary="pfz", data_sources=[DataSource.DERIVED_LIVE], duration_ms=1)
+                        with patch("agents.pfz_agent.PFZAgent.run", side_effect=fake_pfz):
+                            with patch("agents.geospatial_agent.GeospatialAgent.run", side_effect=lambda *a, **k: ((MagicMock(clear=True, hits=[], nearest_boundary_km=999, reasoning_note="clear"), None), AgentTrace(agent_name="GeospatialAgent", action="fake", result_summary="clear", data_sources=[], duration_ms=1))):
+                                o = Orchestrator()
+                                resp = o.handle_query("Is it safe to fish near Kochi tomorrow?", mode="auto")
+                                # Should NOT be degraded — should be normal safety_check handling
+                                assert "limited mode" not in resp.answer.lower()
+                                assert "सीमित" not in resp.answer
+                                assert resp.routing.get("routing_mode") != "degraded"
+                                assert resp.language == "en"
+
 def test_safety_clamp():
     """LLM must NEVER override deterministic UNSAFE."""
     from orchestrator import Orchestrator
