@@ -15,6 +15,8 @@ from .state import (
     resolve_location,
     _degraded_message_for,
     _contains_indic_script,
+    _contains_romanized_regional_language,
+    _detect_romanized_language,
 )
 
 from models import AgentTrace, Location, QueryContext
@@ -187,6 +189,15 @@ class PlanningMixin:
                 translation_missing = True
             elif not llm_client.is_available():
                 translation_missing = True
+        # Romanized regional language extension (Task 2 follow-up):
+        # ASCII romanized queries like "kal subah machli pakadna safe hai kya"
+        # are detected as "en" via fast-path, but contain distinctive transliterated
+        # keywords. If LLM is unavailable, treat them as degraded same as Indic script.
+        is_romanized = _contains_romanized_regional_language(raw_query) or _contains_romanized_regional_language(normalized_query)
+        if lang == "en" and is_romanized and not llm_client.is_available():
+            detected = _detect_romanized_language(raw_query) or _detect_romanized_language(normalized_query) or "hi"
+            lang = detected
+            translation_missing = True
         if lang != "en" and translation_missing:
             degraded_msg = _degraded_message_for(lang)
             plan = {

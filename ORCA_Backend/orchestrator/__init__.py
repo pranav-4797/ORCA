@@ -157,6 +157,95 @@ def _contains_indic_script(text: str) -> bool:
             return True
     return False
 
+# Romanized (Latin-script) regional language keywords — Task 2 extension
+ROMANIZED_KEYWORDS: dict[str, list[str]] = {
+    "hi": [
+        "surakshit", "suraksha", "machli", "machhli", "machhara", "samundar",
+        "samundra", "toofan", "khatra", "chetavni", "leher", "hawa",
+        "kinara", "mausam", "jaal", "machuara",
+    ],
+    "mr": [
+        "surakshit", "maasa", "samudra", "vadal", "dhoka", "ishara",
+        "lahari", "vaara", "kinara", "maasaemari", "hawaman", "kolivada",
+        "maase", "dhokadayak",
+    ],
+    "ta": [
+        "paadukappu", "meen", "kadal", "apayam", "echcharikkai", "alai",
+        "kaatru", "karai", "meenpidippu", "vaanilai", "puyal", "suzhal",
+        "meenpidippa", "kadalora",
+    ],
+    "te": [
+        "bhadrata", "chepa", "samudram", "pramadam", "hechcharika", "alalu",
+        "gali", "teeram", "chepala", "vaatavaranam", "toofan", "chakravatam",
+        "samudra", "chepalu",
+    ],
+    "bn": [
+        "nirapad", "machh", "samudra", "bipad", "satarkata", "dheu",
+        "hawa", "upakul", "jal", "abhawa", "jhor", "ghurnijhar",
+        "machher", "samudre",
+    ],
+    "ml": [
+        "suraksha", "meen", "kadal", "apakadam", "munnaicharika", "thira",
+        "kaattu", "karavan", "meenpiditham", "kalavastha", "kottumkaatu",
+        "chakravatam", "kadalora", "meenukal",
+    ],
+    "kn": [
+        "suraksha", "meenu", "samudra", "apaya", "hechcharike", "ale",
+        "gaali", "karavali", "meenugarike", "havamana", "bharane", "chakravata",
+        "samudrada", "meenugalu",
+    ],
+    "gu": [
+        "surakshit", "machhli", "samudra", "khatro", "chetavni", "lahari",
+        "hawa", "kinaro", "machhimari", "havaman", "vavazodu", "chakravat",
+        "dariyo", "machhal",
+    ],
+    "or": [
+        "suraksha", "machha", "samudra", "bipad", "satarka", "dheu",
+        "pabana", "kula", "jal", "panipaga", "jhada", "batya",
+        "samudrakula", "macha",
+    ],
+    "pa": [
+        "surakhia", "machhi", "samundar", "khatra", "chetavni", "lehar",
+        "hawa", "kinara", "machhi", "mausam", "toofan", "chakravat",
+        "jal", "samundra",
+    ],
+}
+
+_ROMANIZED_WORD_TO_LANG: dict[str, str] = {}
+for _lang, _words in ROMANIZED_KEYWORDS.items():
+    for _w in _words:
+        _lw = _w.lower()
+        if _lw not in _ROMANIZED_WORD_TO_LANG:
+            _ROMANIZED_WORD_TO_LANG[_lw] = _lang
+
+def _contains_romanized_regional_language(text: str) -> bool:
+    if not text or not text.strip():
+        return False
+    low = text.lower()
+    import re
+    words = set(re.findall(r"[a-zA-Z]+", low))
+    for w in words:
+        if w in _ROMANIZED_WORD_TO_LANG:
+            return True
+    for kw in _ROMANIZED_WORD_TO_LANG:
+        if re.search(r"\b" + re.escape(kw) + r"\b", low):
+            return True
+    return False
+
+def _detect_romanized_language(text: str) -> str | None:
+    if not text:
+        return None
+    low = text.lower()
+    import re
+    words = re.findall(r"[a-zA-Z]+", low)
+    for w in words:
+        if w in _ROMANIZED_WORD_TO_LANG:
+            return _ROMANIZED_WORD_TO_LANG[w]
+    for kw, lang in _ROMANIZED_WORD_TO_LANG.items():
+        if re.search(r"\b" + re.escape(kw) + r"\b", low):
+            return lang
+    return None
+
 
 def resolve_location(place_name: str) -> Location:
     """Free-text place name -> Location.
@@ -1489,6 +1578,12 @@ class Orchestrator:
                 translation_missing = True
             elif not llm_client.is_available():
                 translation_missing = True
+        # Romanized extension
+        is_romanized = _contains_romanized_regional_language(raw_query) or _contains_romanized_regional_language(normalized_query)
+        if lang == "en" and is_romanized and not llm_client.is_available():
+            detected = _detect_romanized_language(raw_query) or _detect_romanized_language(normalized_query) or "hi"
+            lang = detected
+            translation_missing = True
         if lang != "en" and translation_missing:
             degraded_msg = _degraded_message_for(lang)
             plan = {

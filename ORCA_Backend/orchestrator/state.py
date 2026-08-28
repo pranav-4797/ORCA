@@ -70,6 +70,125 @@ def _contains_indic_script(text: str) -> bool:
             return True
     return False
 
+# Romanized (Latin-script) regional language keywords — Task 2 extension
+# 10-15 distinctive transliterated words per language, NOT English overlap.
+# These are used only when LLM is unavailable to catch queries like
+# "kal subah machli pakadna safe hai kya" which is ASCII but Hindi.
+
+ROMANIZED_KEYWORDS: dict[str, list[str]] = {
+    # Hindi (hi) — Devanagari romanized
+    "hi": [
+        "surakshit", "suraksha", "machli", "machhli", "machhara", "samundar",
+        "samundra", "toofan", "khatra", "chetavni", "leher", "hawa",
+        "kinara", "mausam", "jaal", "machuara",
+    ],
+    # Marathi (mr)
+    "mr": [
+        "surakshit", "maasa", "samudra", "vadal", "dhoka", "ishara",
+        "lahari", "vaara", "kinara", "maasaemari", "hawaman", "kolivada",
+        "maase", "dhokadayak",
+    ],
+    # Tamil (ta)
+    "ta": [
+        "paadukappu", "meen", "kadal", "apayam", "echcharikkai", "alai",
+        "kaatru", "karai", "meenpidippu", "vaanilai", "puyal", "suzhal",
+        "meenpidippa", "kadalora",
+    ],
+    # Telugu (te)
+    "te": [
+        "bhadrata", "chepa", "samudram", "pramadam", "hechcharika", "alalu",
+        "gali", "teeram", "chepala", "vaatavaranam", "toofan", "chakravatam",
+        "samudra", "chepalu",
+    ],
+    # Bengali (bn)
+    "bn": [
+        "nirapad", "machh", "samudra", "bipad", "satarkata", "dheu",
+        "hawa", "upakul", "jal", "abhawa", "jhor", "ghurnijhar",
+        "machher", "samudre",
+    ],
+    # Malayalam (ml)
+    "ml": [
+        "suraksha", "meen", "kadal", "apakadam", "munnaicharika", "thira",
+        "kaattu", "karavan", "meenpiditham", "kalavastha", "kottumkaatu",
+        "chakravatam", "kadalora", "meenukal",
+    ],
+    # Kannada (kn)
+    "kn": [
+        "suraksha", "meenu", "samudra", "apaya", "hechcharike", "ale",
+        "gaali", "karavali", "meenugarike", "havamana", "bharane", "chakravata",
+        "samudrada", "meenugalu",
+    ],
+    # Gujarati (gu)
+    "gu": [
+        "surakshit", "machhli", "samudra", "khatro", "chetavni", "lahari",
+        "hawa", "kinaro", "machhimari", "havaman", "vavazodu", "chakravat",
+        "dariyo", "machhal",
+    ],
+    # Odia (or) — romanized
+    "or": [
+        "suraksha", "machha", "samudra", "bipad", "satarka", "dheu",
+        "pabana", "kula", "jal", "panipaga", "jhada", "batya",
+        "samudrakula", "macha",
+    ],
+    # Punjabi (pa)
+    "pa": [
+        "surakhia", "machhi", "samundar", "khatra", "chetavni", "lehar",
+        "hawa", "kinara", "machhi", "mausam", "toofan", "chakravat",
+        "jal", "samundra",
+    ],
+}
+
+# Flatten for quick check and map lowercased word -> language
+_ROMANIZED_WORD_TO_LANG: dict[str, str] = {}
+for _lang, _words in ROMANIZED_KEYWORDS.items():
+    for _w in _words:
+        _lw = _w.lower()
+        # Keep first language for duplicate words like "surakshit" (hi/mr/gu) -> hi
+        if _lw not in _ROMANIZED_WORD_TO_LANG:
+            _ROMANIZED_WORD_TO_LANG[_lw] = _lang
+
+def _contains_romanized_regional_language(text: str) -> bool:
+    """
+    True if text contains any romanized regional keyword as a whole word.
+    Case-insensitive, word-boundary aware, Latin-script only.
+    Does not flag English queries because list contains no English words
+    like 'safe', 'cyclone', 'fish', etc. — only transliterated forms.
+    """
+    if not text or not text.strip():
+        return False
+    # Quick ASCII check — romanized is ASCII, but we still need to scan
+    low = text.lower()
+    # Split into words by non-alphabetic to handle punctuation
+    import re
+    words = set(re.findall(r"[a-zA-Z]+", low))
+    # Also check multi-word phrases like "machli pakadna" — we split those into individual words already,
+    # but some keywords are multi-word? In our list, most are single words; a few are phrases like "machhi fadhna" not present.
+    # For now, check single-word hits; also check substring with word boundaries for robustness
+    for w in words:
+        if w in _ROMANIZED_WORD_TO_LANG:
+            return True
+    # Additional: check if any keyword appears as substring with word boundaries (for hyphenated etc.)
+    for kw in _ROMANIZED_WORD_TO_LANG:
+        # Use word boundary regex for each kw
+        if re.search(r"\b" + re.escape(kw) + r"\b", low):
+            return True
+    return False
+
+def _detect_romanized_language(text: str) -> str | None:
+    """Return language code for first romanized keyword found, else None."""
+    if not text:
+        return None
+    low = text.lower()
+    import re
+    words = re.findall(r"[a-zA-Z]+", low)
+    for w in words:
+        if w in _ROMANIZED_WORD_TO_LANG:
+            return _ROMANIZED_WORD_TO_LANG[w]
+    for kw, lang in _ROMANIZED_WORD_TO_LANG.items():
+        if re.search(r"\b" + re.escape(kw) + r"\b", low):
+            return lang
+    return None
+
 def resolve_location(place_name: str) -> Location:
     key = " ".join((place_name or "").strip().lower().split())
     if key in KNOWN_LOCATIONS:
