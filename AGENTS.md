@@ -1,182 +1,210 @@
-# 🌊 ORCA — Maritime Intelligence & Navigation Co-Pilot
-## Comprehensive Architecture, Agent Ecosystem & Tech Stack Specification
+# ORCA — Agent Operating Guide (AGENTS.md)
+
+**Project:** ORCA — Marine EcOsystem Reasoning with Collaborative Agents
+**Event:** SIH 2026 — Problem Statement 26176 (ISRO)
+**Repo:** `orcaV1` — GitHub `FarhanFarooqi122/orca-sih26176` (private), branch `main`
+**Current HEAD:** `dc6b9a3` (in sync with `origin/main`)
+**Date of last full review:** 2026-08-29
 
 ---
 
-## 1. Executive Summary & Mission
-**ORCA** (Oceanic Reconnaissance & Coastal Advisory) is an autonomous, multi-agent maritime intelligence co-pilot engineered for **Indian coastal waters, the Indian Ocean, and the Exclusive Economic Zone (EEZ)**.
+## 1. What this document is
 
-The platform provides life-critical, real-time safety advisories, Potential Fishing Zones (PFZ), oceanographic hazard alerts, and passage clearance for **coastal fishermen, marine divers, vessel skippers, and naval watch officers**.
+The day-one orientation + living status source for anyone (human or coding agent)
+working on ORCA. It supersedes the old "gap analysis" framing from 2026-08-25:
+all 10 PS components and every P0/P1 gap are now implemented. It documents how
+to run, verify, and extend the system, what the real architecture is, what remains
+credential-blocked, and the conventions that must not be broken.
 
----
-
-## 2. Full-Stack Technology Landscape
-
-```mermaid
-graph TD
-    Client["🌐 ORCA Web App (ECDIS UI)\nVanilla TypeScript + Vite\nHosted on Firebase Hosting"]
-    Auth["🔐 Firebase Auth\nGoogle Sign-In"]
-    DB["🗄️ Cloud Firestore\nMulti-Session Persistence\nusers/{uid}/chats/{chatId}"]
-    Backend["⚡ ORCA Multi-Agent Backend\nFastAPI + Python 3.12 + LangGraph\nHosted on Render (Docker)"]
-    LLM["🧠 Groq LLM Inference\nllama-3.3-70b-versatile / gpt-oss-120b\nWhisper STT Audio Engine"]
-    Feeds["🛰️ Live Oceanographic Feeds\nIMD CAP Alerts • Open-Meteo • UHSLC Tides • ETOPO Bathymetry"]
-
-    Client --> Auth
-    Client --> DB
-    Client <-->|REST / SSE Telemetry| Backend
-    Backend --> LLM
-    Backend --> Feeds
-```
-
-### Frontend (`ORCA UI/`)
-- **Core Engine:** Vanilla TypeScript (Strict mode) bundled with Vite 5.4.
-- **Design System:** Custom **ECDIS (Electronic Chart Display & Information System)** Nautical Design Tokens (`variables.css`, `layout.css`, `components.css`).
-  - Dual Theme: **ECDIS Night Station** (`#070d14` deep abyss) and **Sunlight Deck High-Visibility** (`#f4f8fa`).
-- **Mapping & GIS Engine:** Leaflet.js with custom maritime vector layers, PFZ thermal rings, bathymetric contours, and IMD hazard polygon hit-testing.
-- **Speech Audio Engine:** Web Speech API TTS for spoken hands-free audio advisories on boats, combined with Web Audio API speech recognition.
-- **Cloud Infrastructure:** Firebase Hosting (`https://orca-2530.web.app`), Firebase Auth, and Cloud Firestore.
-
-### Backend (`ORCA_Backend/`)
-- **Core Engine:** Python 3.12 + FastAPI with asynchronous ASGI event loops.
-- **Multi-Agent Orchestrator:** LangGraph 1.2 state graph managing agent concurrency, round-table debate deliberation, and synthesis.
-- **LLM Provider:** Groq Cloud API (`https://api.groq.com/openai/v1`) using function-calling schema constraints (`llm_client.py`).
-- **Containerization:** Docker container with dynamic `$PORT` binding on Render (`https://orca-backend-1i5u.onrender.com`).
+Source documents that define the requirement: `DOC-20260824-WA0005.pdf` (15 pages)
+and the SIH PS-26176 description (NL intent, auto language detect/reply, multi-turn
+context, autonomous multi-source integration, spatial/temporal/contextual reasoning,
+explainable evidence-backed answers with maps/charts, proactive alerts incl.
+weather/high-waves/LIGHTNING/cyclones, geofence push (IMBL/restricted/MPA),
+weather-aware route optimization, modular multi-agent collaboration, voice as a
+first-class mode, multilingual, safety NFRs).
 
 ---
 
-## 3. Multi-Agent Deliberation Architecture
+## 2. Run it
 
-ORCA deploys a committee of 7 specialized AI agents orchestrated through a LangGraph directed acyclic graph:
+```bash
+# Backend (from ORCA_Backend/)
+pip install -r requirements.txt
+python -m uvicorn main:app --port 8000            # docs UI at /docs
+python test_run.py                                # CLI smoke of the pipeline
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Coastal Officer / Fisher
-    participant Lang as Language Agent
-    participant Orch as LangGraph Orchestrator
-    participant Ocean as Ocean-State Agent
-    participant Haz as Hazard Agent (IMD CAP)
-    participant PFZ as PFZ Fish Agent
-    participant Geo as Geospatial & UKC Agent
-    participant Disc as Discussion Agent
-    participant Synth as Synthesis Agent
+# UI (from ORCA UI/) — vite auto-spawns the backend if :8000 is free
+npm install
+npm run dev                                       # http://localhost:3000
 
-    User->>Lang: Query (Text or Voice)
-    Lang-->>Orch: Normalized Marine Intent + Coordinates
-    par Specialist Execution
-        Orch->>Ocean: Fetch SWH, swell period, SST, currents
-        Orch->>Haz: Fetch IMD cyclone warnings & storm polygons
-        Orch->>PFZ: Fetch Chlorophyll-a & thermal fronts
-        Orch->>Geo: Check EEZ, IMBL borders & depth clearances
-    end
-    Ocean-->>Disc: Oceanographic telemetry
-    Haz-->>Disc: Active hazard status
-    PFZ-->>Disc: Fishing coordinates & probability
-    Geo-->>Disc: Navigation constraints & UKC
-    Disc->>Disc: Round-Table Debate & Cross-Examination
-    Disc-->>Synth: Reconciled Consensus
-    Synth-->>User: Structured ECDIS Verdict HUD Card + Spoken Audio
+# One-command container deploy
+docker compose up --build
 ```
 
-### Agent Roles & Specifications:
-
-| Agent | Core Logic & Data Connectors | Primary Output |
-|---|---|---|
-| **1. Language Agent** | Detects and translates 11 Indian coastal vernaculars (Marathi, Tamil, Malayalam, Telugu, Bengali, Gujarati, Kannada, Odia, Hindi). | Normalized prompt + geographic extraction |
-| **2. Ocean-State Agent** | Queries Open-Meteo Marine API, UHSLC harmonic tide stations, and wind vectors. | Significant Wave Height (m), Swell (s), SST (°C) |
-| **3. Hazard Agent** | Live parser for IMD CAP XML RSS feeds (`cap-sources.s3.amazonaws.com/in-imd-en`). Ray-casting polygon intersection. | Cyclone alerts, rough sea warnings, danger levels |
-| **4. PFZ Agent** | Computes chlorophyll-a concentration boundaries and sea surface thermal gradients. | Highest probability fishing coordinates & species info |
-| **5. Geospatial & UKC Agent** | Calculates vessel draft, under-keel clearance (UKC), tidal depths, and distance to IMBL / EEZ borders. | Safe waypoint tracks & boundary collision flags |
-| **6. Discussion Agent** | Multi-agent debate mechanism where agents cross-examine findings (e.g., PFZ high fish vs. Hazard high swell). | Resolved contradictions & consensus |
-| **7. Synthesis Agent** | Formulates the definitive 3-second safety verdict, metric chips, and provenance badges. | ECDIS Verdict HUD Card + Full brief |
+- Backend needs `ORCA_Backend/.env` (git-ignored; template `.env.example`) with a
+  free **Groq** key (`GROQ_API_KEY`) for the LLM + Whisper STT layers. Everything
+  degrades gracefully without it (rule/keyword fallbacks, template answers).
+- The deployed backend (`https://orca-backend-1i5u.onrender.com`, Render free plan,
+  Docker, region Singapore) can go cold/offline; local is the reliable path.
+  Render health: `GET /health`. Render service = `ORCA_Backend/Dockerfile` +
+  `render.yaml`; UI is hosted on Firebase (`orca-2530.web.app`, CORS allow-listed).
 
 ---
 
-## 4. Cloud Firestore Schema & Data Isolation
+## 3. Architecture (current reality)
 
-All user session history and chat telemetry are partitioned under the authenticated user's unique Firebase UID:
+Backend: FastAPI (`main.py`, v0.3.0) + **LangGraph** orchestrator split into a
+package `orchestrator/` (`graph.py` graph+conditional edges, `planning.py` planner
+schema v3 + rule fallback, `state.py` shared state + `Intent` constants,
+`dispatch.py` parallel specialist dispatch). A regex `auto_router.py` fast path
+short-circuits common English intents before any LLM planning call. Specialists may
+hold a moderated round-table `agents/discussion_agent.py`, then `SynthesisAgent`
+reconciles and `ResponseAgent` writes the final message.
 
 ```
-users/
-  └── {UID}/
-        ├── profile/
-        │     ├── displayName: string
-        │     ├── email: string
-        │     ├── photoURL: string
-        │     └── lastActiveAt: timestamp
-        │
-        └── chats/
-              └── {chatId}/
-                    ├── title: string
-                    ├── model: string
-                    ├── pinned: boolean
-                    ├── messageCount: number
-                    ├── updatedAt: timestamp
-                    ├── lastMessagePreview: string
-                    │
-                    └── messages/
-                          └── {messageId}/
-                                ├── role: "user" | "assistant"
-                                ├── content: string
-                                ├── timestamp: number
-                                ├── activitySteps: Array<AgentActivityStep>
-                                ├── tokens: { prompt, completion, total }
-                                └── reactions: { type: "like" | "dislike" }
+/query -> session memory -> [auto_router] or [planning (LLM·tools)] -> dispatch
+   -> {ocean_state -> hazard} ∥ {pfz} ∥ {geospatial} ∥ {trend}
+   -> optional discussion round -> synthesis -> response -> trace + viz payload
 ```
 
-### Firestore Security Rules ([`firestore.rules`](file:///c:/Users/PRANAV/OneDrive/Desktop/PRANAV%20CHOPADE/ORCA/firestore.rules)):
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    function isAuthenticated() { return request.auth != null; }
-    function isOwner(userId) { return isAuthenticated() && request.auth.uid == userId; }
+| # | Component | Reality (2026-08-29) | Where |
+|---|---|---|---|
+| 1 | Language/Intent | Detects 11 Indic + English, normalizes; Unicode-script fallback; ASCII fast-path skips the LLM call on English | `agents/language_agent.py`, `auto_router.py` |
+| 2 | Orchestrator/Planner | LangGraph StateGraph; planning schema v3 (`intent` incl. `trend_analysis`/`zone_scan`, `target_hour`, `agents_needed`); parallel dispatch via ThreadPoolExecutor in one node; no-LLM fallback; sequential fallback if langgraph missing | `orchestrator/` |
+| 3 | PFZ | **LIVE official INCOIS/SAMUDRA advisory** is the primary source (`data_connectors/incois_pfz.py`: pfzLines + pfzMobile + sector text, 10-min TTL). Nearest point on the official digitized geometry drives distance/bearing/target coords. Fallbacks: derived live-SST ring (`DERIVED_LIVE`), seeded last resort. Official lookups return ONE exact answer template (no LLM) | `agents/pfz_agent.py`, `agents/pfz_output.py` |
+| 4 | Ocean-State | Live Open-Meteo marine+weather (parallel, unit-checked), real tide via UHSLC ERDDAP 8-constituent harmonic fit incl. next high/low + daily range, NOAA ERDDAP chlorophyll; exceedance windows over next 48 h; per-field provenance | `agents/ocean_state_agent.py`, `data_connectors/tide.py`, `data_connectors/chlorophyll.py` |
+| 5 | Hazard/Alert | Thresholds per vessel class; **keyless IMD CAP live** hit-tested vs location — cyclone, marine/fishermen bulletins AND lightning/thunderstorm via CAP terms; keyed `api.imd.gov.in` secondary coded (401-gated); unreachable = "unverifiable", never "clear" | `agents/hazard_agent.py`, `data_connectors/imd_cap.py`, `imd_live.py` |
+| 6 | Geospatial | Pure-Python point-in-polygon + segment distance vs treaty-digitized IMBL (India–SL 1974/76, Sir Creek) + MPAs, 15 km buffer; sampled planner + **bathymetry (ETOPO180 ERDDAP, keyless) + pure-Python A*** grid avoiding land/shallow cells | `agents/geospatial_agent.py`, `data_connectors/bathymetry.py`, `data/marine_boundaries.geojson` |
+| 7 | Synthesis | Reconciles findings + round-table transcript, flags conflicts, verdict/confidence/key_points; numeric `confidence_score` (0–1) + per-source `evidence_tiers` (Tier 1/2/3) | `agents/synthesis_agent.py`, `fleet_convergence.py` |
+| 8 | Explainability | Add-only `operator.add` `traces` channel; every node appends `AgentTrace` with duration; UI streams it live | `orchestrator/state.py`, `models.py` |
+| 9 | Response | Multilingual final answer (≤ ~70 words, concise mode), exact official INCOIS PFZ template on PFZ lookups, anti-hallucination rules, template fallback | `agents/response_agent.py` |
+| 10 | Proactive Monitor | Independent asyncio timer loop (15 min) re-polls OceanState/Hazard/Geospatial per registered user position; signature dedup (fires on new/escalating hazard or geofence approach only); composes alert in user's language; SSE push + Twilio SMS (no-dep REST, honestly disabled without creds) | `agents/proactive_monitor.py`, `alerts.py` |
 
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
-      match /{allSubcollections=**} {
-        allow read, write: if isOwner(userId);
-      }
-    }
-  }
-}
+### Cross-cutting subsystems (all live)
+
+- **Session memory**: `sessions.py` — location/time-window/language/GPS/destination
+  per `session_id`, 1 h TTL, anaphora-aware planning ("same place, tomorrow evening").
+- **Storage**: `storage.py` TTLStore — Redis when `REDIS_URL` set, in-process otherwise;
+  used by sessions + a 60 s response cache (absorbs UI retries/double-taps).
+- **Fleet convergence**: `fleet_convergence.py` + `/fleet/*` demo endpoints (simulated
+  fleet activity levels).
+- **Routing telemetry**: `routing_telemetry.py` + `/debug/telemetry[/summary]`;
+  routing fixtures in `ORCA_Backend/test_data/`.
+- **UI**: Vite + React + Leaflet (`ORCA UI/`). Streaming chat, verdict callouts, agent
+  activity panel, operational map (/viz GeoJSON), 48 h wave/gust charts, voice in/out,
+  Firebase Google-sign-in (`src/services/firebase.ts`), proactive SSE alert feed,
+  query-routing pills, mock fallback when backend/LIVE absent.
+- **Graceful degradation**: no key → rules + template answers; feed down → tagged
+  seeded fallback, never a crash; per-specialist failures are skipped, not fatal.
+
+### API surface (`main.py`)
+
+```
+GET  /health                         keep-alive (Render/UptimeRobot)
+GET  /debug/telemetry[/summary]      routing latency metrics
+GET  /agents                         addressable specialist registry
+GET  /api/pfz/live                   live INCOIS PFZ zones (official advisory JSON)
+POST /query                          {query, session_id?, device_gps?, destination?, mode?,
+                                      agent?, vessel_class?, query_depth?, fleet_demo_level?}
+POST /query/voice                    multipart audio -> Groq Whisper STT -> same graph (+transcribed_text)
+POST /users/register                 proactive alert registration (lat/lon/phone/language)
+GET/DELETE /users{/user_id}          registry list/delete
+POST /users/{user_id}/position       GPS heartbeat
+GET  /alerts/{user_id}               poll alerts
+GET  /alerts/stream/{user_id}        Server-Sent Events alert stream
+GET  /viz/{session_id}               consolidated GeoJSON FeatureCollection
+GET  /viz/{session_id}/series        hourly wave/gust series + exceedance windows + tide extremes
+POST /fleet/{status,simulate,clear,demo}
 ```
 
 ---
 
-## 5. Coastal Fishermen & Marine Divers UX Features
+## 4. Conventions (must not break)
 
-1. **One-Tap Quick-Action Deck ([`FishermanDeck.ts`](file:///c:/Users/PRANAV/OneDrive/Desktop/PRANAV%20CHOPADE/ORCA/ORCA%20UI/src/components/chat/FishermanDeck.ts)):**
-   - 🐟 **`PFZ HOTSPOT`**: One-tap fishing zone locator.
-   - 🌊 **`24H SWELL`**: Significant wave height and swell forecast.
-   - ⚠️ **`LIVE ALERTS`**: Cyclone and storm warning bulletins.
-   - 🤿 **`BATHYMETRY`**: Diving depths and under-keel clearance.
-2. **Spoken Audio Readout (TTS):**
-   - One-tap **"🔊 Listen"** button on every advisory for hands-free audio while steering at the helm.
-3. **Instant 3-Second Visual Safety Verdict:**
-   - 🟢 **SAFE TO VENTURE** / 🟡 **CAUTION ADVISED** / 🔴 **UNSAFE — DANGER (Cyclone/High Swell)**.
-
----
-
-## 6. Live Production Endpoints
-
-- **Live Web Application:** [https://orca-2530.web.app](https://orca-2530.web.app)
-- **Live Multi-Agent Backend:** [https://orca-backend-1i5u.onrender.com](https://orca-backend-1i5u.onrender.com)
-- **Keep-Alive Health Check:** [https://orca-backend-1i5u.onrender.com/health](https://orca-backend-1i5u.onrender.com/health)
-- **GitHub Repository:** [https://github.com/pranav-4797/ORCA](https://github.com/pranav-4797/ORCA)
-- **Firebase Console:** [https://console.firebase.google.com/project/orca-2530](https://console.firebase.google.com/project/orca-2530)
+- **Honesty/provenance:** per-field `field_sources` + `evidence_tiers`; degraded-mode
+  always disclosed; "unverifiable" ≠ "clear".
+- **LLMs reason ON TOP of deterministic data; they never invent numbers.**
+- **Graceful degradation everywhere** (no 500 on missing key/feed/package).
+- **Exact PFZ answer format:** for official INCOIS advisories the answer must be the
+  template in `agents/pfz_output.py` (`🛡️ IMPORTANT` → `🔶 VERDICT` → target coords →
+  `📋 Quick Summary`), 4-decimal coords, 1-decimal km, 8-point compass. Shared by
+  `ResponseAgent.run()` and the orchestrator fast path (`intent == "pfz_lookup"`). UI
+  skips its own verdict callout when the answer already contains `🛡️ IMPORTANT`.
+- **Do not re-introduce** the old "thermal-front heuristic / simulated chlorophyll /
+  not an official INCOIS advisory" wording on the official path; the derived-fallback
+  path still says honestly it is an estimate ("official advisory unavailable for this
+  spot today").
+- **API + agent-interface stability:** `/query` payload and v3 planner schema are
+  contract — extend, don't remove fields.
+- **No secrets in git:** `.env` is git-ignored; only `.env.example` tracked.
+- Backend code is Python 3.11+ (targeting 3.14); UI is TypeScript strict + tsc.
 
 ---
 
-## 7. Keep-Alive Health-Check Architecture (`GET /health`)
+## 5. Verify before you claim "done"
 
-To support automated uptime monitoring services (such as [UptimeRobot](https://uptimerobot.com)), ORCA exposes an ultra-lightweight, zero-overhead health check endpoint:
+```bash
+# Backend syntax for touched files
+python -m py_compile <changed .py files>
 
+# Quick smoke (needs no key)
+cd ORCA_Backend && python test_run.py
+
+# Unit-ish checks already in repo (run at least the ones covering your change)
+python test_health.py test_safety_floor.py test_fleet_convergence.py test_optimized.py
+python test_romanized_degraded.py test_demo_cache.py
+
+# UI typecheck + build (from ORCA UI/)
+npx tsc --noEmit
+npm run build
 ```
-GET /health
-Response: 200 OK -> {"status": "ok"}
-```
 
-- **Execution Profile:** Microsecond execution time (<1ms), returning pure static JSON.
-- **Independence:** Does not invoke LangGraph, Groq LLM inference, oceanographic connectors, or Firestore.
-- **Open Uptime Monitoring:** Bypasses API key guards and CORS restrictions so external cron workers and uptime checkers can monitor availability and keep the container responsive.
+Live-agency checks: `GET /health`; `POST /query` with `mode=panel` (round table),
+`mode=agent&agent=pfz` (official INCOIS answer template), `mode=auto` fast path; a
+follow-up with a `session_id` reusing the prior location; register a user + poll
+`/alerts`. CI skeleton: `.github/workflows/ci.yml`.
+
+---
+
+## 6. Feature-delivery history (git map)
+
+- The remote rewrite (34 commits) brought Firebase auth, dashboard+latency rework,
+  routing fixtures, fleet convergence, routing telemetry and Docker/Render deployment.
+- **INCOIS PFZ go-live** — `3a85744`..`5e1eeac` (connector + agent consumption +
+  `/api/pfz/live` + UI layer + docs).
+- **Official PFZ answer format** — `cbf67a3`..`dc6b9a3` (shared template, nearest-point
+  distance/bearing, popup metadata, verdict dedup). Current HEAD = `dc6b9a3`.
+- Session history and detailed decisions: `ORCA_Backend/SESSION_SUMMARY.md`
+  (Phases 1–13), `ORCA_Backend/PFZ_INCOIS_INTEGRATION.md`, `SESSION_LOG_2026-08-24.md`.
+
+---
+
+## 7. Remaining / blocked (accurate as of 2026-08-29)
+
+True gaps are all **externally blocked or polish** — the engine is complete:
+
+| Item | State |
+|---|---|
+| Bhuvan WMS live (ISRO's own platform) — SST/chl/buoy layers | Superseded: **INCOIS official PFZ is live** (evaluation-relevant); Bhuvan optional Tier-1 verification if account access granted (`isro_sources.py` stubs) |
+| `api.imd.gov.in` key + cyclone cone-of-uncertainty / wind-warning overlays | Code ready (`imd_live.py`), 401-gated, blocked on credentials; keyless CAP feed covers alerts today |
+| Twilio SMS live-fire | Sending code complete (`alerts.py`, urllib REST); needs trial verified number / TRAI DLT path |
+| PostGIS / vector DB / warehouse | Not present — storage is Redis-or-in-process JSON; PDF Sec. 13 stack for scale-out only |
+| LLM latency (cold ≈ 12–25 s; warm ≈ 10 s) | Sequential chain inherently so; next lever = discussion+synthesis fusion (README item 1) |
+| MOSDAC satellite SST/chl (Oceansat-3, user already downloaded sample NetCDFs via `mdapi.py`) | Connector stub only; wire into Ocean-State if a key/URL is approved |
+| Automated backend CI gate (currently `ci.yml` skeleton, scripts manual) | Polish |
+
+### Housekeeping (untracked, do not commit unless asked)
+
+`ORCA_Backend/_pre_incois_backup/` (pre-integration snapshot), `architecture*.png`,
+`ORCA_Backend/test_openmeteo.py`, `ORCA_Backend/demo_cache/` cache files, `__pycache__/`.
+
+---
+
+## 8. Quick reference — key env vars
+
+`GROQ_API_KEY` (LLM+STT) · `LLM_BASE_URL` · `LLM_MODEL` · `CORS_ORIGINS` ·
+`ORCA_API_KEY` (X-API-Key guard, skip in dev) · `REDIS_URL` (session/response cache) ·
+`ORCA_THRESHOLD_OVERRIDES` (per-vessel-class safety thresholds) ·
+`ORCA_RESPONSE_CACHE_TTL_S` (default 60) · `INCOIS_PFZ_TIMEOUT` ·
+`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER` (SMS).

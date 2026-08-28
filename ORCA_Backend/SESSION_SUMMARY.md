@@ -486,3 +486,66 @@ Prioritised for SIH evaluation impact; top four first.
 **Remaining for next session:** LLM `discussion+synthesis` fusion (`README.md:142`), verdict pill styling, optional Bhuvan/IMD/Twilio activation when creds exist. `AGENTS.md` / `ARCHITECTURE.md` pngs remain untracked.
 
 **Commits pushed this session:** `422879d`, `68ab602`, `830b5d1`, `62e0d76`, `5642e22`, `c4fad4b`, `2edecfc`, `f0ad9f9`, `a1b139e`, `6e005b2` → `origin/main` `6e005b2` (plus follow-up `SESSION_SUMMARY` commit below).
+
+---
+
+## 13. Sessions 2026-08-28/29 — repo reconcile, INCOIS PFZ go-live, official answer format
+
+**Context:** teammate rewrote `main` remotely (34 commits) with Firebase Auth
+(Google sign-in UI), dashboard + latency rework, routing fixtures, fleet-convergence
+demo and Docker/Render deployment. Local branch had 22 (mostly stale) commits the
+remote didn't — so instead of force-pushing, the local INCOIS work was **re-applied
+onto the rewritten `origin/main`** (cherry-pick reconcile, conflicts resolved
+additively, junk-glue fixed, each commit verified compiling, then fast-forward
+pushed). The old local lineage is preserved only in reflog.
+
+### Deliverable 1 — INCOIS / SAMUDRA official PFZ is now the primary PFZ source
+
+Official INCOIS feeds (keyless) replace the Bhuvan-derived/SST-front fallback as the
+**default**; derived/simulated remain only as honest fallbacks. Getting credible
+looking-feeds per SIH tier-3 expectations.
+
+| Commit | What |
+|---|---|
+| `3a85744` | `data_connectors/incois_pfz.py` — pfzLines + pfzMobile + sector-text fetch, nearest-landing-centre advisory, DMS→decimal parse, 10-min TTL cache, `INCOIS_PFZ_TIMEOUT` env |
+| `4e7d49d` | `pfz_agent.py` consumes official advisory (zone, landing centre, depth, validity); provider chain INCOIS_LIVE → DERIVED_LIVE (SST ring) → SIMULATED; `DataSource.INCOIS_LIVE` provenance |
+| `b1f14dd` | `GET /api/pfz/live` endpoint + advisory context surfaced in answers |
+| `27ef7cc` | UI: live PFZ map layer + landing-centre advisory card (source badge "Official INCOIS") |
+| `5e1eeac` | README/ARCHITECTURE source table update + `PFZ_INCOIS_INTEGRATION.md` report |
+
+**Verify (2026-08-29):** `GET /api/pfz/live` returns 300+ zones with landing centres /
+issued advisories; Row-N-in answer as "safety certificate/coordinate prescription"
+(per format requestor) — no more "simulated".
+
+### Deliverable 2 — Official PFZ response now follows an EXACT format (no LLM drift)
+
+| Commit | What |
+|---|---|
+| `cbf67a3` | `agents/pfz_output.py` (shared deterministic formatter) + `response_agent.py` and orchestrator fast path return the exact `🛡️ IMPORTANT / 🔶 VERDICT: … — … / 🎯 Target Coordinates / 📋 Quick Summary` template for official INCOIS PFZ lookups — 4-decimal coords, 1-decimal km, 8-point compass, `📡 Source: Official INCOIS Marine Fisheries (SAMUDRA) live advisory` |
+| `3dd0c4a` | `pfz_agent.py` distance/bearing/target now computed to the **nearest point on the official digitized `pfzLines` geometry** (`_point_on_segment` + `_nearest_point_on_lines`, equirect + haversine, handles LineString/MultiLineString); removed "thermal-front heuristic / simulated chlorophyll / not an official advisory" wording from official path (`auto_router` reason reworded too) |
+| `6f5619b` | `/viz/{session_id}` PFZ markers carry `pfz_lat/pfz_lon/distance_km_to_centre/distance_from_user_km/bearing_from_user_deg` |
+| `dc6b9a3` | UI PFZ popup curated rows — Landing Centre, Distance from you, Bearing (+ compass word), Water depth, Coordinates, `🛡️ Official INCOIS PFZ`; `orcaApiService` skips its generic verdict callout when the answer already contains `🛡️ IMPORTANT` |
+
+**Format guarantees enforced:** `format_pfz_answer()` returns `None` for any
+non-INCOIS_LIVE source so derived/simulated answers keep honest wording; orchestrator
+fast path short-circuits only when `intent == "pfz_lookup"` and fleet convergence did
+not change the recommendation. Exact-template verification was run through
+`ResponseAgent.run()` (E2E, no LLM) and printed byte-for-byte; nearest-point geometry
+unit-checked (far line 441 km, local 0.2 km, empty → None). `py_compile` + `tsc` clean.
+
+**Verification tooling used:** `python -m py_compile <changed files>`; unit probes via
+`python -c` (UTF-8 console); `npx tsc --noEmit` exit 0 in `ORCA UI`.
+
+### Repo / deploy state
+
+- Local `main` == `origin/main` == `dc6b9a3`. Left uncommitted by design:
+  `M AGENTS.md` (now rewritten as an operating guide under this session), untracked
+  `_pre_incois_backup/` snapshot, `architecture*.png`, `test_openmeteo.py`.
+- Deployed backend at `https://orca-backend-1i5u.onrender.com` (Render free, Docker)
+  can go cold; local fallback command (this session): `python -m uvicorn main:app --port 8000` — verified `/health` → `{"status":"ok"}` on `:8000`.
+- Pythagoras note: `ORCA UI` vite dev auto-spawns the backend when `:8000` is free;
+  Render pinned `CORS_ORIGINS` to the Firebase hosting origin.
+
+**Remaining (unchanged from before, all credential/polish blocked):** Bhuvan optional,
+`api.imd.gov.in` key + cyclone-cone overlays, Twilio live-fire, PostGIS/vector store,
+LLM fusion for latency.

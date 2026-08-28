@@ -60,7 +60,7 @@ LangGraph StateGraph with an add-only trace channel; if LangGraph or the LLM is 
 | Planning | Intent, place, time window, hour, needed specialists | LLM forced tool-call + rule fallback |
 | Ocean-State | SST, waves, wind/gusts, tides, chlorophyll | **Live** Open-Meteo marine+weather (parallel), **live** UHSLC harmonic tide fit (cached), NOAA ERDDAP chlorophyll when reachable else seeded & tagged |
 | Hazard | Threshold verdicts, exceedance windows, cyclone checks | Deterministic thresholds + **live** keyless IMD CAP feed |
-| PFZ | Nearest fishing zones from thermal fronts | Derived from live SST; Bhuvan layer coded, disabled until verified |
+| PFZ | Nearest fishing zone from the daily official advisory; distance/bearing to the nearest point on the digitized PFZ lines | **Live** INCOIS/SAMUDRA official PFZ (keyless); SST-ring derived + seeded fallbacks honestly tagged |
 | Geospatial | IMBL/MPA geofencing, weather-aware safe routes | Real point-in-polygon math on treaty-digitized GeoJSON |
 | Trend | Months-long SST/chlorophyll trends + correlation | Live Open-Meteo archive |
 | **Discussion** | Moderated round-table transcript between specialists (structured `speaker/addressing/stance/point` turns + consensus) | LLM-moderated, numbers-only constraint; deterministic fallback |
@@ -143,7 +143,7 @@ Every response also carries `confidence_score` (numeric 0–1 combining data pro
 1. Batch/downgrade further LLM calls in the sequential chain (discussion+synthesis fusion candidate)
 
 ### Blocked externally (code ready, waiting on credentials/access)
-- Bhuvan WMS live activation / INCOIS official PFZ advisory (ISRO account)
+- Bhuvan WMS live activation (ISRO account) — optional now that the official INCOIS PFZ advisory is live
 - `api.imd.gov.in` key (secondary fallback only; keyless CAP feed already active)
 - Cyclone cone-of-uncertainty overlays once the IMD key exists (connector coded)
 - Twilio SMS live-fire test (TRAI DLT registration path)
