@@ -40,10 +40,10 @@ export class Header {
 
         <!-- Center Navigation Tabs (Clean single language) -->
         <nav class="header-nav-tabs" role="tablist">
-          <button class="nav-tab-btn" id="tab-today" data-tab="today">${t.tabToday}</button>
-          <button class="nav-tab-btn active" id="tab-ask-orca" data-tab="chat">${t.tabAsk}</button>
-          <button class="nav-tab-btn" id="tab-authority" data-tab="sar">${t.tabAuthority}</button>
-          <button class="nav-tab-btn" id="tab-system" data-tab="system">${t.tabSystem}</button>
+          <button class="nav-tab-btn ${store.activeNavTab === 'overview' ? 'active' : ''}" id="tab-today" data-tab="overview">${t.tabToday}</button>
+          <button class="nav-tab-btn ${store.activeNavTab === 'chat' ? 'active' : ''}" id="tab-ask-orca" data-tab="chat">${t.tabAsk}</button>
+          <button class="nav-tab-btn ${store.activeNavTab === 'sar' ? 'active' : ''}" id="tab-authority" data-tab="sar">${t.tabAuthority}</button>
+          <button class="nav-tab-btn ${store.activeNavTab === 'system' ? 'active' : ''}" id="tab-system" data-tab="system">${t.tabSystem}</button>
         </nav>
 
         <div class="header-right">
@@ -125,6 +125,22 @@ export class Header {
   private attachEvents(): void {
     const lang = store.activeLanguage || 'en';
     const t = I18N[lang] || I18N.en;
+
+    // Navigation Tabs Switching
+    this.element.querySelectorAll('.nav-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.getAttribute('data-tab') as 'overview' | 'chat' | 'sar' | 'system';
+        if (tab) {
+          store.setNavTab(tab);
+          if (tab === 'chat') {
+            (document.querySelector('#composer-textarea') as HTMLElement)?.focus();
+          } else if (tab === 'overview') {
+            const mapContainer = document.querySelector('#map-container') || document.querySelector('.console-dual-pane-stage');
+            mapContainer?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }
+      });
+    });
 
     // Toggle Sidebar
     this.element.querySelector('#btn-toggle-mobile-sidebar')?.addEventListener('click', () => {

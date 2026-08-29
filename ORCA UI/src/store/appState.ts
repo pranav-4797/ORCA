@@ -134,6 +134,7 @@ class AppStore {
   public categoryModalOpen: boolean = false;
   public userCategory: UserCategoryProfile | null = null;
   public activeLanguage: 'en' | 'mr' | 'hi' = 'en';
+  public activeNavTab: 'overview' | 'chat' | 'sar' | 'system' = 'chat';
   public searchQuery: string = '';
 
   // Settings
@@ -277,6 +278,16 @@ class AppStore {
 
   public setLanguage(lang: 'en' | 'mr' | 'hi'): void {
     this.activeLanguage = lang;
+    this.notify();
+  }
+
+  public setNavTab(tab: 'overview' | 'chat' | 'sar' | 'system'): void {
+    this.activeNavTab = tab;
+    if (tab === 'sar') {
+      this.toggleAgentPanel(true);
+    } else if (tab === 'system') {
+      this.toggleSettingsModal(true);
+    }
     this.notify();
   }
 
