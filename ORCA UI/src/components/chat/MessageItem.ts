@@ -18,12 +18,34 @@ interface VerdictData {
 export class MessageItem {
   private element: HTMLElement;
   private message: Message;
+  private _thinkingInterval?: number;
 
   constructor(message: Message) {
     this.message = message;
     this.element = document.createElement('div');
     this.element.className = `message-wrapper ${message.role}`;
     this.render();
+  }
+
+  /** Progressive agent thought steps revealed over time (vanish when answer arrives) */
+  private getThinkingSteps(elapsedMs: number): { text: string; done: boolean }[] {
+    const steps: { text: string; after: number }[] = [
+      { text: 'Detecting language and parsing intent…', after: 0 },
+      { text: 'Planning agent pipeline…', after: 2000 },
+      { text: 'Querying Ocean-State Agent — live SST, waves, wind…', after: 4000 },
+      { text: 'Checking Hazard Agent — IMD alerts, cyclone bulletins…', after: 7000 },
+      { text: 'Running Geospatial Agent — boundaries, IMBL, MPAs…', after: 10000 },
+      { text: 'Searching PFZ Agent — official INCOIS advisory…', after: 13000 },
+      { text: 'Round-table discussion between agents…', after: 16000 },
+      { text: 'Synthesis Agent reconciling findings…', after: 19000 },
+      { text: 'Composing multilingual response…', after: 22000 },
+    ];
+    return steps
+      .filter(s => elapsedMs >= s.after)
+      .map((s, i, arr) => ({
+        text: s.text,
+        done: i < arr.length - 1,
+      }));
   }
 
   public getElement(): HTMLElement {
@@ -254,19 +276,52 @@ export class MessageItem {
     const formattedTime = formatTime(this.message.timestamp);
     const modelPill = this.message.modelUsed || agent.defaultModel;
 
-    // Pure Minimalist Animation while awaiting response (no card/panel box)
+    // Progressive Agent Thought Process (Claude-like) while awaiting response
     if ((!this.message.content || !this.message.content.trim()) && isStreaming) {
+      // Calculate elapsed time to show progressive steps
+      const elapsed = Date.now() - this.message.timestamp;
+      const thinkingSteps = this.getThinkingSteps(elapsed);
+
       this.element.innerHTML = `
         <div class="message-avatar orca-brand-avatar">
           <img src="/favicon.svg" alt="ORCA" class="message-avatar-favicon" />
         </div>
 
-        <div class="orca-pure-loader animate-fade-in">
-          <div class="orca-radar-pulse-ring"></div>
-          <div class="orca-sonar-spinner" aria-hidden="true"></div>
+        <div class="orca-thinking-feed animate-fade-in">
+          <div class="thinking-header">
+            <div class="orca-sonar-spinner-inline"></div>
+            <span class="thinking-title">ORCA is thinking…</span>
+            <span class="thinking-elapsed">${(elapsed / 1000).toFixed(0)}s</span>
+          </div>
+          <div class="thinking-steps-list">
+            ${thinkingSteps.map((step, i) => `
+              <div class="thinking-step ${step.done ? 'done' : i === thinkingSteps.length - 1 ? 'active' : 'done'}" style="animation-delay: ${i * 0.08}s;">
+                <span class="thinking-step-icon">${step.done ? '✓' : '⟳'}</span>
+                <span class="thinking-step-text">${step.text}</span>
+              </div>
+            `).join('')}
+          </div>
         </div>
       `;
+
+      // Auto-refresh every 1.5 seconds to reveal next step
+      if (!this._thinkingInterval) {
+        this._thinkingInterval = window.setInterval(() => {
+          if (this.message.content && this.message.content.trim()) {
+            clearInterval(this._thinkingInterval!);
+            this._thinkingInterval = undefined;
+            return;
+          }
+          this.render();
+        }, 1500);
+      }
       return;
+    }
+
+    // Clear thinking interval once real content arrives
+    if (this._thinkingInterval) {
+      clearInterval(this._thinkingInterval);
+      this._thinkingInterval = undefined;
     }
 
     const verdictData = this.parseVerdict(this.message.content);
