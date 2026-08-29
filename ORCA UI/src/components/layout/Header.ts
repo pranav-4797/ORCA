@@ -47,17 +47,6 @@ export class Header {
         </nav>
 
         <div class="header-right">
-          <!-- Compact Status Badge -->
-          <div class="orca-compact-status-badge ${store.backendOnline ? 'live' : 'demo'}">
-            <span class="status-dot"></span>
-            <span>${store.backendOnline ? 'LIVE' : 'DEMO'}</span>
-          </div>
-
-          <button class="btn-voice-indicator" id="btn-header-voice-toggle" title="Toggle Voice Response">
-            <span>🔊</span>
-            <span class="voice-state-text">VOICE</span>
-          </button>
-
           <button class="icon-btn" id="btn-theme-toggle" title="Toggle Theme (Night / Day)">
             ${isDark ? ICONS.sun : ICONS.moon}
           </button>

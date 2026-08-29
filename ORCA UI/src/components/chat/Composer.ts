@@ -76,10 +76,19 @@ export class Composer {
 
           ${this.isRecordingVoice ? `
             <div class="voice-recording-overlay">
-              <span class="voice-wave-bar"></span>
-              <span class="voice-wave-bar"></span>
-              <span class="voice-wave-bar"></span>
-              <span style="margin-left:4px;">Listening — speak, text appears live…</span>
+              <span class="voice-recording-pulse-dot"></span>
+              <div class="voice-waveform-visualizer" aria-hidden="true">
+                <span class="voice-wave-bar bar-1"></span>
+                <span class="voice-wave-bar bar-2"></span>
+                <span class="voice-wave-bar bar-3"></span>
+                <span class="voice-wave-bar bar-4"></span>
+                <span class="voice-wave-bar bar-5"></span>
+                <span class="voice-wave-bar bar-6"></span>
+                <span class="voice-wave-bar bar-7"></span>
+                <span class="voice-wave-bar bar-8"></span>
+              </div>
+              <span class="voice-recording-label">Live Voice Input — speak maritime query…</span>
+              <button class="voice-stop-inline-btn" id="btn-voice-stop-inline" title="Finish voice recording">Done ✓</button>
             </div>
           ` : ''}
         </div>
@@ -295,6 +304,11 @@ export class Composer {
       } else {
         void this.startRecording();
       }
+    });
+
+    const inlineStopBtn = this.element.querySelector('#btn-voice-stop-inline');
+    inlineStopBtn?.addEventListener('click', () => {
+      this.stopRecording();
     });
 
     // Query-routing pill: open the panel-vs-direct dropdown

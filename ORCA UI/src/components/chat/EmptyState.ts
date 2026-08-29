@@ -27,16 +27,16 @@ export class EmptyState {
       <div class="orca-clean-hero">
         <div class="hero-brand-emblem">
           <div class="emblem-radar-glow">
-            <span class="emblem-icon">🧭</span>
+            <span class="emblem-icon">⚓</span>
           </div>
         </div>
 
-        <h1 class="hero-clean-title">Welcome to ORCA</h1>
+        <h1 class="hero-clean-title">ORCA Marine Intelligence</h1>
         <p class="hero-clean-subtitle">
-          AI-Powered Marine Intelligence &amp; Multi-Agent Coastal Reasoning
+          Collaborative multi-agent maritime reasoning powered by INCOIS &amp; IMD
         </p>
 
-        <!-- Active Operational Role Banner -->
+        <!-- Active Operational Role Banner (Compact) -->
         <div class="hero-role-badge-card" id="hero-role-card" title="Click to change your operational role">
           <div class="role-badge-left">
             <span class="role-icon">${roleIcon}</span>
@@ -49,61 +49,57 @@ export class EmptyState {
             </div>
           </div>
           <button class="btn-hero-change-role" id="btn-hero-change-role">
-            <span>Switch Role</span>
+            <span>Change</span>
             <span>➔</span>
           </button>
         </div>
 
-        <!-- 3 Core Capabilities (What ORCA Does) -->
-        <div class="orca-capabilities-grid">
-          <div class="capability-item">
-            <div class="capability-icon-wrap" style="color:var(--status-safe); background:rgba(34, 197, 94, 0.1);">
-              <span>🛡️</span>
-            </div>
-            <div class="capability-text">
-              <h4>Safety &amp; Cyclone Verdicts</h4>
-              <p>Real-time wave, wind gust, tide, and IMD storm hazard assessments calibrated for your craft.</p>
-            </div>
+        <!-- Visual Quick Action Cards (1-Click Marine Queries) -->
+        <div class="hero-actions-container">
+          <div class="hero-actions-title">
+            <span>⚡ Quick Actions</span>
           </div>
 
-          <div class="capability-item">
-            <div class="capability-icon-wrap" style="color:var(--primary); background:rgba(14, 124, 134, 0.12);">
-              <span>🐟</span>
-            </div>
-            <div class="capability-text">
-              <h4>Official INCOIS PFZ Advisories</h4>
-              <p>Live satellite thermal ocean fronts and fish aggregation zones with distance &amp; compass bearing.</p>
-            </div>
-          </div>
+          <div class="hero-action-cards-grid">
+            <button class="hero-action-card action-pfz" data-prompt="Where are the nearest official INCOIS PFZ fishing zones from Mumbai?">
+              <div class="action-card-top">
+                <span class="action-card-icon" style="background:rgba(14, 124, 134, 0.15); color:var(--primary);">🐟</span>
+                <span class="action-card-badge">INCOIS LIVE</span>
+              </div>
+              <div class="action-card-title">Live Fishing Zones (PFZ)</div>
+              <div class="action-card-desc">Find nearest high-catch thermal fronts with distance, bearing &amp; depth</div>
+              <div class="action-card-cta">Ask PFZ ➔</div>
+            </button>
 
-          <div class="capability-item">
-            <div class="capability-icon-wrap" style="color:#f59e0b; background:rgba(245, 158, 11, 0.12);">
-              <span>🗺️</span>
-            </div>
-            <div class="capability-text">
-              <h4>Coastal Routing &amp; SAR</h4>
-              <p>Territorial border geofencing (IMBL/Sir Creek), Search &amp; Rescue drift tracking, and bathymetry.</p>
-            </div>
-          </div>
-        </div>
+            <button class="hero-action-card action-safety" data-prompt="Is it safe to sail today from Ratnagiri harbour? Check waves and wind.">
+              <div class="action-card-top">
+                <span class="action-card-icon" style="background:rgba(34, 197, 94, 0.15); color:var(--status-safe);">🛡️</span>
+                <span class="action-card-badge">SAFETY CHECK</span>
+              </div>
+              <div class="action-card-title">Sea State &amp; Cyclone Verdict</div>
+              <div class="action-card-desc">Real-time waves, wind gusts, tides &amp; IMD storm alerts for your vessel</div>
+              <div class="action-card-cta">Check Safety ➔</div>
+            </button>
 
-        <!-- Quick Start Inquiries -->
-        <div class="hero-starters-section">
-          <div class="starters-header-label">
-            <span>✨</span>
-            <span>Suggested Questions to Start:</span>
-          </div>
+            <button class="hero-action-card action-route" data-prompt="Plan a safe weather-aware route from Porbandar to Okha avoiding shallow waters.">
+              <div class="action-card-top">
+                <span class="action-card-icon" style="background:rgba(245, 158, 11, 0.15); color:#f59e0b);">🧭</span>
+                <span class="action-card-badge">NAVIGATION</span>
+              </div>
+              <div class="action-card-title">Safe Route &amp; Geofencing</div>
+              <div class="action-card-desc">A* weather-aware route avoiding international border limits &amp; shallow shoals</div>
+              <div class="action-card-cta">Plan Route ➔</div>
+            </button>
 
-          <div class="quick-inquiry-pills">
-            ${PROMPT_STARTERS.map(starter => `
-              <button class="inquiry-pill-btn" data-prompt="${encodeURIComponent(starter.prompt)}" data-agent-id="${starter.agentId}">
-                <span class="pill-icon">${ICONS[starter.icon] || '🧭'}</span>
-                <div class="pill-text-col">
-                  <span class="pill-text">${starter.title}</span>
-                  <span class="pill-desc">${starter.description}</span>
-                </div>
-              </button>
-            `).join('')}
+            <button class="hero-action-card action-forecast" data-prompt="Show 48-hour marine weather and wave forecast for Goa coast.">
+              <div class="action-card-top">
+                <span class="action-card-icon" style="background:rgba(59, 130, 246, 0.15); color:#3b82f6);">🌊</span>
+                <span class="action-card-badge">48H FORECAST</span>
+              </div>
+              <div class="action-card-title">48-Hour Wave &amp; Wind Forecast</div>
+              <div class="action-card-desc">Hourly wave period, swell directions, exceedance windows &amp; tides</div>
+              <div class="action-card-cta">View Forecast ➔</div>
+            </button>
           </div>
         </div>
       </div>
@@ -123,15 +119,11 @@ export class EmptyState {
       store.toggleCategoryModal(true);
     });
 
-    // Prompt Starter Pills
-    const pills = this.element.querySelectorAll('.inquiry-pill-btn');
-    pills.forEach(pill => {
-      pill.addEventListener('click', () => {
-        const promptText = decodeURIComponent(pill.getAttribute('data-prompt') || '');
-        const agentId = pill.getAttribute('data-agent-id');
-        if (agentId) {
-          store.selectAgent(agentId);
-        }
+    // Visual Quick Action Cards
+    const actionCards = this.element.querySelectorAll('.hero-action-card');
+    actionCards.forEach(card => {
+      card.addEventListener('click', () => {
+        const promptText = card.getAttribute('data-prompt');
         if (promptText) {
           store.sendMessage(promptText);
         }
