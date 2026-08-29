@@ -106,6 +106,9 @@ class QueryRequest(BaseModel):
     query_depth: str | None = None
     # Fleet Convergence demo: low/medium/high/severe — injects SIMULATED fleet activity for demo
     fleet_demo_level: str | None = None
+    # Wind Divergence demo: match/moderate/high_divergence — forces a SIMULATED
+    # satellite wind observation for the query location (Innovation #4)
+    wind_demo_scenario: str | None = None
 
 
 class RegisterRequest(BaseModel):
@@ -222,10 +225,11 @@ def query(request: QueryRequest):
         request.query.strip().lower(), request.mode, request.agent or "",
         request.vessel_class or "", str(device_gps), str(destination),
         session_id, request.query_depth or "", request.fleet_demo_level or "",
+        request.wind_demo_scenario or "",
     ])
     cache_key = hashlib.sha256(cache_key_src.encode()).hexdigest()
-    # Don't cache demo fleet queries — they are meant to change with simulated levels
-    use_cache = not request.fleet_demo_level
+    # Don't cache demo fleet/wind queries — they are meant to change with simulated levels
+    use_cache = not request.fleet_demo_level and not request.wind_demo_scenario
     cached = storage.response_cache.get(cache_key) if use_cache else None
     if cached is not None:
         return cached
@@ -240,6 +244,7 @@ def query(request: QueryRequest):
         vessel_class=request.vessel_class,
         query_depth=request.query_depth,
         fleet_demo_level=request.fleet_demo_level,
+        wind_demo_scenario=request.wind_demo_scenario,
     )
     _last_responses[session_id] = response
     payload = _serialize(response)
@@ -379,6 +384,21 @@ def viz_geojson(session_id: str):
                          "coordinates": [o.location.lon, o.location.lat]},
         })
 
+    wind_div = getattr(r, "wind_divergence", None)
+    if wind_div and wind_div.get("status") in ("MODERATE_DIVERGENCE", "HIGH_DIVERGENCE") and o is not None:
+        features.append({
+            "type": "Feature",
+            "properties": {
+                "kind": "wind_divergence",
+                "status": wind_div["status"],
+                "forecast_kn": wind_div.get("forecast_wind_kn"),
+                "satellite_kn": wind_div.get("satellite_wind_kn"),
+                "warning": wind_div.get("warning"),
+                "is_simulated": wind_div.get("is_simulated"),
+            },
+            "geometry": {"type": "Point", "coordinates": [o.location.lon, o.location.lat]},
+        })
+
     pfz = getattr(r, "pfz", None)
     # Fleet convergence — crowding-adjusted candidates (Innovation #1)
     fleet = getattr(r, "fleet_convergence", None)
@@ -502,6 +522,61 @@ def viz_geojson(session_id: str):
                 ]},
             })
 
+    # SAR overlay — latest surveillance scan (if any) so OceanMap shows authority picture
+    try:
+        _sar_latest = _sar_store.get_latest() or _last_sar_scan
+        if _sar_latest and _sar_latest.get("detections"):
+            for d in _sar_latest["detections"]:
+                ms = d.get("match_status", "")
+                al = d.get("alert_level", "")
+                if ms == "UNKNOWN" and al == "HIGH":
+                    kind = "sar_unknown_high"
+                elif ms == "UNKNOWN":
+                    kind = "sar_unknown"
+                elif ms == "KNOWN":
+                    kind = "sar_known"
+                elif ms == "LOW_CONFIDENCE":
+                    kind = "sar_low_confidence"
+                else:
+                    kind = "sar_other"
+                features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "kind": kind,
+                        "detection_id": d.get("detection_id") or d.get("id"),
+                        "lat": d.get("latitude") or d.get("lat"),
+                        "lon": d.get("longitude") or d.get("lon"),
+                        "confidence": d.get("confidence"),
+                        "distance_to_boundary_km": d.get("distance_to_boundary_km"),
+                        "boundary_segment": d.get("boundary_segment"),
+                        "match_status": ms,
+                        "alert_level": al,
+                        "source": d.get("source"),
+                        "dataset": d.get("dataset"),
+                        "acquisition_timestamp": d.get("acquisition_timestamp") or d.get("acquisition_time"),
+                        "status": d.get("status"),
+                        "is_near_boundary": d.get("is_near_boundary"),
+                    },
+                    "geometry": {"type": "Point", "coordinates": [d.get("longitude") or d.get("lon"), d.get("latitude") or d.get("lat")]},
+                })
+            # Also expose maritime boundary as LineString for map context (from geojson)
+            try:
+                import json as _json, os as _os
+                _bpath = _os.path.join(_os.path.dirname(__file__), "data", "marine_boundaries.geojson")
+                with open(_bpath, "r", encoding="utf-8") as _f:
+                    _gj = _json.load(_f)
+                    for feat in _gj.get("features", [])[:6]:
+                        if feat.get("geometry", {}).get("type") == "LineString":
+                            features.append({
+                                "type": "Feature",
+                                "properties": {"kind": "imbl_line", "name": feat.get("properties", {}).get("name", "IMBL")},
+                                "geometry": feat["geometry"],
+                            })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     return {
         "type": "FeatureCollection",
         "session_id": session_id,
@@ -530,6 +605,175 @@ def viz_series(session_id: str):
     ]
     return {"series": series, "exceedance_windows": windows, "tides": tides}
 
+
+# ---------------------------------------------------------------------------
+# SAR-Based Dark Vessel Detection Near Boundaries (Innovation #3)
+# ---------------------------------------------------------------------------
+from sar import get_provider as _sar_get_provider
+from sar.engine import run_sar_scan, SARConfig
+from sar.store import sar_store as _sar_store
+from sar.boundary import get_boundary_info as _sar_boundary_info
+
+_last_sar_scan: dict | None = None
+
+class SARScanRequest(BaseModel):
+    area: dict | None = None  # {lat_min, lat_max, lon_min, lon_max} or None = default IMBL bbox
+    provider: str | None = None  # auto | demo | bhoonidhi
+    time_window: str | None = None
+    use_cache: bool = True
+    boundary_radius_km: float | None = None
+    match_radius_km: float | None = None
+    match_window_minutes: int | None = None
+
+@app.get("/sar/status")
+def sar_status():
+    prov_auto = _sar_get_provider("auto")
+    prov_demo = _sar_get_provider("demo")
+    prov_bhoo = _sar_get_provider("bhoonidhi")
+    latest = _sar_store.get_latest()
+    return {
+        "providers": {
+            "auto": prov_auto.describe(),
+            "demo": prov_demo.describe(),
+            "bhoonidhi": prov_bhoo.describe(),
+        },
+        "active_provider": getattr(prov_auto, "name", "demo"),
+        "boundary": _sar_boundary_info(),
+        "cache": _sar_store.cache_info(),
+        "latest": {
+            "has_latest": latest is not None,
+            "summary": {
+                "status": latest.get("status") if latest else None,
+                "source": latest.get("source") if latest else None,
+                "total": latest.get("total") if latest else 0,
+                "unknown": latest.get("unknown") if latest else 0,
+                "is_stale": latest.get("is_stale") if latest else False,
+                "acquisition_time": latest.get("acquisition_time") if latest else None,
+                "observation_id": latest.get("observation_id") if latest else None,
+            } if latest else None,
+        },
+        "config": {
+            "boundary_radius_km": float(os.getenv("ORCA_SAR_BOUNDARY_RADIUS_KM", "10")),
+            "match_radius_km": float(os.getenv("ORCA_SAR_MATCH_RADIUS_KM", "2.0")),
+            "match_window_minutes": int(os.getenv("ORCA_SAR_MATCH_WINDOW_MINUTES", "60")),
+            "stale_minutes": int(os.getenv("ORCA_SAR_STALE_MINUTES", "120")),
+            "cache_ttl_s": int(os.getenv("ORCA_SAR_CACHE_TTL_S", "600")),
+        },
+        "disclaimer": "SAR provenance: REAL vs SIMULATED vs UNAVAILABLE is always labeled. Unknown != illegal — requires authority verification.",
+    }
+
+@app.get("/sar/detections")
+def sar_detections(provider: str | None = None, time_window: str | None = None):
+    # Return latest scan from cache (honest: may be SIMULATED / STALE / UNAVAILABLE)
+    latest = _sar_store.get_latest()
+    if latest is None:
+        # Try to run a demo scan on first access so authority dashboard isn't empty
+        # This is a read path that triggers a scan only when cache is empty (not on every fisherman query)
+        try:
+            scan = run_sar_scan(provider=provider or "demo", time_window=time_window or "today")
+            _sar_store.set(None, getattr(scan.observation, "source", "demo").lower() if hasattr(scan.observation, "source") else "demo", scan.to_dict())
+            return scan.to_dict()
+        except Exception as exc:
+            raise HTTPException(500, f"SAR scan failed: {exc}")
+    # Optionally filter by provider? For now return latest regardless
+    return latest
+
+@app.post("/sar/scan")
+def sar_scan(req: SARScanRequest):
+    try:
+        cfg = SARConfig(
+            boundary_radius_km=req.boundary_radius_km if req.boundary_radius_km is not None else float(os.getenv("ORCA_SAR_BOUNDARY_RADIUS_KM", "10")),
+            match_radius_km=req.match_radius_km if req.match_radius_km is not None else float(os.getenv("ORCA_SAR_MATCH_RADIUS_KM", "2.0")),
+            match_window_minutes=req.match_window_minutes if req.match_window_minutes is not None else int(os.getenv("ORCA_SAR_MATCH_WINDOW_MINUTES", "60")),
+            provider=req.provider or "auto",
+        )
+        scan = run_sar_scan(
+            area=req.area,
+            provider=req.provider or "auto",
+            config=cfg,
+            use_cache=req.use_cache,
+            time_window=req.time_window or "today",
+        )
+        global _last_sar_scan
+        _last_sar_scan = scan.to_dict()
+        return _last_sar_scan
+    except Exception as exc:
+        raise HTTPException(500, f"SAR scan failed: {exc}")
+
+@app.post("/sar/demo")
+def sar_demo(area: dict | None = None):
+    """Deterministic demo: always uses DemoSARProvider, always fresh (no cache). Returns authoritative UNKNOWN example."""
+    try:
+        scan = run_sar_scan(area=area, provider="demo", use_cache=False)
+        global _last_sar_scan
+        _last_sar_scan = scan.to_dict()
+        return _last_sar_scan
+    except Exception as exc:
+        raise HTTPException(500, f"SAR demo scan failed: {exc}")
+
+@app.post("/sar/clear")
+def sar_clear():
+    _sar_store.clear()
+    global _last_sar_scan
+    _last_sar_scan = None
+    return {"cleared": True}
+
+@app.get("/sar/viz")
+def sar_viz():
+    """GeoJSON FeatureCollection for SAR detections — for direct authority map overlay."""
+    latest = _sar_store.get_latest() or _last_sar_scan
+    features: list[dict] = []
+    if latest and latest.get("detections"):
+        for d in latest["detections"]:
+            ms = d.get("match_status", "")
+            al = d.get("alert_level", "")
+            if ms == "UNKNOWN" and al == "HIGH":
+                kind = "sar_unknown_high"
+            elif ms == "UNKNOWN":
+                kind = "sar_unknown"
+            elif ms == "KNOWN":
+                kind = "sar_known"
+            elif ms == "LOW_CONFIDENCE":
+                kind = "sar_low_confidence"
+            else:
+                kind = "sar_other"
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "kind": kind,
+                    "detection_id": d.get("detection_id") or d.get("id"),
+                    "confidence": d.get("confidence"),
+                    "distance_to_boundary_km": d.get("distance_to_boundary_km"),
+                    "boundary_segment": d.get("boundary_segment"),
+                    "match_status": ms,
+                    "alert_level": al,
+                    "source": d.get("source"),
+                    "dataset": d.get("dataset"),
+                    "acquisition_timestamp": d.get("acquisition_timestamp") or d.get("acquisition_time"),
+                    "status": d.get("status"),
+                    "is_near_boundary": d.get("is_near_boundary"),
+                },
+                "geometry": {"type": "Point", "coordinates": [d.get("longitude") or d.get("lon"), d.get("latitude") or d.get("lat")]},
+            })
+    # Add IMBL lines for context
+    try:
+        import json as _json, os as _os
+        _bpath = _os.path.join(_os.path.dirname(__file__), "data", "marine_boundaries.geojson")
+        with open(_bpath, "r", encoding="utf-8") as _f:
+            _gj = _json.load(_f)
+            for feat in _gj.get("features", []):
+                if feat.get("geometry", {}).get("type") == "LineString":
+                    features.append({
+                        "type": "Feature",
+                        "properties": {"kind": "imbl_line", "name": feat.get("properties", {}).get("name", "IMBL")},
+                        "geometry": feat["geometry"],
+                    })
+    except Exception:
+        pass
+    return {"type": "FeatureCollection", "features": features, "count": len(features), "status": (latest.get("status") if latest else "NO_DATA")}
+
+# Also enrich /viz geojson with latest SAR detections when available (authority map overlay)
+_original_viz_geojson = None  # placeholder for patching below
 
 # ---------------------------------------------------------------------------
 # Fleet Convergence Forecast (Innovation #1)
@@ -627,6 +871,66 @@ def fleet_demo(lat: float, lon: float, level: str = "high"):
         "final": final.zone_id if final else None,
         "changed": raw_best.zone_id != final.zone_id if raw_best and final else False,
     }
+
+# ---------------------------------------------------------------------------
+# Satellite–Model Wind Divergence Flag (Innovation #4)
+# ---------------------------------------------------------------------------
+
+@app.get("/satellite-wind/status")
+def satellite_wind_status():
+    """Whether the real (ISRO/MOSDAC) satellite wind connector is activated."""
+    import os as _os
+    import wind_divergence as wd
+    configured = bool(_os.getenv("MOSDAC_API_KEY", "").strip())
+    return {
+        "real_provider": "MOSDAC_OSCAT3",
+        "real_provider_activated": configured,
+        "note": (
+            "Oceansat-3 (OSCAT-3) is ISRO's current operational scatterometer; "
+            "SCATSAT-1 (named in early planning docs) ended its mission in "
+            "Feb 2021 and is not live."
+        ),
+        "moderate_threshold_kmh": wd.MODERATE_ABS_KMH,
+        "high_threshold_kmh": wd.HIGH_ABS_KMH,
+        "moderate_threshold_pct": wd.MODERATE_PCT,
+        "high_threshold_pct": wd.HIGH_PCT,
+        "obs_ttl_s": wd._OBS_TTL_S,
+        "max_spatial_km": wd.MAX_SPATIAL_KM,
+        "max_age_min": wd.MAX_AGE_MIN,
+    }
+
+
+@app.get("/satellite-wind/latest")
+def satellite_wind_latest(lat: float, lon: float, demo_scenario: str | None = None):
+    """Latest cached satellite wind observation for a point (REAL/SIMULATED/UNAVAILABLE)."""
+    import wind_divergence as wd
+    obs = wd.get_satellite_observation(Location(name="query", lat=lat, lon=lon), demo_scenario=demo_scenario)
+    return {
+        "latitude": obs.latitude, "longitude": obs.longitude,
+        "wind_speed_kmh": obs.wind_speed_kmh, "wind_direction_deg": obs.wind_direction_deg,
+        "observation_timestamp": obs.observation_timestamp.isoformat() if obs.observation_timestamp else None,
+        "source": obs.source, "dataset": obs.dataset,
+        "status": obs.status.value, "reason": obs.reason,
+    }
+
+
+@app.get("/satellite-wind/divergence")
+def satellite_wind_divergence(lat: float, lon: float, forecast_wind_kmh: float | None = None,
+                               demo_scenario: str | None = None):
+    """Standalone divergence check/demo trigger without running a full /query.
+
+    If forecast_wind_kmh is omitted, the live Open-Meteo forecast is fetched
+    for the point (same OceanStateAgent path used by /query).
+    """
+    import wind_divergence as wd
+    from agents.ocean_state_agent import OceanStateAgent
+    loc = Location(name="query", lat=lat, lon=lon)
+    if forecast_wind_kmh is None:
+        reading, _t = OceanStateAgent().run(loc, "now")
+        forecast_wind_kmh = reading.wind_speed_kmh
+    result = wd.analyze_wind_divergence(forecast_wind_kmh, loc, demo_scenario=demo_scenario)
+    return wd.result_to_dict(result)
+
 
 @app.delete("/sessions/{session_id}")
 def session_clear(session_id: str):

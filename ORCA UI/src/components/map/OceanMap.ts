@@ -29,16 +29,23 @@ export class OceanMap {
     query_point: { color: '#38bdf8', fill: '#38bdf8' },
     pfz_primary: { color: '#22c55e', fill: '#22c55e' },
     pfz_alternate: { color: '#86efac', fill: '#86efac' },
-fleet_recommended: { color: '#16a34a', fill: '#16a34a' },
+    fleet_recommended: { color: '#16a34a', fill: '#16a34a' },
     fleet_candidate: { color: '#f59e0b', fill: '#f59e0b' },
     fleet_change: { color: '#a855f7', fill: '#a855f7' },
     pfz_landing: { color: '#e879f9', fill: '#e879f9' },
     pfz_line: { color: '#facc15', fill: 'none' },
     landing_centre: { color: '#64748b', fill: '#64748b' },
     landing_centre_issued: { color: '#f472b6', fill: '#f472b6' },
+    wind_divergence: { color: '#ef4444', fill: '#ef4444' },
     route: { color: '#22d3ee', fill: 'none' },
     boundary_flag: { color: '#f87171', fill: '#f87171' },
     cap_hazard: { color: '#fbbf24', fill: '#f59e0b' },
+    sar_known: { color: '#22c55e', fill: '#22c55e' },
+    sar_unknown: { color: '#f59e0b', fill: '#f59e0b' },
+    sar_unknown_high: { color: '#ef4444', fill: '#ef4444' },
+    sar_low_confidence: { color: '#94a3b8', fill: '#94a3b8' },
+    sar_other: { color: '#64748b', fill: '#64748b' },
+    imbl_line: { color: '#f87171', fill: 'none' },
   };
 
   constructor() {
@@ -194,18 +201,42 @@ fleet_recommended: { color: '#16a34a', fill: '#16a34a' },
       if (geom.type === 'Point') {
         const [lon, lat] = geom.coordinates;
         const isPfz = kind.startsWith('pfz') && !this.isBackgroundKind(kind);
+        const isSar = kind.startsWith('sar_');
+        const isBackground = this.isBackgroundKind(kind);
         shape = L.circleMarker([lat, lon], {
           radius: kind === 'query_point' ? 8
             : isPfz ? 6
-            : this.isBackgroundKind(kind) ? 3
+            : isBackground ? 3
+            : isSar ? 7
+            : kind === 'wind_divergence' ? 6
             : 5,
           color: c.color,
           fillColor: c.fill,
-          fillOpacity: 0.85,
-          weight: 2,
+          fillOpacity: isSar ? 0.95 : isBackground ? 0.7 : 0.85,
+          weight: isSar ? 2.5 : isBackground ? 1 : 2,
         });
-        if (isPfz) {
-          // ~12 km visual ring around the recommended zone centre.
+        if (kind === 'wind_divergence') {
+          this.layer.addLayer(
+            L.circle([lat, lon], {
+              radius: 9000,
+              color: '#ef4444',
+              weight: 1.5,
+              fillOpacity: 0.12,
+              dashArray: '6 6',
+            }),
+          );
+        } else if (kind === 'sar_unknown_high') {
+          // Pulsing ring for high-priority unknown
+          this.layer.addLayer(
+            L.circle([lat, lon], {
+              radius: 8000,
+              color: '#ef4444',
+              weight: 1.5,
+              fillOpacity: 0.12,
+              dashArray: '6 6',
+            }),
+          );
+        } else if (isPfz) {
           this.layer!.addLayer(
             L.circle([lat, lon], {
               radius: 12000,
@@ -217,13 +248,16 @@ fleet_recommended: { color: '#16a34a', fill: '#16a34a' },
           );
         }
       } else if (geom.type === 'LineString') {
+        const isImbl = kind === 'imbl_line';
+        const isPfzLine = kind === 'pfz_line';
         const latlngs = (geom.coordinates as [number, number][]).map(
           ([lon, lat]) => [lat, lon] as [number, number],
         );
         shape = L.polyline(latlngs, {
-          color: c.color,
-          weight: kind === 'pfz_line' ? 1.5 : 3,
-          dashArray: kind === 'pfz_line' ? '3 5' : '6 6',
+          color: isImbl ? '#f87171' : c.color,
+          weight: isPfzLine ? 1.5 : isImbl ? 2.5 : 3,
+          dashArray: isPfzLine ? '3 5' : isImbl ? '8 6' : '6 6',
+          opacity: isImbl ? 0.9 : isPfzLine ? 0.85 : 0.85,
         });
       } else if (geom.type === 'Polygon') {
         const rings = (geom.coordinates as [number, number][][]).map((ring) =>
@@ -338,9 +372,16 @@ fleet_recommended: { color: '#16a34a', fill: '#16a34a' },
       fleet_recommended: 'Fleet ✓ Recommended',
       fleet_candidate: 'Fleet candidate',
       fleet_change: 'Fleet switch',
+      wind_divergence: 'Wind divergence',
       route: 'Safe route',
       boundary_flag: 'Boundary flag',
       cap_hazard: 'IMD warning',
+      sar_known: 'SAR Known vessel',
+      sar_unknown: 'SAR Unknown vessel',
+      sar_unknown_high: 'SAR Unknown HIGH',
+      sar_low_confidence: 'SAR Low conf.',
+      sar_other: 'SAR other',
+      imbl_line: 'Maritime boundary',
     };
     if (store.pfzLive) {
       labels.pfz_line = 'INCOIS PFZ line';

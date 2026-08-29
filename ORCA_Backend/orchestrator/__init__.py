@@ -64,6 +64,7 @@ from typing import Annotated, List, Optional, TypedDict
 import llm_client
 import sessions as session_store
 import fleet_convergence as fleet_engine
+import wind_divergence as wind_engine
 import routing_telemetry
 from agents.discussion_agent import DiscussionAgent
 from agents.geospatial_agent import GeospatialAgent
@@ -476,6 +477,8 @@ class ORCAGraphState(TypedDict, total=False):
     mode: str  # auto | panel | agent
     fleet_convergence: Optional[dict]  # FleetConvergenceResult as dict
     fleet_demo_level: Optional[str]  # low/medium/high/severe for demo
+    wind_divergence: Optional[dict]  # WindDivergenceResult as dict (Innovation #4)
+    wind_demo_scenario: Optional[str]  # match/moderate/high_divergence for demo
 
 
 class Orchestrator:
@@ -500,6 +503,7 @@ class Orchestrator:
         g.add_node("planning", self._node_planning)
         g.add_node("specialists", self._node_dispatch)
         g.add_node("fleet_convergence", self._node_fleet_convergence)
+        g.add_node("wind_divergence", self._node_wind_divergence)
         g.add_node("discussion", self._node_discussion)
         g.add_node("synthesis", self._node_synthesis)
         g.add_node("safety_floor", self._node_safety_floor)
@@ -522,7 +526,8 @@ class Orchestrator:
             {"specialists": "specialists", "unsupported": "unsupported"},
         )
         g.add_edge("specialists", "fleet_convergence")
-        g.add_edge("fleet_convergence", "discussion")
+        g.add_edge("fleet_convergence", "wind_divergence")
+        g.add_edge("wind_divergence", "discussion")
         g.add_edge("discussion", "synthesis")
         g.add_edge("synthesis", "safety_floor")
         g.add_edge("safety_floor", "response")
@@ -672,6 +677,7 @@ class Orchestrator:
         vessel_class: str | None = None,
         query_depth: str | None = None,
         fleet_demo_level: str | None = None,
+        wind_demo_scenario: str | None = None,
     ) -> OrchestratorResponse:
         # Normalize mode (backwards compat: panel default previously)
         mode_norm = (mode or "auto").strip().lower()
@@ -698,6 +704,7 @@ class Orchestrator:
             "mode": mode_norm,
             "query_depth": (query_depth or QUERY_DEPTH).strip().lower() if query_depth else QUERY_DEPTH,
             "fleet_demo_level": (fleet_demo_level.strip().lower() if fleet_demo_level else None),
+            "wind_demo_scenario": (wind_demo_scenario.strip().lower() if wind_demo_scenario else None),
             "timings": {},
             "traces": [],
         }
@@ -1273,6 +1280,61 @@ class Orchestrator:
             timings["fleet_ms"] = round(trace.duration_ms, 1)
             return {"fleet_convergence": {"status": "UNAVAILABLE", "reason": str(exc), "candidates": []}, "traces": [trace], "timings": timings}
 
+    def _compute_wind_divergence(self, state: ORCAGraphState) -> tuple[dict, AgentTrace]:
+        """Shared by the graph node and the sequential fallback (Innovation #4).
+
+        Non-blocking by construction: the real satellite provider isn't
+        activated (instant local check), and the demo path is deterministic
+        -- neither ever waits on a network call, so normal ORCA queries are
+        never slowed down by this check.
+        """
+        t0 = time.perf_counter()
+        ocean = state.get("ocean_state")
+        location = state.get("location")
+        demo_scenario = state.get("wind_demo_scenario")
+        if ocean is None or location is None:
+            trace = AgentTrace(
+                agent_name="WindDivergence",
+                action="Skipped wind divergence — no forecast wind for this query",
+                result_summary="No ocean-state reading available",
+                data_sources=[], duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            return {"status": "UNAVAILABLE", "reason": "no forecast wind"}, trace
+        try:
+            result = wind_engine.analyze_wind_divergence(
+                forecast_wind_kmh=ocean.wind_speed_kmh,
+                location=location,
+                demo_scenario=demo_scenario,
+            )
+            result_dict = wind_engine.result_to_dict(result)
+            trace = AgentTrace(
+                agent_name="WindDivergence",
+                action=f"Compared forecast vs satellite wind [{result_dict['status']}]",
+                result_summary=(
+                    f"forecast {result_dict['forecast_wind_kn']}kn vs satellite "
+                    f"{result_dict.get('satellite_wind_kn')}kn — {result.warning} "
+                    f"(satellite: {result_dict['satellite_status']})"
+                ),
+                data_sources=[], duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            return result_dict, trace
+        except Exception as exc:
+            import logging
+            logging.getLogger("orca.orchestrator").warning("wind divergence failed: %s", exc)
+            trace = AgentTrace(
+                agent_name="WindDivergence",
+                action="Wind divergence unavailable — normal forecast behaviour preserved",
+                result_summary=str(exc), data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            return {"status": "UNAVAILABLE", "reason": str(exc)}, trace
+
+    def _node_wind_divergence(self, state: ORCAGraphState) -> dict:
+        result_dict, trace = self._compute_wind_divergence(state)
+        timings = dict(state.get("timings") or {})
+        timings["wind_divergence_ms"] = round(trace.duration_ms, 1)
+        return {"wind_divergence": result_dict, "traces": [trace], "timings": timings}
+
     def _node_discussion(self, state: ORCAGraphState) -> dict:
         """Round-table: specialists read each other's findings and debate. Skipped for FAST mode."""
         t0 = time.perf_counter()
@@ -1798,6 +1860,13 @@ class Orchestrator:
         agreement = 1.0 if not conflicts else 0.5
         score = round(min(1.0, 0.55 * live_fraction + 0.30 * float(verdict_conf)
                           + 0.15 * agreement), 2)
+        # Innovation #4: a HIGH satellite-vs-forecast wind divergence flags
+        # the forecast as less trustworthy — reduce confidence, never claim
+        # the satellite disproves the forecast or touch the safety verdict.
+        wind_div = state.get("wind_divergence") or {}
+        penalty = float(wind_div.get("confidence_penalty") or 0.0)
+        if penalty:
+            score = round(max(0.0, score - penalty), 2)
         return score, tiers
 
     def _assemble_response(self, state: ORCAGraphState, answer: str) -> OrchestratorResponse:
@@ -1850,6 +1919,12 @@ class Orchestrator:
             "confidence": state.get("plan", {}).get("confidence", 0.0),
         }
         fleet_conv = state.get("fleet_convergence")
+        wind_div = state.get("wind_divergence")
+        if wind_div and wind_div.get("status") == "HIGH_DIVERGENCE":
+            reasoning.append(
+                f"Wind validation: forecast {wind_div.get('forecast_wind_kn')}kn vs "
+                f"satellite {wind_div.get('satellite_wind_kn')}kn — {wind_div.get('warning')}"
+            )
 
         return OrchestratorResponse(
             answer=answer,
@@ -1872,6 +1947,7 @@ class Orchestrator:
             timings=timings,
             routing=routing,
             fleet_convergence=fleet_conv,
+            wind_divergence=wind_div,
         )
 
     @staticmethod
@@ -2038,6 +2114,12 @@ class Orchestrator:
             trace.append(AgentTrace(agent_name="FleetConvergence", action="Skipped fleet convergence — no PFZ", result_summary="No candidates", data_sources=[], duration_ms=(time.perf_counter()-t_fleet0)*1000))
             timings["fleet_ms"] = round((time.perf_counter()-t_fleet0)*1000, 1)
             state["fleet_convergence"] = {"status": "UNAVAILABLE", "reason": "no PFZ", "candidates": []}
+
+        # Wind Divergence (Innovation #4) — cheap/instant, never blocks
+        wind_dict, wind_trace = self._compute_wind_divergence(state)
+        state["wind_divergence"] = wind_dict
+        trace.append(wind_trace)
+        timings["wind_divergence_ms"] = round(wind_trace.duration_ms, 1)
 
         # Discussion gating
         t_disc0 = time.perf_counter()

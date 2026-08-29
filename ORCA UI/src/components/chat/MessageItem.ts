@@ -333,6 +333,7 @@ export class MessageItem {
         ` : ''}
 
         ${this.renderFleetConvergence()}
+        ${this.renderWindDivergence()}
 
         <div class="ai-msg-body">
           ${renderedHtml}
@@ -431,6 +432,32 @@ export class MessageItem {
           ${rows}
         </div>
         <div style="font-size:10px;color:var(--text-tertiary);margin-top:6px;">Window ${fc.window_hours}h • Crowding-adjusted suitability = base × (1 − penalty) • CPUE-inspired, not official CMFRI</div>
+      </div>`;
+  }
+
+  private renderWindDivergence(): string {
+    const wd: any = (this.message as any).windDivergence;
+    // Deliberately quiet for MATCH/UNAVAILABLE/STALE — only surface the card
+    // when there's an actual disagreement worth a fisherman's attention.
+    if (!wd || (wd.status !== 'MODERATE_DIVERGENCE' && wd.status !== 'HIGH_DIVERGENCE')) return '';
+    const isHigh = wd.status === 'HIGH_DIVERGENCE';
+    const badge = wd.is_simulated
+      ? '<span style="font-size:10px;background:#f59e0b;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">DEMO — SIMULATED SATELLITE DATA</span>'
+      : '<span style="font-size:10px;background:#0ea5e9;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">REAL SATELLITE DATA</span>';
+    const diffTxt = (wd.diff_kn ?? null) !== null ? `${wd.diff_kn >= 0 ? '+' : ''}${wd.diff_kn} kn` : 'n/a';
+    return `
+      <div class="wind-validation-card" style="margin-top:10px;padding:12px;border:1px solid ${isHigh ? 'var(--status-unsafe, #ef4444)' : 'var(--border-default)'};border-radius:8px;background:var(--bg-surface);">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+          <span style="font-weight:700;font-size:13px;">🌬️ WIND VALIDATION</span>
+          ${badge}
+        </div>
+        <div style="display:flex;gap:16px;align-items:center;margin-bottom:6px;">
+          <div><div style="font-size:10px;color:var(--text-tertiary);">Forecast</div><div style="font-weight:700;font-size:14px;">${wd.forecast_wind_kn} kn</div></div>
+          <div><div style="font-size:10px;color:var(--text-tertiary);">Satellite</div><div style="font-weight:700;font-size:14px;">${wd.satellite_wind_kn} kn</div></div>
+          <div><div style="font-size:10px;color:var(--text-tertiary);">Difference</div><div style="font-weight:700;font-size:14px;">${diffTxt}</div></div>
+          <div><div style="font-size:10px;color:var(--text-tertiary);">Status</div><div style="font-weight:700;font-size:13px;color:${isHigh ? 'var(--status-unsafe, #ef4444)' : 'var(--status-caution, #f59e0b)'};">${isHigh ? '⚠ HIGH DIVERGENCE' : 'MODERATE DIVERGENCE'}</div></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);">${wd.warning}</div>
       </div>`;
   }
 

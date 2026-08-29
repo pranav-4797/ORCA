@@ -332,6 +332,13 @@ class AppStore {
     this.notify();
   }
 
+  public setSyntheticViz(geojson: any, sessionId: string): void {
+    this.vizGeojson = geojson;
+    this.vizSessionId = sessionId;
+    this.mapPanelOpen = true;
+    this.notify();
+  }
+
   public toggleMapPanel(open?: boolean): void {
     this.mapPanelOpen = open !== undefined ? open : !this.mapPanelOpen;
     this.notify();
@@ -745,6 +752,7 @@ class AppStore {
         queryMode: this.queryMode,
         targetAgent: this.directAgentKey || undefined,
         fleetDemoLevel: (OrcaApiService as any).getFleetDemoLevel ? (OrcaApiService as any).getFleetDemoLevel() : null,
+        windDemoScenario: (OrcaApiService as any).getWindDemoScenario ? (OrcaApiService as any).getWindDemoScenario() : null,
         voiceBlob: voice?.blob,
         speakReply: Boolean(voice),
         abortSignal: this.currentAbortController.signal,
@@ -797,6 +805,9 @@ class AppStore {
             }
             if ((chunk as any).fleetConvergence) {
               (assistantMsg as any).fleetConvergence = (chunk as any).fleetConvergence;
+            }
+            if ((chunk as any).windDivergence) {
+              (assistantMsg as any).windDivergence = (chunk as any).windDivergence;
             }
             if (!(chunk as any).content && assistantMsg.content) {
             } else if ((chunk as any).content && !assistantMsg.content) {

@@ -55,6 +55,8 @@ export interface SendMessageOptions {
   targetAgent?: string;
   /** Fleet demo level for convergence forecast: low/medium/high/severe */
   fleetDemoLevel?: string | null;
+  /** Wind divergence demo scenario: match/moderate/high_divergence (SIMULATED) */
+  windDemoScenario?: string | null;
   /** When set, the prompt is carried as mic audio -> /query/voice (STT). */
   voiceBlob?: Blob;
   /** Speak the finished answer via browser TTS (voice-originated replies). */

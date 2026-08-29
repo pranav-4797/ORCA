@@ -65,4 +65,14 @@ export interface Message {
     raw_best_zone?: any;
     final_zone?: any;
   };
+  /** Satellite–Model Wind Divergence Flag — forecast vs satellite wind comparison */
+  windDivergence?: {
+    status: string; // MATCH | MODERATE_DIVERGENCE | HIGH_DIVERGENCE | UNAVAILABLE | STALE
+    forecast_wind_kn: number;
+    satellite_wind_kn?: number | null;
+    diff_kn?: number | null;
+    warning: string;
+    satellite_status: string; // REAL | SIMULATED | UNAVAILABLE
+    is_simulated: boolean;
+  };
 }

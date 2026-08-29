@@ -11,6 +11,7 @@ export class AgentPanel {
   private agentSelector: AgentSelector;
   private oceanMap: any = null;
   private vizChart: any = null;
+  private sarMonitor: any = null;
   private mapsLoading = false;
   private mapsLoadPromise: Promise<void> | null = null;
 
@@ -132,6 +133,9 @@ export class AgentPanel {
           </div>
         </div>
 
+        <!-- SAR Boundary Monitor — Innovation #3 (Authority) -->
+        <div id="sar-monitor-container"></div>
+
         <!-- Fleet Convergence Forecast — Innovation #1 -->
         <div class="orca-telemetry-widget" id="fleet-convergence-widget" style="border-left:3px solid var(--primary);">
           <div class="widget-section-header">
@@ -159,6 +163,32 @@ export class AgentPanel {
           <div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;">Window 6h • Radius 15km • Target 8 vessels • Penalty max 50% • <em>DEMO — SIMULATED Fleet Activity</em> when highlighted</div>
         </div>
 
+        <!-- Wind Validation — Innovation #4 (Satellite–Model Divergence) -->
+        <div class="orca-telemetry-widget" id="wind-validation-widget" style="border-left:3px solid #0ea5e9;">
+          <div class="widget-section-header">
+            <span class="label-caps" style="display:flex;align-items:center;gap:6px;">🌬️ WIND VALIDATION</span>
+            <span class="status-pill info" id="wind-status-pill">
+              <span class="dot"></span>
+              <span class="data-mono-bold" id="wind-status-text">CHECKING</span>
+            </span>
+          </div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4;">
+            Compares forecast model wind with independent satellite scatterometer observation. <span style="color:var(--text-tertiary);">High divergence flags confidence, never overrides safety.</span>
+          </div>
+          <div class="wind-demo-controls" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+            <button class="cap-badge wind-demo-btn" data-scenario="" style="cursor:pointer;${!OrcaApiService.getWindDemoScenario() ? 'background:var(--primary);color:#fff;' : ''}">Normal</button>
+            <button class="cap-badge wind-demo-btn" data-scenario="match" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='match' ? 'background:var(--primary);color:#fff;' : ''}">Match (18→19kn)</button>
+            <button class="cap-badge wind-demo-btn" data-scenario="moderate" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='moderate' ? 'background:var(--primary);color:#fff;' : ''}">Moderate</button>
+            <button class="cap-badge wind-demo-btn" data-scenario="high_divergence" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='high_divergence' ? 'background:var(--primary);color:#fff;' : ''}">High (18→27kn)</button>
+          </div>
+          <div style="display:flex;gap:4px;">
+            <button class="icon-btn" id="btn-wind-clear" title="Clear wind demo" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">Clear Simulation</button>
+            <button class="icon-btn" id="btn-wind-refresh" title="Refresh satellite wind status" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">↻ Refresh</button>
+          </div>
+          <div id="wind-status-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:6px;max-height:60px;overflow-y:auto;"></div>
+          <div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;">Real provider: MOSDAC OSCAT-3 (ISRO Oceansat-3) — <em>SIMULATED</em> when highlighted • Thresholds 9/15 kn • <span id="wind-real-badge"></span></div>
+        </div>
+
         <!-- Active Advisory Persona Info -->
         <div style="padding:var(--space-3);background:var(--bg-card);border:1px solid var(--border-default);border-radius:var(--radius-md);">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
@@ -183,6 +213,27 @@ export class AgentPanel {
         <div id="selector-container"></div>
       </div>
     `;
+
+    const sarContainer = this.element.querySelector('#sar-monitor-container');
+    if (sarContainer) {
+      if (!this.sarMonitor) {
+        import('../sar/SARBoundaryMonitor').then(({ SARBoundaryMonitor }) => {
+          this.sarMonitor = new SARBoundaryMonitor();
+          const cont = this.element.querySelector('#sar-monitor-container');
+          if (cont && this.sarMonitor) {
+            cont.appendChild(this.sarMonitor.getElement());
+          }
+        }).catch(() => {
+          const fallback = document.createElement('div');
+          fallback.textContent = 'SAR Boundary Monitor unavailable';
+          fallback.style.fontSize = '11px';
+          fallback.style.color = 'var(--text-tertiary)';
+          sarContainer.appendChild(fallback);
+        });
+      } else {
+        sarContainer.appendChild(this.sarMonitor.getElement());
+      }
+    }
 
     const mapContainer = this.element.querySelector('#map-container');
     if (mapContainer) {
@@ -290,8 +341,51 @@ export class AgentPanel {
     this.element.querySelector('#btn-fleet-refresh')?.addEventListener('click', () => {
       this.refreshFleetStatus();
     });
-    // Auto-refresh fleet status once per render
+    // Wind validation demo controls
+    const windBtns = this.element.querySelectorAll('.wind-demo-btn');
+    windBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const sc = (btn as HTMLElement).getAttribute('data-scenario') || '';
+        OrcaApiService.setWindDemoScenario(sc || null);
+        const label = sc ? `Wind demo set to ${sc} — next safety/PFZ query will show validation${sc==='high_divergence'?' ⚠ HIGH':sc==='match'?' (MATCH)':''}` : 'Cleared wind demo — back to Normal (live check only)';
+        showToast(label, sc ? 'info' : 'success');
+        this.render();
+      });
+    });
+    this.element.querySelector('#btn-wind-clear')?.addEventListener('click', () => {
+      OrcaApiService.setWindDemoScenario(null);
+      showToast('Cleared wind demo', 'success');
+      this.render();
+    });
+    this.element.querySelector('#btn-wind-refresh')?.addEventListener('click', () => this.refreshWindStatus());
+    // Auto-refresh statuses once per render
     this.refreshFleetStatus();
+    this.refreshWindStatus();
+  }
+
+  private async refreshWindStatus(): Promise<void> {
+    const statusText = this.element.querySelector('#wind-status-text') as HTMLElement | null;
+    const detail = this.element.querySelector('#wind-status-detail') as HTMLElement | null;
+    const badge = this.element.querySelector('#wind-real-badge') as HTMLElement | null;
+    if (!statusText) return;
+    try {
+      const s = await OrcaApiService.getSatelliteWindStatus();
+      const activated = !!s.real_provider_activated;
+      const demo = OrcaApiService.getWindDemoScenario();
+      if (demo) statusText.textContent = `${demo.toUpperCase()} (DEMO)`;
+      else statusText.textContent = activated ? 'REAL ACTIVE' : 'DEMO ONLY';
+      if (detail) {
+        const m = s.moderate_threshold_kmh ?? 9;
+        const h = s.high_threshold_kmh ?? 15;
+        detail.textContent = `${s.real_provider} — activated=${activated} • thresholds ${m}/${h} km/h • TTL ${s.obs_ttl_s}s • max ${s.max_spatial_km}km/${s.max_age_min}min`;
+      }
+      if (badge) badge.textContent = activated ? 'REAL SATELLITE DATA' : 'DEMO — SIMULATED SATELLITE DATA';
+      const pill = this.element.querySelector('#wind-status-pill') as HTMLElement | null;
+      if (pill) pill.className = `status-pill ${demo ? (demo==='high_divergence'?'critical':'info') : activated ? 'safe' : 'info'}`;
+    } catch {
+      if (statusText) statusText.textContent = 'UNAVAILABLE';
+      if (detail) detail.textContent = 'Wind validation unavailable';
+    }
   }
 
   private async refreshFleetStatus(): Promise<void> {

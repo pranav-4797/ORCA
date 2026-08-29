@@ -39,6 +39,21 @@ class DataSource(str, Enum):
     SIMULATED = "simulated"
 
 
+class WindObsStatus(str, Enum):
+    """Provenance tag for a satellite wind observation -- never blended."""
+    REAL = "REAL"
+    SIMULATED = "SIMULATED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class DivergenceStatus(str, Enum):
+    MATCH = "MATCH"
+    MODERATE_DIVERGENCE = "MODERATE_DIVERGENCE"
+    HIGH_DIVERGENCE = "HIGH_DIVERGENCE"
+    UNAVAILABLE = "UNAVAILABLE"   # no satellite obs to compare against
+    STALE = "STALE"               # obs too old to trust
+
+
 @dataclass
 class Location:
     name: str
@@ -139,6 +154,45 @@ class OceanStateReading:
     # Hourly series for charting (/viz endpoints). Keys are metric names,
     # values are {"times": [...], "values": [...]} local ISO strings.
     hourly_series: dict = field(default_factory=dict)
+
+
+@dataclass
+class WindObservation:
+    """One satellite ocean-wind observation (Innovation #4).
+
+    `status` is the honesty tag: REAL only when an activated official
+    connector actually returned it; SIMULATED for the deterministic demo
+    provider; UNAVAILABLE when neither could serve this point/time -- the
+    numeric fields are meaningless (0.0 placeholders) in that case.
+    """
+    latitude: float
+    longitude: float
+    wind_speed_kmh: float
+    wind_direction_deg: Optional[float]   # None when the source has no direction
+    observation_timestamp: Optional[datetime]
+    source: str            # e.g. "MOSDAC_OSCAT3", "orca_demo_scatterometer"
+    dataset: str            # product/dataset name, "" when UNAVAILABLE
+    status: WindObsStatus
+    reason: str = ""        # why UNAVAILABLE/STALE, human-readable
+
+
+@dataclass
+class WindDivergenceResult:
+    """Output of the divergence engine comparing forecast vs. satellite wind."""
+    forecast_wind_kmh: float
+    satellite_wind_kmh: Optional[float]
+    abs_diff_kmh: Optional[float]
+    pct_diff: Optional[float]
+    direction_diff_deg: Optional[float]
+    status: DivergenceStatus
+    warning: str
+    satellite_status: WindObsStatus
+    satellite_source: str
+    satellite_dataset: str
+    observation_age_minutes: Optional[float]
+    spatial_offset_km: Optional[float]
+    confidence_penalty: float = 0.0     # subtracted from response confidence on HIGH_DIVERGENCE
+    reasoning_note: str = ""
 
 
 @dataclass
@@ -302,3 +356,6 @@ class OrchestratorResponse:
     routing: dict = field(default_factory=dict)
     # Fleet Convergence Forecast (Innovation #1) — crowding-adjusted recommendation
     fleet_convergence: Optional[dict] = None
+    # Satellite-Model Wind Divergence Flag (Innovation #4) — dict form of
+    # WindDivergenceResult, None when the check wasn't run for this query.
+    wind_divergence: Optional[dict] = None

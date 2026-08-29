@@ -104,6 +104,17 @@ timings?: Record<string, number>;
     final_zone?: any;
   };
   pfz?: OrcaPfz | null;
+  wind_divergence?: {
+    status: string;
+    forecast_wind_kn: number;
+    satellite_wind_kn?: number | null;
+    diff_kn?: number | null;
+    warning: string;
+    satellite_status: string;
+    satellite_source?: string;
+    reasoning_note?: string;
+    is_simulated: boolean;
+  };
 }
 
 /** Addressable specialists for direct-agent queries (backend registry). */
@@ -249,8 +260,9 @@ export class OrcaApiService implements IAIService {
     });
 
     let data: OrcaQueryResponse;
-    // Include fleet demo level if set (via options or global demo control)
+    // Include fleet + wind demo levels if set (via options or global demo controls)
     const fleetDemoLevel = (options as any).fleetDemoLevel || OrcaApiService.getFleetDemoLevel() || null;
+    const windDemoScenario = (options as any).windDemoScenario || OrcaApiService.getWindDemoScenario() || null;
     try {
       data = options.voiceBlob
         ? await this.postVoiceQuery(options)
@@ -264,6 +276,7 @@ export class OrcaApiService implements IAIService {
               mode: resolvedMode,
               agent: resolvedMode === 'agent' ? options.targetAgent : undefined,
               fleet_demo_level: fleetDemoLevel || undefined,
+              wind_demo_scenario: windDemoScenario || undefined,
             }),
           });
     } catch (err: any) {
@@ -360,6 +373,26 @@ export class OrcaApiService implements IAIService {
       }
     }
 
+    // Wind Validation (Satellite-Model Wind Divergence Flag) - only surface
+    // an activity step when there's something to flag, so a normal MATCH or
+    // UNAVAILABLE check doesn't clutter the fisherman's activity feed.
+    if ((data as any).wind_divergence) {
+      const wdv: any = (data as any).wind_divergence;
+      if (wdv.status === 'MODERATE_DIVERGENCE' || wdv.status === 'HIGH_DIVERGENCE') {
+        const simLabel = wdv.is_simulated ? ' [DEMO - SIMULATED SATELLITE DATA]' : ' [REAL SATELLITE DATA]';
+        const diffTxt = (wdv.diff_kn !== null && wdv.diff_kn !== undefined) ? `${wdv.diff_kn >= 0 ? '+' : ''}${wdv.diff_kn}kn` : 'n/a';
+        onChunk({
+          type: 'activity',
+          activityStep: this.step(
+            `wind-${Date.now()}`,
+            `Wind validation: ${wdv.status.replace('_', ' ')}${simLabel}`,
+            `Forecast ${wdv.forecast_wind_kn}kn vs satellite ${wdv.satellite_wind_kn}kn (${diffTxt}) - ${wdv.warning}`,
+            'completed',
+          ),
+        });
+      }
+    }
+
     // ---- Phase 2b: round-table discussion -> activity steps (only when present; no delay) ------------
     const STANCE_ICON: Record<string, string> = {
       challenge: '\u26a1', clarify: '\u2139\ufe0f', agree: '\u2705', concede: '\ud83e\udd1d',
@@ -429,6 +462,7 @@ export class OrcaApiService implements IAIService {
       routing: data.routing,
       timings: data.timings,
       fleetConvergence: (data as any).fleet_convergence,
+      windDivergence: (data as any).wind_divergence,
       tokens: {
         promptTokens: Math.ceil(prompt.length / 4),
         completionTokens: Math.ceil(fullText.length / 4),
@@ -522,6 +556,7 @@ export class OrcaApiService implements IAIService {
   }
 
   public static fleetDemoLevel: string | null = null;
+  public static windDemoScenario: string | null = null;
 
   /** Fleet Convergence — set demo level for next query (low/medium/high/severe) */
   public static setFleetDemoLevel(level: string | null): void {
@@ -531,6 +566,14 @@ export class OrcaApiService implements IAIService {
   }
   public static getFleetDemoLevel(): string | null {
     return OrcaApiService.fleetDemoLevel || localStorage.getItem('orca_fleet_demo_level');
+  }
+  public static setWindDemoScenario(scenario: string | null): void {
+    OrcaApiService.windDemoScenario = scenario;
+    if (scenario) localStorage.setItem('orca_wind_demo_scenario', scenario);
+    else localStorage.removeItem('orca_wind_demo_scenario');
+  }
+  public static getWindDemoScenario(): string | null {
+    return OrcaApiService.windDemoScenario || localStorage.getItem('orca_wind_demo_scenario');
   }
   public static async simulateFleet(level: string, lat?: number, lon?: number, sessionId?: string): Promise<any> {
     const body: any = { level };
@@ -551,6 +594,14 @@ export class OrcaApiService implements IAIService {
   }
   public static async getFleetStatus(): Promise<any> {
     return fetch(`${BACKEND_URL}/fleet/status`).then(r => r.json());
+  }
+  public static async getSatelliteWindStatus(): Promise<any> {
+    return fetch(`${BACKEND_URL}/satellite-wind/status`).then(r => r.json());
+  }
+  public static async getSatelliteWindDivergence(lat: number, lon: number, scenario?: string): Promise<any> {
+    const qs = new URLSearchParams({ lat: String(lat), lon: String(lon) });
+    if (scenario) qs.set('demo_scenario', scenario);
+    return fetch(`${BACKEND_URL}/satellite-wind/divergence?${qs}`).then(r => r.json());
   }
 
   public static cachedGps: [number, number] | null = null;
@@ -579,6 +630,46 @@ export class OrcaApiService implements IAIService {
     if (OrcaApiService.cachedGps) return OrcaApiService.cachedGps;
     const raw = localStorage.getItem('orca_device_gps') || localStorage.getItem('orca_demo_gps');
     return raw ? JSON.parse(raw) : null;
+  }
+
+  // -------------------------------------------------------------------------
+  // SAR Boundary Surveillance (Innovation #3)
+  // -------------------------------------------------------------------------
+  public static async getSarStatus(): Promise<any> {
+    return fetch(`${BACKEND_URL}/sar/status`, { signal: AbortSignal.timeout(5000) }).then(r => {
+      if (!r.ok) throw new Error(`sar/status ${r.status}`);
+      return r.json();
+    });
+  }
+  public static async getSarDetections(): Promise<any> {
+    return fetch(`${BACKEND_URL}/sar/detections`, { signal: AbortSignal.timeout(8000) }).then(r => {
+      if (!r.ok) throw new Error(`sar/detections ${r.status}`);
+      return r.json();
+    });
+  }
+  public static async runSarScan(opts: { provider?: string; area?: any; useCache?: boolean } = {}): Promise<any> {
+    return fetch(`${BACKEND_URL}/sar/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: opts.provider || 'demo',
+        area: opts.area || null,
+        use_cache: opts.useCache ?? false,
+      }),
+      signal: AbortSignal.timeout(10000),
+    }).then(r => {
+      if (!r.ok) throw new Error(`sar/scan ${r.status}`);
+      return r.json();
+    });
+  }
+  public static async runSarDemo(): Promise<any> {
+    return fetch(`${BACKEND_URL}/sar/demo`, { method: 'POST', signal: AbortSignal.timeout(10000) }).then(r => {
+      if (!r.ok) throw new Error(`sar/demo ${r.status}`);
+      return r.json();
+    });
+  }
+  public static async clearSar(): Promise<any> {
+    return fetch(`${BACKEND_URL}/sar/clear`, { method: 'POST', signal: AbortSignal.timeout(4000) }).then(r => r.json());
   }
 
   /** Proactive alerts: register the browser as a monitorable user and
