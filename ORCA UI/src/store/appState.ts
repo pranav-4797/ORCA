@@ -124,7 +124,7 @@ class AppStore {
   ];
 
   // UI Drawer / Modal States
-  public sidebarCollapsed: boolean = false;
+  public sidebarCollapsed: boolean = true;
   public mobileSidebarOpen: boolean = false;
   public agentPanelOpen: boolean = false;
   public mobileAgentDrawerOpen: boolean = false;
@@ -133,12 +133,13 @@ class AppStore {
   public authModalOpen: boolean = false;
   public categoryModalOpen: boolean = false;
   public userCategory: UserCategoryProfile | null = null;
+  public activeLanguage: 'en' | 'mr' | 'hi' = 'en';
   public searchQuery: string = '';
 
   // Settings
   public settings: AppSettings = {
     theme: 'dark',
-    sidebarCollapsed: false,
+    sidebarCollapsed: true,
     agentPanelOpen: false,
     soundEnabled: true,
     sendOnEnter: true,
@@ -160,20 +161,29 @@ class AppStore {
       if (user) {
         void saveUserProfile(user);
         
-        // 1. Check user category/role in Firestore (Mandatory onboarding step)
+        // 1. Check user category/role (Check local storage cache first, then Firestore)
         try {
+          const cachedRole = localStorage.getItem(`orca_role_${user.uid}`);
+          if (cachedRole) {
+            this.userCategory = JSON.parse(cachedRole);
+            this.categoryModalOpen = false;
+          }
+
           const categoryProfile = await getUserCategoryProfileFromFirestore(user.uid);
           if (categoryProfile) {
             this.userCategory = categoryProfile;
             this.categoryModalOpen = false;
-          } else {
-            // New user without role selected -> show mandatory category selection modal
+            localStorage.setItem(`orca_role_${user.uid}`, JSON.stringify(categoryProfile));
+          } else if (!this.userCategory) {
+            // New user without role selected -> show category selection modal
             this.userCategory = null;
             this.categoryModalOpen = true;
           }
         } catch (catErr) {
           console.warn('[Firestore] Category check error:', catErr);
-          this.categoryModalOpen = true;
+          if (this.userCategory) {
+            this.categoryModalOpen = false;
+          }
         }
 
         // 2. Load chat history
@@ -252,15 +262,21 @@ class AppStore {
     this.categoryModalOpen = false;
 
     if (this.currentUser) {
+      localStorage.setItem(`orca_role_${this.currentUser.uid}`, JSON.stringify(profile));
       try {
         await saveUserCategoryProfileToFirestore(this.currentUser.uid, profile);
-        showToast(`Role set to ${config.icon} ${config.name} (Stored in Firestore)`, 'success');
+        showToast(`Role set to ${config.icon} ${config.name}`, 'success');
       } catch (err) {
         console.warn('Failed to save category profile to Firestore:', err);
         showToast(`Role active for session (${config.name})`, 'info');
       }
     }
 
+    this.notify();
+  }
+
+  public setLanguage(lang: 'en' | 'mr' | 'hi'): void {
+    this.activeLanguage = lang;
     this.notify();
   }
 

@@ -1,6 +1,7 @@
 import { store } from '../../store/appState';
 import { ICONS } from '../../utils/icons';
 import { showToast } from '../ui/Toast';
+import { I18N } from '../../utils/i18n';
 import { copyToClipboard } from '../../utils/helpers';
 
 export class Header {
@@ -12,6 +13,7 @@ export class Header {
     this.render();
     store.subscribe(() => this.render());
   }
+
   public getElement(): HTMLElement {
     return this.element;
   }
@@ -19,13 +21,14 @@ export class Header {
   private render(): void {
     const isThinking = store.isStreaming;
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const activeChat = store.getActiveChat();
+    const lang = store.activeLanguage || 'en';
+    const t = I18N[lang] || I18N.en;
 
     this.element.innerHTML = `
       <!-- Top Nautical Header Strip -->
       <div class="header-main-strip">
         <div class="header-left">
-          <button class="icon-btn btn-mobile-menu" id="btn-toggle-mobile-sidebar" title="Open Navigation Menu" aria-label="Open Navigation Menu">
+          <button class="icon-btn btn-mobile-menu" id="btn-toggle-mobile-sidebar" title="Toggle Sidebar" aria-label="Toggle Sidebar">
             ${ICONS.menu}
           </button>
 
@@ -36,19 +39,19 @@ export class Header {
           </div>
         </div>
 
-        <!-- Center Navigation Tabs (Clean, single-line) -->
+        <!-- Center Navigation Tabs (Clean single language) -->
         <nav class="header-nav-tabs" role="tablist">
-          <button class="nav-tab-btn" id="tab-today" data-tab="today">Overview (आज)</button>
-          <button class="nav-tab-btn active" id="tab-ask-orca" data-tab="chat">Ask ORCA (विचारा)</button>
-          <button class="nav-tab-btn" id="tab-authority" data-tab="sar">Authority (प्रशासन)</button>
-          <button class="nav-tab-btn" id="tab-system" data-tab="system">System (प्रणाली)</button>
+          <button class="nav-tab-btn" id="tab-today" data-tab="today">${t.tabToday}</button>
+          <button class="nav-tab-btn active" id="tab-ask-orca" data-tab="chat">${t.tabAsk}</button>
+          <button class="nav-tab-btn" id="tab-authority" data-tab="sar">${t.tabAuthority}</button>
+          <button class="nav-tab-btn" id="tab-system" data-tab="system">${t.tabSystem}</button>
         </nav>
 
         <div class="header-right">
           <!-- Compact Status Badge -->
           <div class="orca-compact-status-badge ${store.backendOnline ? 'live' : 'demo'}">
             <span class="status-dot"></span>
-            <span>${store.backendOnline ? 'LIVE FEED' : 'DEMO MODE'}</span>
+            <span>${store.backendOnline ? 'LIVE' : 'DEMO'}</span>
           </div>
 
           <button class="btn-voice-indicator" id="btn-header-voice-toggle" title="Toggle Voice Response">
@@ -62,7 +65,7 @@ export class Header {
 
           <!-- Google Auth / Officer Profile Popover -->
           ${store.currentUser ? `
-            <div class="officer-profile-chip" id="officer-profile-chip" title="${store.currentUser.displayName || store.currentUser.email} • Click for options">
+            <div class="officer-profile-chip" id="officer-profile-chip" title="${store.currentUser.displayName || store.currentUser.email}">
               ${store.currentUser.photoURL ? `
                 <img src="${store.currentUser.photoURL}" alt="Avatar" class="officer-avatar-img" />
               ` : `
@@ -97,32 +100,32 @@ export class Header {
 
       <!-- Rehearsed Coastal Scenarios Ribbon -->
       <div class="scenarios-quick-ribbon">
-        <span class="scenarios-title">REHEARSED SCENARIOS</span>
+        <span class="scenarios-title">SCENARIOS</span>
         <div class="scenarios-list">
           <button class="scenario-btn" data-scenario="safe_goa">
             <span class="sc-num">1</span>
-            <span class="sc-name">Safe</span>
-            <span class="sc-loc">GOA • LOW</span>
+            <span class="sc-name">${t.sc1Title}</span>
+            <span class="sc-loc">${t.sc1Sub}</span>
           </button>
           <button class="scenario-btn" data-scenario="rough_mumbai">
             <span class="sc-num">2</span>
-            <span class="sc-name">Rough</span>
-            <span class="sc-loc">MUMBAI • मराठी</span>
+            <span class="sc-name">${t.sc2Title}</span>
+            <span class="sc-loc">${t.sc2Sub}</span>
           </button>
           <button class="scenario-btn" data-scenario="cyclone_paradip">
             <span class="sc-num">3</span>
-            <span class="sc-name">Cyclone</span>
-            <span class="sc-loc">PARADIP • EXTREME</span>
+            <span class="sc-name">${t.sc3Title}</span>
+            <span class="sc-loc">${t.sc3Sub}</span>
           </button>
           <button class="scenario-btn" data-scenario="pfz_kochi">
             <span class="sc-num">4</span>
-            <span class="sc-name">Fishing zones</span>
-            <span class="sc-loc">KOCHI • हिंदी</span>
+            <span class="sc-name">${t.sc4Title}</span>
+            <span class="sc-loc">${t.sc4Sub}</span>
           </button>
           <button class="scenario-btn" data-scenario="safe_route_mumbai">
             <span class="sc-num">5</span>
-            <span class="sc-name">Safe route</span>
-            <span class="sc-loc">MUMBAI • GEOFENCE</span>
+            <span class="sc-name">${t.sc5Title}</span>
+            <span class="sc-loc">${t.sc5Sub}</span>
           </button>
         </div>
       </div>
@@ -132,6 +135,14 @@ export class Header {
   }
 
   private attachEvents(): void {
+    const lang = store.activeLanguage || 'en';
+    const t = I18N[lang] || I18N.en;
+
+    // Toggle Sidebar
+    this.element.querySelector('#btn-toggle-mobile-sidebar')?.addEventListener('click', () => {
+      store.toggleSidebar();
+    });
+
     // Google Auth Login
     this.element.querySelector('#btn-header-login')?.addEventListener('click', () => {
       store.loginWithGoogle();
@@ -142,18 +153,19 @@ export class Header {
       btn.addEventListener('click', () => {
         const scenario = btn.getAttribute('data-scenario');
         if (scenario === 'safe_goa') {
-          store.sendMessage('Is it safe to sail from Panaji Port, Goa tomorrow morning? Inspect waves and wind.');
+          store.sendMessage(t.sc1Q);
         } else if (scenario === 'rough_mumbai') {
-          store.sendMessage('मी उद्या सकाळी ६ वाजता मुंबईजवळ मासेमारीला जाऊ शकतो का?');
+          store.sendMessage(t.sc2Q);
         } else if (scenario === 'cyclone_paradip') {
-          store.sendMessage('Are there active cyclone or high wave warnings near Paradip port, Odisha?');
+          store.sendMessage(t.sc3Q);
         } else if (scenario === 'pfz_kochi') {
-          store.sendMessage('कोच्चि तट के पास सबसे निकटतम मछली पकड़ने का क्षेत्र (PFZ) कहाँ है?');
+          store.sendMessage(t.sc4Q);
         } else if (scenario === 'safe_route_mumbai') {
-          store.sendMessage('Plot a safe navigational route from Mumbai Harbour avoiding restricted coastal zones.');
+          store.sendMessage(t.sc5Q);
         }
       });
     });
+
 
     // Switch Role via popover
     this.element.querySelector('#btn-popover-switch-role')?.addEventListener('click', (e) => {

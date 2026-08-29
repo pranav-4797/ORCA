@@ -2,6 +2,7 @@ import { store } from '../../store/appState';
 import { MessageList } from './MessageList';
 import { Composer } from './Composer';
 import { showToast } from '../ui/Toast';
+import { I18N } from '../../utils/i18n';
 
 export class ChatWindow {
   private element: HTMLElement;
@@ -16,20 +17,8 @@ export class ChatWindow {
     this.element = document.createElement('main');
     this.element.className = 'chat-console-pane';
 
-    // Top Language Header
     this.headerBar = document.createElement('div');
     this.headerBar.className = 'chat-console-top-bar';
-    this.headerBar.innerHTML = `
-      <div class="chat-top-title-col">
-        <span class="chat-top-title">Ask ORCA</span>
-        <span class="chat-top-sub">Type or speak — English • हिंदी • मराठी</span>
-      </div>
-      <div class="chat-lang-switchers">
-        <button class="chat-lang-btn active" data-lang="en">EN</button>
-        <button class="chat-lang-btn" data-lang="hi">हिं</button>
-        <button class="chat-lang-btn" data-lang="mr">मरा</button>
-      </div>
-    `;
 
     this.scrollContainer = document.createElement('div');
     this.scrollContainer.className = 'chat-scroll-container';
@@ -37,15 +26,8 @@ export class ChatWindow {
     this.messageList = new MessageList();
     this.composer = new Composer();
 
-    // Suggestion Quick Chips Bar
     this.suggestionBar = document.createElement('div');
     this.suggestionBar.className = 'chat-console-suggestion-bar';
-    this.suggestionBar.innerHTML = `
-      <button class="chat-sugg-chip" data-q="दुपारी १२ वाजता हवामान काय असेल?">दुपारी १२ वाजता काय?</button>
-      <button class="chat-sugg-chip" data-q="Where is the nearest official INCOIS Potential Fishing Zone (PFZ) today?">जवळचे PFZ दाखवा</button>
-      <button class="chat-sugg-chip" data-q="Plot a safe navigational route avoiding shallow waters and restricted zones.">सुरक्षित मार्ग दाखवा</button>
-      <button class="chat-sugg-chip" data-q="Are there active cyclone or squall warnings near this sector?">जवळपास चक्रीवादळ आहे का?</button>
-    `;
 
     this.scrollContainer.appendChild(this.messageList.getElement());
     this.element.appendChild(this.headerBar);
@@ -53,24 +35,47 @@ export class ChatWindow {
     this.element.appendChild(this.suggestionBar);
     this.element.appendChild(this.composer.getElement());
 
-    this.setupEvents();
+    this.renderHeaderAndSuggestions();
     this.setupScrollListener();
     store.subscribe(() => this.handleStateUpdate());
   }
 
-  private setupEvents(): void {
+  private renderHeaderAndSuggestions(): void {
+    const lang = store.activeLanguage || 'en';
+    const t = I18N[lang] || I18N.en;
+
+    this.headerBar.innerHTML = `
+      <div class="chat-top-title-col">
+        <span class="chat-top-title">${t.askTitle}</span>
+        <span class="chat-top-sub">${t.askSub}</span>
+      </div>
+      <div class="chat-lang-switchers">
+        <button class="chat-lang-btn ${lang === 'en' ? 'active' : ''}" data-lang="en">EN</button>
+        <button class="chat-lang-btn ${lang === 'hi' ? 'active' : ''}" data-lang="hi">हिं</button>
+        <button class="chat-lang-btn ${lang === 'mr' ? 'active' : ''}" data-lang="mr">मरा</button>
+      </div>
+    `;
+
+    this.suggestionBar.innerHTML = `
+      <button class="chat-sugg-chip" data-q="${t.sugg1Q}">${t.sugg1}</button>
+      <button class="chat-sugg-chip" data-q="${t.sugg2Q}">${t.sugg2}</button>
+      <button class="chat-sugg-chip" data-q="${t.sugg3Q}">${t.sugg3}</button>
+      <button class="chat-sugg-chip" data-q="${t.sugg4Q}">${t.sugg4}</button>
+    `;
+
     // Language buttons
     this.headerBar.querySelectorAll('.chat-lang-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        this.headerBar.querySelectorAll('.chat-lang-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const lang = btn.getAttribute('data-lang');
-        if (lang === 'mr') {
-          showToast('मराठी भाषा निवडली', 'info');
-        } else if (lang === 'hi') {
-          showToast('हिंदी भाषा चयनित', 'info');
-        } else {
-          showToast('English selected', 'info');
+        const selectedLang = btn.getAttribute('data-lang') as 'en' | 'mr' | 'hi';
+        if (selectedLang && selectedLang !== store.activeLanguage) {
+          store.setLanguage(selectedLang);
+          if (selectedLang === 'mr') {
+            showToast('मराठी भाषा निवडली', 'info');
+          } else if (selectedLang === 'hi') {
+            showToast('हिंदी भाषा चयनित', 'info');
+          } else {
+            showToast('English selected', 'info');
+          }
         }
       });
     });
@@ -84,15 +89,8 @@ export class ChatWindow {
     });
   }
 
-  public getElement(): HTMLElement {
-    return this.element;
-  }
-
-  public getComposer(): Composer {
-    return this.composer;
-  }
-
   private handleStateUpdate(): void {
+    this.renderHeaderAndSuggestions();
     if (store.isStreaming) {
       this.messageList.updateLastMessage();
       if (this.shouldAutoScroll) {
@@ -102,6 +100,14 @@ export class ChatWindow {
       this.messageList.render();
       this.scrollToBottom();
     }
+  }
+
+  public getElement(): HTMLElement {
+    return this.element;
+  }
+
+  public getComposer(): Composer {
+    return this.composer;
   }
 
   private setupScrollListener(): void {
