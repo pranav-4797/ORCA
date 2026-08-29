@@ -1,4 +1,5 @@
 export type UserCategoryKey =
+  | 'general_user'
   | 'fisherman'
   | 'trawler'
   | 'coastal_guard'
@@ -33,6 +34,18 @@ export interface UserCategoryProfile {
 }
 
 export const USER_CATEGORIES: UserCategoryConfig[] = [
+  {
+    key: 'general_user',
+    name: 'General User / Tourist / Mariner',
+    shortName: 'General Mariner',
+    tagline: 'Coastal Weather, Beach Safety & Maritime Inquiries',
+    icon: '🧭',
+    vesselClass: 'small_fishing_boat',
+    vesselLabel: 'General Maritime User (Small Craft)',
+    description: 'Simplified coastal forecasts, beach & high-tide safety, cyclone warnings, wave status, and intuitive conversational advisories for coastal citizens and boaters.',
+    focusBadges: ['Beach & Coast Safety', 'High / Low Tides', 'IMD Cyclone Alerts', 'Simplified Advisories'],
+    systemContextPrompt: 'User is a General Citizen, Tourist, or Recreational Mariner. Provide clear, straightforward maritime weather, high-tide timing, sea safety verdicts, and easy-to-understand explanations.',
+  },
   {
     key: 'fisherman',
     name: 'Traditional Coastal Fisherman',

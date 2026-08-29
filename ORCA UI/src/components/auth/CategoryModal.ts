@@ -4,7 +4,7 @@ import { ICONS } from '../../utils/icons';
 
 export class CategoryModal {
   private element: HTMLElement;
-  private selectedCategoryKey: UserCategoryKey = 'fisherman';
+  private selectedCategoryKey: UserCategoryKey = 'general_user';
 
   constructor() {
     this.element = document.createElement('div');
