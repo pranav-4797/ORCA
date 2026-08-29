@@ -11,6 +11,7 @@ import {
 import {
   getFirestore,
   doc,
+  getDoc,
   setDoc,
   getDocs,
   deleteDoc,
@@ -20,6 +21,8 @@ import {
 } from 'firebase/firestore';
 import { Chat } from '../types/chat';
 import { Message } from '../types/message';
+import { UserCategoryProfile } from '../types/userCategory';
+
 
 export const firebaseConfig = {
   apiKey: "AIzaSyACNEnzNQkQvdHD-6AqnABfHYF-gnFXQeE",
@@ -72,6 +75,57 @@ export async function saveUserProfile(user: User): Promise<void> {
     console.warn('[Firestore] Failed to save user profile:', err);
   }
 }
+
+/**
+ * Save selected user category/role in Firestore for tailored responses
+ */
+export async function saveUserCategoryProfileToFirestore(uid: string, profile: UserCategoryProfile): Promise<void> {
+  if (!uid || !profile) return;
+  try {
+    const userRef = doc(db, 'users', uid);
+    await setDoc(userRef, {
+      category: profile.category,
+      roleName: profile.roleName,
+      vesselClass: profile.vesselClass,
+      badgeEmoji: profile.badgeEmoji,
+      tagline: profile.tagline,
+      categoryUpdatedAt: profile.updatedAt || Date.now(),
+      lastActiveAt: Date.now(),
+    }, { merge: true });
+    console.info(`[Firestore] Category ${profile.category} saved for user ${uid}`);
+  } catch (err) {
+    console.warn('[Firestore] Failed to save category profile:', err);
+  }
+}
+
+/**
+ * Load user category/role from Firestore
+ */
+export async function getUserCategoryProfileFromFirestore(uid: string): Promise<UserCategoryProfile | null> {
+  if (!uid) return null;
+  try {
+    const userRef = doc(db, 'users', uid);
+    const snap = await getDoc(userRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data && data.category) {
+        return {
+          category: data.category,
+          roleName: data.roleName || data.category,
+          vesselClass: data.vesselClass || 'small_fishing_boat',
+          badgeEmoji: data.badgeEmoji || '⚓',
+          tagline: data.tagline || '',
+          updatedAt: data.categoryUpdatedAt || Date.now(),
+        };
+      }
+    }
+    return null;
+  } catch (err) {
+    console.warn('[Firestore] Failed to load user category profile:', err);
+    return null;
+  }
+}
+
 
 /**
  * Save or update a mission brief / chat session in Firestore (Only for authenticated users)

@@ -66,8 +66,15 @@ export class Header {
           ${ICONS.sidebarRight}
         </button>
 
-        <!-- Google Auth / Officer Profile -->
+        <!-- Google Auth / Officer Profile & Role Indicator -->
         ${store.currentUser ? `
+          <!-- Operational Category Switcher Chip -->
+          <button class="header-role-chip" id="btn-header-switch-role" title="Operational Role: ${store.userCategory?.roleName || 'Select Role'} (Click to Switch)">
+            <span class="role-badge-icon">${store.userCategory?.badgeEmoji || '⚓'}</span>
+            <span class="role-badge-text">${store.userCategory?.roleName || 'Set Role'}</span>
+            <span class="role-badge-arrow">▾</span>
+          </button>
+
           <div class="officer-profile-chip" id="officer-profile-chip" title="${store.currentUser.displayName || store.currentUser.email} • Click for options">
             ${store.currentUser.photoURL ? `
               <img src="${store.currentUser.photoURL}" alt="Officer Avatar" class="officer-avatar-img" />
@@ -78,8 +85,15 @@ export class Header {
               <div class="officer-popover-header">
                 <div class="popover-name">${store.currentUser.displayName || 'Watch Officer'}</div>
                 <div class="popover-email">${store.currentUser.email}</div>
-                <span class="officer-role-pill">Verified Maritime Officer</span>
+                <div class="officer-role-pill">
+                  <span>${store.userCategory?.badgeEmoji || '⚓'}</span>
+                  <span>${store.userCategory?.roleName || 'Verified Officer'}</span>
+                </div>
               </div>
+              <button class="btn-popover-action" id="btn-popover-switch-role">
+                <span>🔄</span>
+                <span>Change Operational Role</span>
+              </button>
               <button class="btn-popover-logout" id="btn-header-logout">
                 <span>${ICONS.logOut || '⎋'}</span>
                 <span>Sign Out</span>
@@ -107,6 +121,19 @@ export class Header {
     // Google Auth Login
     this.element.querySelector('#btn-header-login')?.addEventListener('click', () => {
       store.loginWithGoogle();
+    });
+
+    // Switch Role via header chip
+    this.element.querySelector('#btn-header-switch-role')?.addEventListener('click', () => {
+      store.toggleCategoryModal(true);
+    });
+
+    // Switch Role via popover
+    this.element.querySelector('#btn-popover-switch-role')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const popover = this.element.querySelector('#officer-popover') as HTMLElement | null;
+      if (popover) popover.style.display = 'none';
+      store.toggleCategoryModal(true);
     });
 
     // Toggle Officer Popover

@@ -53,6 +53,10 @@ export interface SendMessageOptions {
   queryMode?: 'auto' | 'panel' | 'agent';
   /** Specialist key for queryMode='agent' (see backend GET /agents). */
   targetAgent?: string;
+  /** Vessel Class: small_fishing_boat / mechanized_trawler / coastal_cargo */
+  vesselClass?: string;
+  /** Active user category / role profile */
+  userCategory?: string;
   /** Fleet demo level for convergence forecast: low/medium/high/severe */
   fleetDemoLevel?: string | null;
   /** Wind divergence demo scenario: match/moderate/high_divergence (SIMULATED) */

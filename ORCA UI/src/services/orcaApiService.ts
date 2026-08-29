@@ -275,6 +275,7 @@ export class OrcaApiService implements IAIService {
               device_gps: OrcaApiService.demoGps(),
               mode: resolvedMode,
               agent: resolvedMode === 'agent' ? options.targetAgent : undefined,
+              vessel_class: options.vesselClass || 'small_fishing_boat',
               fleet_demo_level: fleetDemoLevel || undefined,
               wind_demo_scenario: windDemoScenario || undefined,
             }),

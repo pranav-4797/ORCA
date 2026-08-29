@@ -41,6 +41,27 @@ export class SettingsModal {
         </div>
 
         <div class="modal-body" style="display:flex;flex-direction:column;gap:18px;">
+          <!-- Active Operational Role -->
+          <div style="background:var(--bg-surface-hover);padding:12px;border:1px solid var(--border-subtle);border-radius:var(--radius-xs);">
+            <label style="display:block;font-size:12px;font-weight:700;letter-spacing:0.04em;margin-bottom:6px;color:var(--primary);text-transform:uppercase;">
+              Maritime Operational Role
+            </label>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+              <div>
+                <div style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;">
+                  <span>${store.userCategory?.badgeEmoji || '⚓'}</span>
+                  <span>${store.userCategory?.roleName || 'No Role Selected'}</span>
+                </div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">
+                  ${store.userCategory?.tagline || 'Select your maritime profile for tailored telemetry'}
+                </div>
+              </div>
+              <button id="btn-settings-change-role" style="padding:6px 12px;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:var(--radius-xs);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                Switch Role
+              </button>
+            </div>
+          </div>
+
           <!-- Theme Preference -->
           <div>
             <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-primary);">Appearance</label>
@@ -109,6 +130,12 @@ export class SettingsModal {
 
     this.element.querySelector('#btn-save-settings')?.addEventListener('click', () => {
       store.toggleSettingsModal(false);
+    });
+
+    // Change Role button
+    this.element.querySelector('#btn-settings-change-role')?.addEventListener('click', () => {
+      store.toggleSettingsModal(false);
+      store.toggleCategoryModal(true);
     });
 
     // Theme selector buttons

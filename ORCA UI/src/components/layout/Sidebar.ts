@@ -87,7 +87,7 @@ export class Sidebar {
 
       <!-- Clean Footer -->
       <div class="sidebar-footer">
-        <button class="user-profile-btn" id="btn-sidebar-settings" title="Workspace Settings">
+        <button class="user-profile-btn" id="btn-sidebar-settings" title="Role: ${store.userCategory?.roleName || 'Verified Officer'} • Click to change profile">
           ${user?.photoURL ? `
             <img src="${user.photoURL}" alt="Officer" class="sidebar-user-avatar-img" />
           ` : `
@@ -95,9 +95,9 @@ export class Sidebar {
           `}
           <div class="user-details">
             <div class="user-name">${officerName}</div>
-            <div class="user-plan">${user ? 'Verified Officer' : 'Demo Session'}</div>
+            <div class="user-plan">${store.userCategory ? `${store.userCategory.badgeEmoji} ${store.userCategory.roleName}` : user ? 'Verified Officer' : 'Authentication Required'}</div>
           </div>
-          <span class="footer-settings-icon">${ICONS.settings}</span>
+          <span class="footer-settings-icon" title="Change Role &amp; Settings">${ICONS.settings}</span>
         </button>
       </div>
     `;

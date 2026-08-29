@@ -27,7 +27,15 @@ import {
   deleteUserChatFromFirestore,
   saveUserMessageToFirestore,
   loadUserSessionsFromFirestore,
+  saveUserCategoryProfileToFirestore,
+  getUserCategoryProfileFromFirestore,
 } from '../services/firebase';
+import {
+  UserCategoryConfig,
+  UserCategoryProfile,
+  USER_CATEGORIES,
+} from '../types/userCategory';
+
 
 type StateListener = () => void;
 
@@ -123,6 +131,8 @@ class AppStore {
   public searchModalOpen: boolean = false;
   public settingsModalOpen: boolean = false;
   public authModalOpen: boolean = false;
+  public categoryModalOpen: boolean = false;
+  public userCategory: UserCategoryProfile | null = null;
   public searchQuery: string = '';
 
   // Settings
@@ -149,6 +159,24 @@ class AppStore {
       this.currentUser = user;
       if (user) {
         void saveUserProfile(user);
+        
+        // 1. Check user category/role in Firestore (Mandatory onboarding step)
+        try {
+          const categoryProfile = await getUserCategoryProfileFromFirestore(user.uid);
+          if (categoryProfile) {
+            this.userCategory = categoryProfile;
+            this.categoryModalOpen = false;
+          } else {
+            // New user without role selected -> show mandatory category selection modal
+            this.userCategory = null;
+            this.categoryModalOpen = true;
+          }
+        } catch (catErr) {
+          console.warn('[Firestore] Category check error:', catErr);
+          this.categoryModalOpen = true;
+        }
+
+        // 2. Load chat history
         try {
           const remoteData = await loadUserSessionsFromFirestore(user.uid);
           if (remoteData && remoteData.chats.length > 0) {
@@ -182,7 +210,9 @@ class AppStore {
           console.warn('[Firestore] Sync initialization error:', e);
         }
       } else {
-        // Not logged in (Guest/Demo): strictly local memory/temporary storage, never in Firestore
+        // Not logged in -> reset state
+        this.userCategory = null;
+        this.categoryModalOpen = false;
         this.loadFromStorage();
       }
       this.notify();
@@ -203,10 +233,43 @@ class AppStore {
     }
   }
 
+  public toggleCategoryModal(open?: boolean): void {
+    this.categoryModalOpen = open !== undefined ? open : !this.categoryModalOpen;
+    this.notify();
+  }
+
+  public async setUserCategory(config: UserCategoryConfig): Promise<void> {
+    const profile: UserCategoryProfile = {
+      category: config.key,
+      roleName: config.name,
+      vesselClass: config.vesselClass,
+      badgeEmoji: config.icon,
+      tagline: config.tagline,
+      updatedAt: Date.now(),
+    };
+
+    this.userCategory = profile;
+    this.categoryModalOpen = false;
+
+    if (this.currentUser) {
+      try {
+        await saveUserCategoryProfileToFirestore(this.currentUser.uid, profile);
+        showToast(`Role set to ${config.icon} ${config.name} (Stored in Firestore)`, 'success');
+      } catch (err) {
+        console.warn('Failed to save category profile to Firestore:', err);
+        showToast(`Role active for session (${config.name})`, 'info');
+      }
+    }
+
+    this.notify();
+  }
+
   public async logout(): Promise<void> {
     try {
       await logoutUser();
       this.currentUser = null;
+      this.userCategory = null;
+      this.categoryModalOpen = false;
       this.chats = [...INITIAL_CHATS];
       this.messages = { ...INITIAL_MESSAGES };
       this.activeChatId = this.chats[0]?.id || null;
@@ -219,6 +282,7 @@ class AppStore {
       showToast('Error during sign out.', 'error');
     }
   }
+
 
   /** Probe the ORCA FastAPI backend; wire proactive alerts when online.
    * Retries every 15 s while offline so starting uvicorn mid-session
@@ -751,6 +815,8 @@ class AppStore {
         attachments,
         queryMode: this.queryMode,
         targetAgent: this.directAgentKey || undefined,
+        vesselClass: this.userCategory?.vesselClass || 'small_fishing_boat',
+        userCategory: this.userCategory?.category || 'fisherman',
         fleetDemoLevel: (OrcaApiService as any).getFleetDemoLevel ? (OrcaApiService as any).getFleetDemoLevel() : null,
         windDemoScenario: (OrcaApiService as any).getWindDemoScenario ? (OrcaApiService as any).getWindDemoScenario() : null,
         voiceBlob: voice?.blob,

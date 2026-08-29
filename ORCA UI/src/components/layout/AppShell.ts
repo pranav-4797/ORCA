@@ -6,6 +6,7 @@ import { AgentPanel } from '../agents/AgentPanel';
 import { SearchModal } from '../search/SearchModal';
 import { SettingsModal } from '../settings/SettingsModal';
 import { AuthModal } from '../auth/AuthModal';
+import { CategoryModal } from '../auth/CategoryModal';
 import { ToastManager } from '../ui/Toast';
 
 export class AppShell {
@@ -17,6 +18,7 @@ export class AppShell {
   private searchModal: SearchModal;
   private settingsModal: SettingsModal;
   private authModal: AuthModal;
+  private categoryModal: CategoryModal;
   private mobileBackdrop: HTMLElement;
 
   constructor() {
@@ -31,6 +33,7 @@ export class AppShell {
     this.searchModal = new SearchModal();
     this.settingsModal = new SettingsModal();
     this.authModal = new AuthModal();
+    this.categoryModal = new CategoryModal();
 
     // Mobile Backdrop
     this.mobileBackdrop = document.createElement('div');
@@ -51,6 +54,8 @@ export class AppShell {
     this.element.appendChild(this.searchModal.getElement());
     this.element.appendChild(this.settingsModal.getElement());
     this.element.appendChild(this.authModal.getElement());
+    this.element.appendChild(this.categoryModal.getElement());
+
 
     // Initialize toast manager
     ToastManager.getInstance();
