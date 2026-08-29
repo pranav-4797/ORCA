@@ -35,7 +35,6 @@ export class Header {
           <div class="orca-brand-badge">
             <span class="orca-brand-icon">⚓</span>
             <span class="orca-brand-title">ORCA</span>
-            <span class="orca-chart-pill">SIH-26176</span>
           </div>
         </div>
 

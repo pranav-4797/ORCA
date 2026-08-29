@@ -1630,45 +1630,52 @@
 .toast.info { border-left: 3px solid var(--primary); }
 
 /* =========================================================================
-   ORCA PURE MINIMALIST LOADING ANIMATION (No Card, No Panel, No Border)
+   ORCA PURE MINIMALIST LOADING ANIMATION (Concentric Sonar Radar Pulse)
    ========================================================================= */
 .orca-pure-loader {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   position: relative !important;
-  width: 38px !important;
-  height: 38px !important;
+  width: 28px !important;
+  height: 28px !important;
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
   padding: 0 !important;
-  margin: 2px 0 !important;
-}
-
-.orca-pure-loader dotlottie-player {
-  position: relative;
-  z-index: 2;
-  width: 38px !important;
-  height: 38px !important;
+  margin-top: 2px !important;
 }
 
 .orca-pure-loader .orca-sonar-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(14, 124, 134, 0.2);
+  border-top: 2px solid var(--primary);
+  border-right: 2px solid var(--primary);
+  border-radius: 50%;
+  animation: orcaSonarSpin 0.75s linear infinite;
+  box-shadow: 0 0 6px rgba(14, 124, 134, 0.25);
+}
+
+.orca-pure-loader .orca-radar-pulse-ring {
   position: absolute;
-  top: 6px;
-  left: 6px;
   width: 26px;
   height: 26px;
-  border: 2.5px solid rgba(14, 124, 134, 0.2);
-  border-top: 2.5px solid var(--primary);
   border-radius: 50%;
-  animation: orcaSonarSpin 0.8s linear infinite;
-  z-index: 1;
+  border: 1px solid rgba(14, 124, 134, 0.4);
+  animation: orcaRadarPulse 1.8s ease-out infinite;
+  pointer-events: none;
 }
 
 @keyframes orcaSonarSpin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+@keyframes orcaRadarPulse {
+  0% { transform: scale(0.6); opacity: 0.8; }
+  50% { opacity: 0.3; }
+  100% { transform: scale(1.4); opacity: 0; }
 }
 
 /* =========================================================================

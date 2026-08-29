@@ -262,14 +262,7 @@ export class MessageItem {
         </div>
 
         <div class="orca-pure-loader animate-fade-in">
-          <dotlottie-player
-            src="/loading.lottie"
-            background="transparent"
-            speed="1"
-            style="width: 38px; height: 38px;"
-            loop
-            autoplay>
-          </dotlottie-player>
+          <div class="orca-radar-pulse-ring"></div>
           <div class="orca-sonar-spinner" aria-hidden="true"></div>
         </div>
       `;
