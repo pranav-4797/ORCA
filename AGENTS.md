@@ -3,8 +3,8 @@
 **Project:** ORCA — Marine EcOsystem Reasoning with Collaborative Agents
 **Event:** SIH 2026 — Problem Statement 26176 (ISRO)
 **Repo:** `orcaV1` — GitHub `FarhanFarooqi122/orca-sih26176` (private), branch `main`
-**Current HEAD:** `dc6b9a3` (in sync with `origin/main`)
-**Date of last full review:** 2026-08-29
+**Current HEAD:** `8e77b2a` (in sync with `origin/main`)
+**Date of last full review:** 2026-08-30
 
 ---
 
@@ -45,6 +45,7 @@ docker compose up --build
 - Backend needs `ORCA_Backend/.env` (git-ignored; template `.env.example`) with a
   free **Groq** key (`GROQ_API_KEY`) for the LLM + Whisper STT layers. Everything
   degrades gracefully without it (rule/keyword fallbacks, template answers).
+- **INCOIS single marine pipeline (8e77b2a):** all SST/Wind/Current/Swell via THREDDS WMS + Chlorophyll via OceanSat-2 ERDDAP through `data_connectors/incois_marine.py`; `chlorophyll.py` (NOAA CoastWatch) deleted; query-aware filtering (SST-only shows only SST) and readable markdown tables with `📍` coords.
 - The deployed backend (`https://orca-backend-1i5u.onrender.com`, Render free plan,
   Docker, region Singapore) can go cold/offline; local is the reliable path.
   Render health: `GET /health`. Render service = `ORCA_Backend/Dockerfile` +
@@ -73,9 +74,9 @@ reconciles and `ResponseAgent` writes the final message.
 | 1 | Language/Intent | Detects 11 Indic + English, normalizes; Unicode-script fallback; ASCII fast-path skips the LLM call on English | `agents/language_agent.py`, `auto_router.py` |
 | 2 | Orchestrator/Planner | LangGraph StateGraph; planning schema v3 (`intent` incl. `trend_analysis`/`zone_scan`, `target_hour`, `agents_needed`); parallel dispatch via ThreadPoolExecutor in one node; no-LLM fallback; sequential fallback if langgraph missing | `orchestrator/` |
 | 3 | PFZ | **LIVE official INCOIS/SAMUDRA advisory** is the primary source (`data_connectors/incois_pfz.py`: pfzLines + pfzMobile + sector text, 10-min TTL). Nearest point on the official digitized geometry drives distance/bearing/target coords. Fallbacks: derived live-SST ring (`DERIVED_LIVE`), seeded last resort. Official lookups return ONE exact answer template (no LLM) | `agents/pfz_agent.py`, `agents/pfz_output.py` |
-| 4 | Ocean-State | Live Open-Meteo marine+weather (parallel, unit-checked), real tide via UHSLC ERDDAP 8-constituent harmonic fit incl. next high/low + daily range, NOAA ERDDAP chlorophyll; exceedance windows over next 48 h; per-field provenance | `agents/ocean_state_agent.py`, `data_connectors/tide.py`, `data_connectors/chlorophyll.py` |
-| 5 | Hazard/Alert | Thresholds per vessel class; **keyless IMD CAP live** hit-tested vs location — cyclone, marine/fishermen bulletins AND lightning/thunderstorm via CAP terms; keyed `api.imd.gov.in` secondary coded (401-gated); unreachable = "unverifiable", never "clear" | `agents/hazard_agent.py`, `data_connectors/imd_cap.py`, `imd_live.py` |
-| 6 | Geospatial | Pure-Python point-in-polygon + segment distance vs treaty-digitized IMBL (India–SL 1974/76, Sir Creek) + MPAs, 15 km buffer; sampled planner + **bathymetry (ETOPO180 ERDDAP, keyless) + pure-Python A*** grid avoiding land/shallow cells | `agents/geospatial_agent.py`, `data_connectors/bathymetry.py`, `data/marine_boundaries.geojson` |
+| 4 | Ocean-State | **Single INCOIS pipeline** — `incois_marine.py` is the ONLY marine connector: OSF SST + WW3 wind (`mag`) + wind vector + Currents + WW3 PHS01 primary swell + OceanSat-2:CHL ERDDAP; field-by-field graceful (never fabricates), `Value: 28.` truncated fix, `ORCA_DEBUG_INCOIS` per-layer logging, tide via UHSLC 8-constituent harmonic; no Open-Meteo/NOAA fallbacks | `agents/ocean_state_agent.py`, `data_connectors/incois_marine.py`, `data_connectors/tide.py` |
+| 5 | Hazard/Alert | Thresholds per vessel class (None-guarded `wave_height_m`/`wind_gust_kmh`); **keyless IMD CAP live** hit-tested — cyclone only forces UNSAFE when covering location/route, marine covering filtered to non-cyclone; lightning via CAP terms; keyed `api.imd.gov.in` secondary (401-gated) | `agents/hazard_agent.py`, `data_connectors/imd_cap.py`, `imd_live.py` |
+| 6 | Geospatial | Treaty-digitized IMBL + MPAs (15 km buffer); sampled planner + **GEBCO/INCOIS bathymetry + pure-Python A***; PFZ line style `#00E5FF` weight 4 overlay with `fitBounds` | `agents/geospatial_agent.py`, `data_connectors/bathymetry.py`, `data/marine_boundaries.geojson` |
 | 7 | Synthesis | Reconciles findings + round-table transcript, flags conflicts, verdict/confidence/key_points; numeric `confidence_score` (0–1) + per-source `evidence_tiers` (Tier 1/2/3) | `agents/synthesis_agent.py`, `fleet_convergence.py` |
 | 8 | Explainability | Add-only `operator.add` `traces` channel; every node appends `AgentTrace` with duration; UI streams it live | `orchestrator/state.py`, `models.py` |
 | 9 | Response | Multilingual final answer (≤ ~70 words, concise mode), exact official INCOIS PFZ template on PFZ lookups, anti-hallucination rules, template fallback | `agents/response_agent.py` |
@@ -83,18 +84,15 @@ reconciles and `ResponseAgent` writes the final message.
 
 ### Cross-cutting subsystems (all live)
 
-- **Session memory**: `sessions.py` — location/time-window/language/GPS/destination
-  per `session_id`, 1 h TTL, anaphora-aware planning ("same place, tomorrow evening").
+- **Session memory**: `sessions.py` — location/time-window/language/GPS/destination/`map_point`
+  per `session_id`, 1 h TTL, anaphora-aware planning ("same place, tomorrow evening"); map-tap priority `mapPoint > GPS > chat`.
 - **Storage**: `storage.py` TTLStore — Redis when `REDIS_URL` set, in-process otherwise;
   used by sessions + a 60 s response cache (absorbs UI retries/double-taps).
 - **Fleet convergence**: `fleet_convergence.py` + `/fleet/*` demo endpoints (simulated
   fleet activity levels).
 - **Routing telemetry**: `routing_telemetry.py` + `/debug/telemetry[/summary]`;
   routing fixtures in `ORCA_Backend/test_data/`.
-- **UI**: Vite + React + Leaflet (`ORCA UI/`). Streaming chat, verdict callouts, agent
-  activity panel, operational map (/viz GeoJSON), 48 h wave/gust charts, voice in/out,
-  Firebase Google-sign-in (`src/services/firebase.ts`), proactive SSE alert feed,
-  query-routing pills, mock fallback when backend/LIVE absent.
+- **UI**: Vite + React + Leaflet (`ORCA UI/`). Streaming chat (readable markdown tables with query-aware filtering), verdict callouts, agent activity panel, operational map (`/viz` GeoJSON, PFZ `#00E5FF` weight 4 `fitBounds`), 48 h wave/gust charts (`/viz/series` normalized), voice in/out, `marineService.ts` INCOIS WMS tiles, Firebase Google-sign-in, proactive SSE alert feed, query-routing pills, mock fallback when backend/LIVE absent.
 - **Graceful degradation**: no key → rules + template answers; feed down → tagged
   seeded fallback, never a crash; per-specialist failures are skipped, not fatal.
 
@@ -174,7 +172,8 @@ follow-up with a `session_id` reusing the prior location; register a user + poll
 - **INCOIS PFZ go-live** — `3a85744`..`5e1eeac` (connector + agent consumption +
   `/api/pfz/live` + UI layer + docs).
 - **Official PFZ answer format** — `cbf67a3`..`dc6b9a3` (shared template, nearest-point
-  distance/bearing, popup metadata, verdict dedup). Current HEAD = `dc6b9a3`.
+  distance/bearing, popup metadata, verdict dedup).
+- **INCOIS consolidation master patch** — `8e77b2a` (single marine pipeline `incois_marine.py`: OSF/WW3/Currents/OceanSat-2, deleted NOAA `chlorophyll.py`, fixed Hazard `None` guards + cyclone scoping + confidence excluding `unavailable`, fixed `_serialize` dynamic-field drop, `/query/voice` → `asyncio.to_thread`, WMS `Value: 28.` parse + `ORCA_DEBUG_INCOIS` logging, PFZ nondeterminism + `0.0` fab fix, `hourly_series` flat + `viz_series` normalization, PFZ line `#00E5FF`, map-tap priority, readable markdown tables, query-aware field filtering). Current HEAD = `8e77b2a`.
 - Session history and detailed decisions: `ORCA_Backend/SESSION_SUMMARY.md`
   (Phases 1–13), `ORCA_Backend/PFZ_INCOIS_INTEGRATION.md`, `SESSION_LOG_2026-08-24.md`.
 

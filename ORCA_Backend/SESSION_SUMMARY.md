@@ -538,13 +538,46 @@ unit-checked (far line 441 km, local 0.2 km, empty → None). `py_compile` + `ts
 
 ### Repo / deploy state
 
-- Local `main` == `origin/main` == `dc6b9a3`. Left uncommitted by design:
-  `M AGENTS.md` (now rewritten as an operating guide under this session), untracked
-  `_pre_incois_backup/` snapshot, `architecture*.png`, `test_openmeteo.py`.
+- Local `main` == `origin/main` == `8e77b2a` (pushed 2026-08-30). Left untracked by design: `_pre_incois_backup/` snapshot, `architecture*.png`.
 - Deployed backend at `https://orca-backend-1i5u.onrender.com` (Render free, Docker)
   can go cold; local fallback command (this session): `python -m uvicorn main:app --port 8000` — verified `/health` → `{"status":"ok"}` on `:8000`.
 - Pythagoras note: `ORCA UI` vite dev auto-spawns the backend when `:8000` is free;
   Render pinned `CORS_ORIGINS` to the Firebase hosting origin.
+
+---
+
+## 14. Session 2026-08-30 — INCOIS consolidation master patch (8e77b2a)
+
+**Context:** Full repo audit (every file/line) surfaced verified runtime crashes, conflicting marine providers (Open-Meteo/NOAA CoastWatch vs INCOIS), and unreadable single-line answers. One surgical pass fixed crashers first, then data-integrity, then UX — preserving FastAPI+LangGraph+React.
+
+**Goal:** single `incois_marine.py` marine pipeline (Gemini PFZ + OSF SST/Wind + WW3 PHS01 swell + Currents + OceanSat-2:CHL ERDDAP), no fabricated values.
+
+| Phase | Fix | Files |
+|---|---|---|
+| 1.1 | HazardAgent `None > float` guards (`wave_height_m`/`wind_gust_kmh` may be `None` on INCOIS live path) | `agents/hazard_agent.py:85` |
+| 1.2 | Remove `_fetch_simulated_fallback` (nonexistent) → `_unavailable_reading` on ocean timeout | `orchestrator/__init__.py:1060` |
+| 1.3 | `_serialize` dropping 7 dynamic fields → move `surface_current_mps`/`primary_swell_height_m`/`wind_direction*`/`marine_location_note`/`unavailable_reason`/`debug_incois` into `OceanStateReading` dataclass | `models.py:156`, `main.py:969` |
+| 1.4 | `/query/voice` `async def` + sync `handle_query` blocking loop → `await asyncio.to_thread` | `main.py:272` |
+| 2–3 | Delete `chlorophyll.py` (NOAA CoastWatch `coastwatch.pfeg.noaa.gov` / `nesdisNPP`); `incois_marine.py` already had `_fetch_chlorophyll` via `erddap.incois.gov.in` OceanSat-2:CHL; probe revealed `2011-02-02` archive only → honestly unavailable for 2026 | `data_connectors/chlorophyll.py` deleted, `data_connectors/incois_marine.py` |
+| 2 | WMS `Value: 28.` truncated parse (INCOIS THREDDS `Value: 28.` without `SST` keyword) → explicit `Value:` fallback with `28.`→`28.0` | `data_connectors/incois_marine.py:95` |
+| 2 | `trend_agent` + `bathymetry` + `geospatial` NOAA refs → INCOIS/GEBCO; `wind_divergence`/`models` comments | `agents/trend_agent.py`, `data_connectors/bathymetry.py` |
+| 4 | Ensure `SST near me` → `ocean_state` only (Geospatial gated to `EEZ/boundary/route/…` intents, not blanket GPS) — already correct at `orchestrator/__init__.py:570` | verified |
+| 6 | PFZ line style `#00E5FF` weight 4 opacity 1 + `[lon,lat]→[lat,lon]` + `fitBounds` | `ORCA UI/src/components/map/OceanMap.ts:34` |
+| 7 | `marineService.ts` `resolveCoord` priority `mapPoint > GPS` | `ORCA UI/src/services/marineService.ts:39` |
+| 8 | `hourly_series` flat `{times, wave_height_m, wind_gust_kmh}` + `viz_series` per-metric normalization | `agents/ocean_state_agent.py:220`, `main.py:621` |
+| 9 | PFZ nondeterministic centre (`samples[0]` + `as_completed`) → coord match; `chlorophyll 0.0` fab → `None`; `chlorophyll_at_zone_mg_m3: float\|None` | `agents/pfz_agent.py:360`, `models.py:239` |
+| 10 | Cyclone elsewhere forcing UNSAFE → only covering location/route forces UNSAFE; marine covering filtered to non-cyclone | `agents/hazard_agent.py:191` |
+| 11 | Confidence counting `unavailable`/`tide_gauge_model` as live → exclude | `orchestrator/__init__.py:2051` |
+| 12 | Readable answers: `"\n\n".join(parts)` + markdown table `| Parameter | Value |` with `📍` coords; `response_agent` LLM prompt + fallback both query-aware | `orchestrator/__init__.py:1646,1728`, `agents/response_agent.py:306` |
+| 12 | Query-aware filtering: `sst` shows only SST, `wind` only wind, `wave` only waves, `chlorophyll` only chl, generic shows all | `orchestrator/__init__.py:1647`, `agents/response_agent.py:136` |
+| 12 | Provenance `INCOIS OFFICIAL` fallback for marine keywords | `ORCA UI/src/components/chat/MessageItem.ts:264` |
+
+**Verification 2026-08-30:**
+- `py_compile` all `ORCA_Backend/**/*.py` → `ALL COMPILE OK`
+- `import main, orchestrator, all agents, incois_marine, bathymetry` → `ALL IMPORTS OK`
+- `test_optimized.py` → `All 21 tests passed`
+- `ORCA UI` `vite build` → `✓ 67 modules transformed`
+- Live probe `18.71,72.29` → after `Value: 28.` fix: `SST 28.29°C, Wind 31.76 km/h, Current 0.163 m/s, Swell 1.24 m, Chlorophyll unavailable (2011 archive)`; `sst at my location` now single-row SST table, `wind speed` single-row wind
 
 **Remaining (unchanged from before, all credential/polish blocked):** Bhuvan optional,
 `api.imd.gov.in` key + cyclone-cone overlays, Twilio live-fire, PostGIS/vector store,
