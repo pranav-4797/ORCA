@@ -2252,34 +2252,31 @@
 .orca-brand-badge {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .orca-brand-icon {
-  font-size: 20px;
+  font-size: 18px;
   color: var(--primary);
-}
-
-.orca-brand-text-col {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
 }
 
 .orca-brand-title {
   font-family: var(--font-sans);
   font-weight: 800;
-  font-size: 16px;
+  font-size: 15px;
   color: var(--text-primary);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
 }
 
-.orca-brand-tagline {
+.orca-chart-pill {
+  font-size: 9.5px;
   font-family: var(--font-mono);
-  font-size: 8.5px;
-  color: var(--text-tertiary);
-  letter-spacing: 0.05em;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--primary);
+  background: rgba(14, 124, 134, 0.12);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid rgba(14, 124, 134, 0.3);
 }
 
 .header-nav-tabs {
@@ -2289,7 +2286,7 @@
 }
 
 .nav-tab-btn {
-  padding: 6px 14px;
+  padding: 5px 12px;
   border-radius: var(--radius-xs);
   background: transparent;
   border: 1px solid transparent;
@@ -2313,31 +2310,33 @@
   font-weight: 700;
 }
 
-.ecdis-meta-chip {
-  display: flex;
-  flex-direction: column;
+.orca-compact-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 3px 8px;
-  background: var(--bg-app);
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xs);
   font-family: var(--font-mono);
-  line-height: 1.1;
-  text-align: center;
-}
-
-.ecdis-meta-chip .meta-label {
-  font-size: 8px;
-  color: var(--text-tertiary);
-}
-
-.ecdis-meta-chip .meta-val {
   font-size: 10px;
   font-weight: 700;
-  color: var(--text-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
 }
 
-.ecdis-meta-chip .meta-val.highlight {
-  color: var(--status-safe);
+.orca-compact-status-badge.live .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-safe);
+  box-shadow: 0 0 6px var(--status-safe);
+}
+
+.orca-compact-status-badge.demo .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
 }
 
 .btn-voice-indicator {

@@ -22,7 +22,7 @@ export class Header {
     const activeChat = store.getActiveChat();
 
     this.element.innerHTML = `
-      <!-- Top Nautical Brand & Status Strip -->
+      <!-- Top Nautical Header Strip -->
       <div class="header-main-strip">
         <div class="header-left">
           <button class="icon-btn btn-mobile-menu" id="btn-toggle-mobile-sidebar" title="Open Navigation Menu" aria-label="Open Navigation Menu">
@@ -31,36 +31,29 @@ export class Header {
 
           <div class="orca-brand-badge">
             <span class="orca-brand-icon">⚓</span>
-            <div class="orca-brand-text-col">
-              <span class="orca-brand-title">ORCA</span>
-              <span class="orca-brand-tagline">MARINE ECOSYSTEM REASONING • COLLABORATIVE AGENTS</span>
-            </div>
+            <span class="orca-brand-title">ORCA</span>
+            <span class="orca-chart-pill">SIH-26176</span>
           </div>
         </div>
 
-        <!-- Top Navigation Tabs (Today | Ask ORCA | Authority | System) -->
+        <!-- Center Navigation Tabs (Clean, single-line) -->
         <nav class="header-nav-tabs" role="tablist">
-          <button class="nav-tab-btn" id="tab-today" data-tab="today">आज / Today</button>
-          <button class="nav-tab-btn active" id="tab-ask-orca" data-tab="chat">ORCA ला विचारा / Ask ORCA</button>
-          <button class="nav-tab-btn" id="tab-authority" data-tab="sar">प्रशासन / Authority</button>
-          <button class="nav-tab-btn" id="tab-system" data-tab="system">प्रणाली / System</button>
+          <button class="nav-tab-btn" id="tab-today" data-tab="today">Overview (आज)</button>
+          <button class="nav-tab-btn active" id="tab-ask-orca" data-tab="chat">Ask ORCA (विचारा)</button>
+          <button class="nav-tab-btn" id="tab-authority" data-tab="sar">Authority (प्रशासन)</button>
+          <button class="nav-tab-btn" id="tab-system" data-tab="system">System (प्रणाली)</button>
         </nav>
 
         <div class="header-right">
-          <!-- ECDIS Chart & Edition Badges -->
-          <div class="ecdis-meta-chip">
-            <span class="meta-label">CHART #</span>
-            <span class="meta-val">SIH26176</span>
-          </div>
-
-          <div class="ecdis-meta-chip">
-            <span class="meta-label">DATA EDITION</span>
-            <span class="meta-val highlight">${store.backendOnline ? 'LIVE' : 'DEMO'}</span>
+          <!-- Compact Status Badge -->
+          <div class="orca-compact-status-badge ${store.backendOnline ? 'live' : 'demo'}">
+            <span class="status-dot"></span>
+            <span>${store.backendOnline ? 'LIVE FEED' : 'DEMO MODE'}</span>
           </div>
 
           <button class="btn-voice-indicator" id="btn-header-voice-toggle" title="Toggle Voice Response">
-            <span>🔊 VOICE</span>
-            <span class="voice-state-text">ON</span>
+            <span>🔊</span>
+            <span class="voice-state-text">VOICE</span>
           </button>
 
           <button class="icon-btn" id="btn-theme-toggle" title="Toggle Theme (Night / Day)">
@@ -69,9 +62,9 @@ export class Header {
 
           <!-- Google Auth / Officer Profile Popover -->
           ${store.currentUser ? `
-            <div class="officer-profile-chip" id="officer-profile-chip" title="${store.currentUser.displayName || store.currentUser.email} • Click for account options">
+            <div class="officer-profile-chip" id="officer-profile-chip" title="${store.currentUser.displayName || store.currentUser.email} • Click for options">
               ${store.currentUser.photoURL ? `
-                <img src="${store.currentUser.photoURL}" alt="Officer Avatar" class="officer-avatar-img" />
+                <img src="${store.currentUser.photoURL}" alt="Avatar" class="officer-avatar-img" />
               ` : `
                 <div class="officer-avatar">${(store.currentUser.displayName || store.currentUser.email || 'OP').slice(0, 2).toUpperCase()}</div>
               `}
