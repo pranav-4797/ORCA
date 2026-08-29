@@ -49,11 +49,6 @@ export class ChatWindow {
         <span class="chat-top-title">${t.askTitle}</span>
         <span class="chat-top-sub">${t.askSub}</span>
       </div>
-      <div class="chat-lang-switchers">
-        <button class="chat-lang-btn ${lang === 'en' ? 'active' : ''}" data-lang="en">EN</button>
-        <button class="chat-lang-btn ${lang === 'hi' ? 'active' : ''}" data-lang="hi">हिं</button>
-        <button class="chat-lang-btn ${lang === 'mr' ? 'active' : ''}" data-lang="mr">मरा</button>
-      </div>
     `;
 
     this.suggestionBar.innerHTML = `
@@ -62,23 +57,6 @@ export class ChatWindow {
       <button class="chat-sugg-chip" data-q="${t.sugg3Q}">${t.sugg3}</button>
       <button class="chat-sugg-chip" data-q="${t.sugg4Q}">${t.sugg4}</button>
     `;
-
-    // Language buttons
-    this.headerBar.querySelectorAll('.chat-lang-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const selectedLang = btn.getAttribute('data-lang') as 'en' | 'mr' | 'hi';
-        if (selectedLang && selectedLang !== store.activeLanguage) {
-          store.setLanguage(selectedLang);
-          if (selectedLang === 'mr') {
-            showToast('मराठी भाषा निवडली', 'info');
-          } else if (selectedLang === 'hi') {
-            showToast('हिंदी भाषा चयनित', 'info');
-          } else {
-            showToast('English selected', 'info');
-          }
-        }
-      });
-    });
 
     // Suggestion chips
     this.suggestionBar.querySelectorAll('.chat-sugg-chip').forEach(chip => {

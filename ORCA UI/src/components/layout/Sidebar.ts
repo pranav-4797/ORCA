@@ -85,6 +85,18 @@ export class Sidebar {
         </div>
       </div>
 
+      <!-- Language Selector -->
+      <div class="sidebar-lang-section">
+        <div class="sidebar-lang-label">
+          <span>🌐 Language</span>
+        </div>
+        <div class="sidebar-lang-switchers">
+          <button class="sidebar-lang-btn ${store.activeLanguage === 'en' ? 'active' : ''}" data-sidebar-lang="en" title="English">EN</button>
+          <button class="sidebar-lang-btn ${store.activeLanguage === 'hi' ? 'active' : ''}" data-sidebar-lang="hi" title="हिंदी">हिं</button>
+          <button class="sidebar-lang-btn ${store.activeLanguage === 'mr' ? 'active' : ''}" data-sidebar-lang="mr" title="मराठी">मरा</button>
+        </div>
+      </div>
+
       <!-- Clean Footer -->
       <div class="sidebar-footer">
         <button class="user-profile-btn" id="btn-sidebar-settings" title="Role: ${store.userCategory?.roleName || 'Verified Officer'} • Click to change profile">
@@ -187,6 +199,24 @@ export class Sidebar {
           if (confirm('Delete this mission brief?')) {
             store.deleteChat(chatId);
             showToast('Briefing deleted', 'info');
+          }
+        }
+      });
+    });
+
+    // Sidebar Language switcher buttons
+    this.element.querySelectorAll('.sidebar-lang-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const selectedLang = btn.getAttribute('data-sidebar-lang') as 'en' | 'mr' | 'hi';
+        if (selectedLang && selectedLang !== store.activeLanguage) {
+          store.setLanguage(selectedLang);
+          if (selectedLang === 'mr') {
+            showToast('मराठी भाषा निवडली', 'info');
+          } else if (selectedLang === 'hi') {
+            showToast('हिंदी भाषा चयनित', 'info');
+          } else {
+            showToast('English selected', 'info');
           }
         }
       });
