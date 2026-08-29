@@ -22,87 +22,116 @@ export class Header {
     const activeChat = store.getActiveChat();
 
     this.element.innerHTML = `
-      <div class="header-left">
-        <button class="icon-btn btn-mobile-menu" id="btn-toggle-mobile-sidebar" title="Open Navigation Menu" aria-label="Open Navigation Menu">
-          ${ICONS.menu}
-        </button>
-
-        <div class="orca-brand-badge">
-          <span class="orca-brand-title">ORCA</span>
-          <span class="orca-region-divider"></span>
-          <span class="orca-region-label">Indian Region</span>
-        </div>
-
-        ${activeChat && activeChat.messageCount > 0 ? `
-          <div class="header-active-brief-title" id="chat-title-heading" title="Click to rename brief">
-            <span class="title-text">${activeChat.title}</span>
-          </div>
-        ` : ''}
-      </div>
-
-      <div class="header-right">
-        <!-- Telemetry Indicators -->
-        <div class="header-telemetry-status">
-          <button class="orca-status-chip ${store.backendOnline === false ? 'offline' : isThinking ? 'busy' : 'safe'}"
-                  id="btn-backend-status"
-                  title="${store.backendOnline === false
-                    ? `Backend OFFLINE at ${store.backendUrl} — click to retry`
-                    : `Live backend: ${store.backendUrl}`}">
-            <span class="status-indicator-dot ${isThinking ? 'thinking' : ''}"></span>
-            <span class="status-text">${store.backendOnline === false ? 'DEMO MODE' : store.backendOnline === null ? 'CONNECTING' : 'LIVE'}</span>
+      <!-- Top Nautical Brand & Status Strip -->
+      <div class="header-main-strip">
+        <div class="header-left">
+          <button class="icon-btn btn-mobile-menu" id="btn-toggle-mobile-sidebar" title="Open Navigation Menu" aria-label="Open Navigation Menu">
+            ${ICONS.menu}
           </button>
-        </div>
 
-        <button class="icon-btn" id="btn-theme-toggle" title="Toggle Theme (ECDIS Night / Maritime Light)" aria-label="Toggle Theme">
-          ${isDark ? ICONS.sun : ICONS.moon}
-        </button>
-
-        <button class="icon-btn" id="btn-share-chat" title="Export / Share Mission Brief" aria-label="Share Brief">
-          ${ICONS.share}
-        </button>
-
-        <button class="icon-btn ${store.agentPanelOpen ? 'active' : ''}" id="btn-toggle-agent-panel" title="Toggle Mission & Telemetry Inspector" aria-label="Toggle Inspector">
-          ${ICONS.sidebarRight}
-        </button>
-
-        <!-- Google Auth / Officer Profile Popover -->
-        ${store.currentUser ? `
-          <div class="officer-profile-chip" id="officer-profile-chip" title="${store.currentUser.displayName || store.currentUser.email} • Click for account options">
-            ${store.currentUser.photoURL ? `
-              <img src="${store.currentUser.photoURL}" alt="Officer Avatar" class="officer-avatar-img" />
-            ` : `
-              <div class="officer-avatar">${(store.currentUser.displayName || store.currentUser.email || 'OP').slice(0, 2).toUpperCase()}</div>
-            `}
-            <div class="officer-popover" id="officer-popover" style="display:none;">
-              <div class="officer-popover-header">
-                <div class="popover-name">${store.currentUser.displayName || 'Watch Officer'}</div>
-                <div class="popover-email">${store.currentUser.email}</div>
-                <div class="officer-role-pill" style="margin-top:4px;">
-                  <span>${store.userCategory?.badgeEmoji || '⚓'}</span>
-                  <span>${store.userCategory?.roleName || 'General Mariner'}</span>
-                </div>
-              </div>
-              <button class="btn-popover-action" id="btn-popover-switch-role">
-                <span>🔄</span>
-                <span>Switch Operational Role</span>
-              </button>
-              <button class="btn-popover-logout" id="btn-header-logout">
-                <span>${ICONS.logOut || '⎋'}</span>
-                <span>Sign Out</span>
-              </button>
+          <div class="orca-brand-badge">
+            <span class="orca-brand-icon">⚓</span>
+            <div class="orca-brand-text-col">
+              <span class="orca-brand-title">ORCA</span>
+              <span class="orca-brand-tagline">MARINE ECOSYSTEM REASONING • COLLABORATIVE AGENTS</span>
             </div>
           </div>
-        ` : `
-          <button class="btn-google-auth" id="btn-header-login" title="Sign in with Google Account">
-            <svg width="15" height="15" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-            </svg>
-            <span>Sign In</span>
+        </div>
+
+        <!-- Top Navigation Tabs (Today | Ask ORCA | Authority | System) -->
+        <nav class="header-nav-tabs" role="tablist">
+          <button class="nav-tab-btn" id="tab-today" data-tab="today">आज / Today</button>
+          <button class="nav-tab-btn active" id="tab-ask-orca" data-tab="chat">ORCA ला विचारा / Ask ORCA</button>
+          <button class="nav-tab-btn" id="tab-authority" data-tab="sar">प्रशासन / Authority</button>
+          <button class="nav-tab-btn" id="tab-system" data-tab="system">प्रणाली / System</button>
+        </nav>
+
+        <div class="header-right">
+          <!-- ECDIS Chart & Edition Badges -->
+          <div class="ecdis-meta-chip">
+            <span class="meta-label">CHART #</span>
+            <span class="meta-val">SIH26176</span>
+          </div>
+
+          <div class="ecdis-meta-chip">
+            <span class="meta-label">DATA EDITION</span>
+            <span class="meta-val highlight">${store.backendOnline ? 'LIVE' : 'DEMO'}</span>
+          </div>
+
+          <button class="btn-voice-indicator" id="btn-header-voice-toggle" title="Toggle Voice Response">
+            <span>🔊 VOICE</span>
+            <span class="voice-state-text">ON</span>
           </button>
-        `}
+
+          <button class="icon-btn" id="btn-theme-toggle" title="Toggle Theme (Night / Day)">
+            ${isDark ? ICONS.sun : ICONS.moon}
+          </button>
+
+          <!-- Google Auth / Officer Profile Popover -->
+          ${store.currentUser ? `
+            <div class="officer-profile-chip" id="officer-profile-chip" title="${store.currentUser.displayName || store.currentUser.email} • Click for account options">
+              ${store.currentUser.photoURL ? `
+                <img src="${store.currentUser.photoURL}" alt="Officer Avatar" class="officer-avatar-img" />
+              ` : `
+                <div class="officer-avatar">${(store.currentUser.displayName || store.currentUser.email || 'OP').slice(0, 2).toUpperCase()}</div>
+              `}
+              <div class="officer-popover" id="officer-popover" style="display:none;">
+                <div class="officer-popover-header">
+                  <div class="popover-name">${store.currentUser.displayName || 'Watch Officer'}</div>
+                  <div class="popover-email">${store.currentUser.email}</div>
+                  <div class="officer-role-pill" style="margin-top:4px;">
+                    <span>${store.userCategory?.badgeEmoji || '⚓'}</span>
+                    <span>${store.userCategory?.roleName || 'General Mariner'}</span>
+                  </div>
+                </div>
+                <button class="btn-popover-action" id="btn-popover-switch-role">
+                  <span>🔄</span>
+                  <span>Switch Operational Role</span>
+                </button>
+                <button class="btn-popover-logout" id="btn-header-logout">
+                  <span>${ICONS.logOut || '⎋'}</span>
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          ` : `
+            <button class="btn-google-auth" id="btn-header-login" title="Sign in with Google Account">
+              <span>Sign In</span>
+            </button>
+          `}
+        </div>
+      </div>
+
+      <!-- Rehearsed Coastal Scenarios Ribbon -->
+      <div class="scenarios-quick-ribbon">
+        <span class="scenarios-title">REHEARSED SCENARIOS</span>
+        <div class="scenarios-list">
+          <button class="scenario-btn" data-scenario="safe_goa">
+            <span class="sc-num">1</span>
+            <span class="sc-name">Safe</span>
+            <span class="sc-loc">GOA • LOW</span>
+          </button>
+          <button class="scenario-btn" data-scenario="rough_mumbai">
+            <span class="sc-num">2</span>
+            <span class="sc-name">Rough</span>
+            <span class="sc-loc">MUMBAI • मराठी</span>
+          </button>
+          <button class="scenario-btn" data-scenario="cyclone_paradip">
+            <span class="sc-num">3</span>
+            <span class="sc-name">Cyclone</span>
+            <span class="sc-loc">PARADIP • EXTREME</span>
+          </button>
+          <button class="scenario-btn" data-scenario="pfz_kochi">
+            <span class="sc-num">4</span>
+            <span class="sc-name">Fishing zones</span>
+            <span class="sc-loc">KOCHI • हिंदी</span>
+          </button>
+          <button class="scenario-btn" data-scenario="safe_route_mumbai">
+            <span class="sc-num">5</span>
+            <span class="sc-name">Safe route</span>
+            <span class="sc-loc">MUMBAI • GEOFENCE</span>
+          </button>
+        </div>
       </div>
     `;
 
@@ -113,6 +142,24 @@ export class Header {
     // Google Auth Login
     this.element.querySelector('#btn-header-login')?.addEventListener('click', () => {
       store.loginWithGoogle();
+    });
+
+    // Rehearsed Scenarios Click
+    this.element.querySelectorAll('.scenario-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const scenario = btn.getAttribute('data-scenario');
+        if (scenario === 'safe_goa') {
+          store.sendMessage('Is it safe to sail from Panaji Port, Goa tomorrow morning? Inspect waves and wind.');
+        } else if (scenario === 'rough_mumbai') {
+          store.sendMessage('मी उद्या सकाळी ६ वाजता मुंबईजवळ मासेमारीला जाऊ शकतो का?');
+        } else if (scenario === 'cyclone_paradip') {
+          store.sendMessage('Are there active cyclone or high wave warnings near Paradip port, Odisha?');
+        } else if (scenario === 'pfz_kochi') {
+          store.sendMessage('कोच्चि तट के पास सबसे निकटतम मछली पकड़ने का क्षेत्र (PFZ) कहाँ है?');
+        } else if (scenario === 'safe_route_mumbai') {
+          store.sendMessage('Plot a safe navigational route from Mumbai Harbour avoiding restricted coastal zones.');
+        }
+      });
     });
 
     // Switch Role via popover

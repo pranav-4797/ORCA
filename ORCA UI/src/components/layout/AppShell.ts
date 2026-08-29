@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { ChatWindow } from '../chat/ChatWindow';
 import { AgentPanel } from '../agents/AgentPanel';
+import { OperationalPicture } from '../map/OperationalPicture';
 import { SearchModal } from '../search/SearchModal';
 import { SettingsModal } from '../settings/SettingsModal';
 import { AuthModal } from '../auth/AuthModal';
@@ -14,6 +15,7 @@ export class AppShell {
   private sidebar: Sidebar;
   private header: Header;
   private chatWindow: ChatWindow;
+  private operationalPicture: OperationalPicture;
   private agentPanel: AgentPanel;
   private searchModal: SearchModal;
   private settingsModal: SettingsModal;
@@ -29,6 +31,7 @@ export class AppShell {
     this.sidebar = new Sidebar();
     this.header = new Header();
     this.chatWindow = new ChatWindow();
+    this.operationalPicture = new OperationalPicture();
     this.agentPanel = new AgentPanel();
     this.searchModal = new SearchModal();
     this.settingsModal = new SettingsModal();
@@ -46,7 +49,14 @@ export class AppShell {
     const centerWorkspace = document.createElement('div');
     centerWorkspace.className = 'main-workspace';
     centerWorkspace.appendChild(this.header.getElement());
-    centerWorkspace.appendChild(this.chatWindow.getElement());
+
+    // Dual-Pane Maritime Console Stage (Left: Chat, Right: Operations Map & HUD)
+    const dualPaneStage = document.createElement('div');
+    dualPaneStage.className = 'console-dual-pane-stage';
+    dualPaneStage.appendChild(this.chatWindow.getElement());
+    dualPaneStage.appendChild(this.operationalPicture.getElement());
+
+    centerWorkspace.appendChild(dualPaneStage);
 
     this.element.appendChild(centerWorkspace);
     this.element.appendChild(this.agentPanel.getElement());

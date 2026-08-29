@@ -2234,6 +2234,620 @@
   display: none;
 }
 
+/* =========================================================================
+   ORCA NAUTICAL DUAL-PANE MARITIME CONSOLE STYLES
+   ========================================================================= */
+
+/* Header Top Main Strip & Tab Navigation */
+.header-main-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+  gap: 12px;
+}
+
+.orca-brand-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.orca-brand-icon {
+  font-size: 20px;
+  color: var(--primary);
+}
+
+.orca-brand-text-col {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.orca-brand-title {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--text-primary);
+  letter-spacing: 0.04em;
+}
+
+.orca-brand-tagline {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.header-nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-tab-btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.nav-tab-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.nav-tab-btn.active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: rgba(14, 124, 134, 0.1);
+  font-weight: 700;
+}
+
+.ecdis-meta-chip {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 8px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  line-height: 1.1;
+  text-align: center;
+}
+
+.ecdis-meta-chip .meta-label {
+  font-size: 8px;
+  color: var(--text-tertiary);
+}
+
+.ecdis-meta-chip .meta-val {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ecdis-meta-chip .meta-val.highlight {
+  color: var(--status-safe);
+}
+
+.btn-voice-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.btn-voice-indicator .voice-state-text {
+  color: var(--status-safe);
+}
+
+/* Rehearsed Scenarios Ribbon */
+.scenarios-quick-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 16px;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.scenarios-quick-ribbon::-webkit-scrollbar {
+  display: none;
+}
+
+.scenarios-title {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.scenarios-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scenario-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.scenario-btn:hover {
+  border-color: var(--primary);
+  background: var(--bg-surface-hover);
+  transform: translateY(-1px);
+}
+
+.scenario-btn .sc-num {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scenario-btn .sc-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.scenario-btn .sc-loc {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-tertiary);
+}
+
+/* Dual-Pane Maritime Console Layout */
+.console-dual-pane-stage {
+  display: grid;
+  grid-template-columns: 38% 62%;
+  width: 100%;
+  height: calc(100vh - 90px);
+  overflow: hidden;
+}
+
+@media (max-width: 1024px) {
+  .console-dual-pane-stage {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow-y: auto;
+  }
+}
+
+.operational-picture-console {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-left: 1px solid var(--border-default);
+  background: var(--bg-app);
+  overflow-y: auto;
+  padding: 10px;
+  gap: 10px;
+}
+
+/* Nautical Chart Frame */
+.nautical-chart-frame {
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  overflow: hidden;
+  position: relative;
+}
+
+.nautical-chart-header, .nautical-chart-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.nautical-chart-footer {
+  border-bottom: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.ocean-map-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 310px;
+}
+
+.ocean-map-canvas-wrap .ocean-map-canvas {
+  width: 100%;
+  height: 100%;
+  background: #09111e;
+}
+
+.map-compass-rose {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 400;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+}
+
+.map-symbols-inset-box {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  z-index: 400;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius-xs);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.map-symbols-inset-box .inset-title {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  margin-bottom: 2px;
+}
+
+.map-symbols-inset-box .inset-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #e2e8f0;
+}
+
+.map-symbols-inset-box .sym-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.map-symbols-inset-box .sym-box {
+  width: 10px;
+  height: 7px;
+  border-radius: 1px;
+}
+
+.map-symbols-inset-box .sym-line {
+  width: 12px;
+  height: 0;
+}
+
+/* 6-Metric Telemetry Ribbon */
+.telemetry-metrics-ribbon {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+
+.ribbon-cell {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.ribbon-cell .ribbon-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-tertiary);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ribbon-cell .ribbon-val {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-top: 2px;
+}
+
+/* Safety Score & Factor Breakdown HUD */
+.safety-score-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.score-header-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.score-gauge-wrap {
+  flex-shrink: 0;
+}
+
+.radial-gauge-circle {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  border: 4px solid var(--primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-app);
+}
+
+.radial-gauge-circle .score-num {
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.radial-gauge-circle .score-denom {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: var(--text-tertiary);
+}
+
+.verdict-meta-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.verdict-headline {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.verdict-badges-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.verdict-status-badge {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  letter-spacing: 0.04em;
+}
+
+.verdict-source-badge, .verdict-mode-badge {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-secondary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+}
+
+.verdict-timing-tip {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-surface-hover);
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  border-left: 2.5px solid var(--primary);
+}
+
+/* Factor Breakdown Bars */
+.factor-breakdown-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+
+.factor-section-title {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+.factor-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.factor-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.factor-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.factor-val-badge {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.factor-progress-track {
+  width: 100%;
+  height: 5px;
+  background: var(--bg-app);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.factor-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.factor-subtext {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+/* Chat Console Pane Styles */
+.chat-console-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-default);
+  overflow: hidden;
+  position: relative;
+}
+
+.chat-console-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.chat-top-title-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-top-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.chat-top-sub {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+.chat-lang-switchers {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--bg-app);
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-subtle);
+}
+
+.chat-lang-btn {
+  padding: 3px 7px;
+  border-radius: var(--radius-xs);
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.chat-lang-btn.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* Chat Console Suggestion Bar */
+.chat-console-suggestion-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-app);
+  border-top: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-console-suggestion-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-sugg-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.chat-sugg-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--bg-surface-hover);
+}
+
+
+
 
 
 

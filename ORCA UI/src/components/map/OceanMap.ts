@@ -50,17 +50,46 @@ export class OceanMap {
 
   constructor() {
     this.element = document.createElement('div');
-    this.element.className = 'ocean-map-widget';
+    this.element.className = 'ocean-map-widget nautical-chart-frame';
     this.element.innerHTML = `
-      <div class="widget-section-header">
-        <span class="label-caps">OPERATIONS MAP</span>
-        <span class="data-mono-sm" id="ocean-map-status" style="color:var(--text-tertiary);">NO FIX</span>
+      <div class="nautical-chart-header">
+        <div class="chart-header-left">
+          <span class="chart-coord-label">INDIAN COASTAL WATERS • SCALE VARIES</span>
+        </div>
+        <div class="chart-header-right">
+          <span class="data-mono-sm" id="ocean-map-status" style="color:var(--text-tertiary);">NO FIX</span>
+        </div>
       </div>
-      <div class="ocean-map-canvas" id="ocean-map-canvas"></div>
-      <div class="ocean-map-legend" id="ocean-map-legend"></div>
+      <div class="ocean-map-canvas-wrap">
+        <div class="ocean-map-canvas" id="ocean-map-canvas"></div>
+        
+        <!-- Compass Rose Overlay -->
+        <div class="map-compass-rose" title="Magnetic North • Soundings in Metres">
+          <svg width="40" height="40" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(14,124,134,0.4)" stroke-width="2" stroke-dasharray="2,2"/>
+            <polygon points="50,10 56,45 50,40" fill="#ef4444"/>
+            <polygon points="50,10 44,45 50,40" fill="#991b1b"/>
+            <polygon points="50,90 56,55 50,60" fill="#0e7c86"/>
+            <polygon points="50,90 44,55 50,60" fill="#084c53"/>
+            <text x="50" y="8" font-size="9" font-family="monospace" font-weight="bold" fill="#ef4444" text-anchor="middle">N</text>
+          </svg>
+        </div>
+
+        <!-- Inset Symbols Legend Box -->
+        <div class="map-symbols-inset-box">
+          <div class="inset-title">SYMBOLS</div>
+          <div class="inset-item"><span class="sym-dot" style="background:#22c55e;"></span> Very good chance (PFZ)</div>
+          <div class="inset-item"><span class="sym-dot" style="background:#f59e0b;"></span> Moderate PFZ</div>
+          <div class="inset-item"><span class="sym-box" style="border:1.5px dashed #ef4444; background:rgba(239,68,68,0.2);"></span> Do not enter (IMBL)</div>
+          <div class="inset-item"><span class="sym-line" style="border-top:2px dashed #22d3ee;"></span> Safest course</div>
+        </div>
+      </div>
+      <div class="nautical-chart-footer">
+        <span>ILLUSTRATIVE BOUNDARIES — NOT FOR LEGAL NAVIGATION</span>
+        <span class="data-mono-xs">WGS 84 • SOUNDINGS IN METRES</span>
+      </div>
     `;
     store.subscribe(() => this.onState());
-    // First paint happens after the element is in the DOM (see onState).
   }
 
   public getElement(): HTMLElement {
