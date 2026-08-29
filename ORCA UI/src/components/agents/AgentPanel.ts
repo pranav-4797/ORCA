@@ -66,128 +66,82 @@ export class AgentPanel {
 
       <div class="agent-panel-content">
         <!-- Operational picture: live map + hourly series for the last answer -->
-        <div id="map-container"></div>
-
-        <!-- Live AIS Vessel Telemetry Widget — STATIC DEMO placeholders, not live query state -->
-        <div class="orca-telemetry-widget" data-demo-widget="ais-telemetry" title="Static demo telemetry — live ocean state appears in message HUD after query">
-          <div class="widget-section-header">
-            <span class="label-caps">LIVE AIS TELEMETRY — DEMO</span>
-            <span class="status-pill safe">
-              <span class="dot"></span>
-              <span class="data-mono-bold">ACTIVE</span>
-            </span>
-          </div>
-
-          <div class="telemetry-data-grid">
-            <div class="data-cell">
-              <span class="cell-label">MMSI / IMO</span>
-              <span class="cell-val-mono">419001234 / 9432810</span>
+        <div id="map-container">
+          ${!store.vizGeojson ? `
+            <div class="empty-telemetry-panel-card">
+              <div class="empty-telemetry-icon">🛰️</div>
+              <div class="empty-telemetry-title">Operations Map &amp; Telemetry</div>
+              <div class="empty-telemetry-desc">
+                Live INCOIS PFZ lines, wave/wind forecast charts, and boundary geofences will render dynamically here after you ask a question.
+              </div>
             </div>
-            <div class="data-cell">
-              <span class="cell-label">CURRENT POSITION</span>
-              <span class="cell-val-mono">18°55.20'N, 72°50.15'E</span>
-            </div>
-            <div class="data-cell">
-              <span class="cell-label">SOG (SPEED)</span>
-              <span class="cell-val-mono">14.2 KTS</span>
-            </div>
-            <div class="data-cell">
-              <span class="cell-label">COG (HEADING)</span>
-              <span class="cell-val-mono">218° (SW)</span>
-            </div>
-            <div class="data-cell">
-              <span class="cell-label">VESSEL DRAFT</span>
-              <span class="cell-val-mono">12.4m</span>
-            </div>
-            <div class="data-cell">
-              <span class="cell-label">DYNAMIC UKC</span>
-              <span class="cell-val-mono" style="color:var(--status-safe);font-weight:700;">+4.6m (SAFE)</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Environmental & Oceanographic Sensor Ingestion — STATIC DEMO -->
-        <div class="orca-telemetry-widget" data-demo-widget="ocean-sensors" title="Static demo — see message verdict for live data">
-          <div class="widget-section-header">
-            <span class="label-caps">INCOIS / IMD OCEAN SENSORS — DEMO</span>
-            <span class="data-mono-sm" style="color:var(--text-tertiary);">STATIC DEMO</span>
-          </div>
-
-          <div class="telemetry-data-grid">
-            <div class="data-cell">
-              <span class="cell-label">SEA SURFACE TEMP (SST)</span>
-              <span class="cell-val-mono">27.8°C</span>
-            </div>
-            <div class="data-cell">
-              <span class="cell-label">SIGNIFICANT WAVE (SWH)</span>
-              <span class="cell-val-mono">1.1m (SLIGHT)</span>
-            </div>
-            <div class="data-cell">
-              <span class="cell-label">BAROMETRIC PRESSURE</span>
-              <span class="cell-val-mono">1012.4 hPa</span>
-            </div>
-            <div class="data-cell">
-              <span class="cell-label">TIDAL CYCLE</span>
-              <span class="cell-val-mono">RISING FLOOD (+3.2m)</span>
-            </div>
-          </div>
+          ` : ''}
         </div>
 
         <!-- SAR Boundary Monitor — Innovation #3 (Authority) -->
         <div id="sar-monitor-container"></div>
 
-        <!-- Fleet Convergence Forecast — Innovation #1 -->
-        <div class="orca-telemetry-widget" id="fleet-convergence-widget" style="border-left:3px solid var(--primary);">
-          <div class="widget-section-header">
-            <span class="label-caps" style="display:flex;align-items:center;gap:6px;">${ICONS.sparkles} FLEET CONVERGENCE FORECAST</span>
-            <span class="status-pill info" id="fleet-status-pill">
-              <span class="dot"></span>
-              <span class="data-mono-bold" id="fleet-status-text">CHECKING</span>
-            </span>
-          </div>
-          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4;">
-            ORCA detects when its own recommendations concentrate fleet &amp; adjusts toward less-crowded, similarly suitable zones. <span style="color:var(--text-tertiary);">Safety &amp; legal always override.</span>
-          </div>
-          <div class="fleet-demo-controls" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
-            <button class="cap-badge fleet-demo-btn" data-level="" style="cursor:pointer;${!OrcaApiService.getFleetDemoLevel() ? 'background:var(--primary);color:#fff;' : ''}">Normal</button>
-            <button class="cap-badge fleet-demo-btn" data-level="low" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='low' ? 'background:var(--primary);color:#fff;' : ''}">Low (2)</button>
-            <button class="cap-badge fleet-demo-btn" data-level="medium" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='medium' ? 'background:var(--primary);color:#fff;' : ''}">Medium (5)</button>
-            <button class="cap-badge fleet-demo-btn" data-level="high" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='high' ? 'background:var(--primary);color:#fff;' : ''}">High (10)</button>
-            <button class="cap-badge fleet-demo-btn" data-level="severe" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='severe' ? 'background:var(--primary);color:#fff;' : ''}">Severe (20+)</button>
-          </div>
-          <div style="display:flex;gap:4px;">
-            <button class="icon-btn" id="btn-fleet-clear" title="Clear simulated fleet" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">Clear Simulation</button>
-            <button class="icon-btn" id="btn-fleet-refresh" title="Refresh fleet status" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">↻ Refresh</button>
-          </div>
-          <div id="fleet-status-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:6px;max-height:60px;overflow-y:auto;"></div>
-          <div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;">Window 6h • Radius 15km • Target 8 vessels • Penalty max 50% • <em>DEMO — SIMULATED Fleet Activity</em> when highlighted</div>
-        </div>
+        <!-- Advanced Simulation & Stress Test Controls (Collapsed by default to eliminate clutter) -->
+        <details class="simulation-accordion" style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:12px;">
+          <summary style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:var(--text-secondary);cursor:pointer;user-select:none;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;">
+            <span>⚙️ Simulation &amp; Stress Tests</span>
+            <span style="font-size:10px;opacity:0.7;">Click to Expand</span>
+          </summary>
 
-        <!-- Wind Validation — Innovation #4 (Satellite–Model Divergence) -->
-        <div class="orca-telemetry-widget" id="wind-validation-widget" style="border-left:3px solid #0ea5e9;">
-          <div class="widget-section-header">
-            <span class="label-caps" style="display:flex;align-items:center;gap:6px;">🌬️ WIND VALIDATION</span>
-            <span class="status-pill info" id="wind-status-pill">
-              <span class="dot"></span>
-              <span class="data-mono-bold" id="wind-status-text">CHECKING</span>
-            </span>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px;">
+            <!-- Fleet Convergence Forecast — Innovation #1 -->
+            <div class="orca-telemetry-widget" id="fleet-convergence-widget" style="border-left:3px solid var(--primary);margin:0;">
+              <div class="widget-section-header">
+                <span class="label-caps" style="display:flex;align-items:center;gap:6px;">${ICONS.sparkles} FLEET CONVERGENCE</span>
+                <span class="status-pill info" id="fleet-status-pill">
+                  <span class="dot"></span>
+                  <span class="data-mono-bold" id="fleet-status-text">CHECKING</span>
+                </span>
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4;">
+                Crowding-adjusted PFZ recommendations.
+              </div>
+              <div class="fleet-demo-controls" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+                <button class="cap-badge fleet-demo-btn" data-level="" style="cursor:pointer;${!OrcaApiService.getFleetDemoLevel() ? 'background:var(--primary);color:#fff;' : ''}">Normal</button>
+                <button class="cap-badge fleet-demo-btn" data-level="low" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='low' ? 'background:var(--primary);color:#fff;' : ''}">Low (2)</button>
+                <button class="cap-badge fleet-demo-btn" data-level="medium" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='medium' ? 'background:var(--primary);color:#fff;' : ''}">Medium (5)</button>
+                <button class="cap-badge fleet-demo-btn" data-level="high" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='high' ? 'background:var(--primary);color:#fff;' : ''}">High (10)</button>
+                <button class="cap-badge fleet-demo-btn" data-level="severe" style="cursor:pointer;${OrcaApiService.getFleetDemoLevel()==='severe' ? 'background:var(--primary);color:#fff;' : ''}">Severe (20+)</button>
+              </div>
+              <div style="display:flex;gap:4px;">
+                <button class="icon-btn" id="btn-fleet-clear" title="Clear simulated fleet" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">Clear</button>
+                <button class="icon-btn" id="btn-fleet-refresh" title="Refresh fleet status" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">↻ Refresh</button>
+              </div>
+              <div id="fleet-status-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:6px;max-height:60px;overflow-y:auto;"></div>
+            </div>
+
+            <!-- Wind Validation — Innovation #4 (Satellite–Model Divergence) -->
+            <div class="orca-telemetry-widget" id="wind-validation-widget" style="border-left:3px solid #0ea5e9;margin:0;">
+              <div class="widget-section-header">
+                <span class="label-caps" style="display:flex;align-items:center;gap:6px;">🌬️ SATELLITE WIND DIVERGENCE</span>
+                <span class="status-pill info" id="wind-status-pill">
+                  <span class="dot"></span>
+                  <span class="data-mono-bold" id="wind-status-text">CHECKING</span>
+                </span>
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4;">
+                Compares forecast model with MOSDAC satellite scatterometer.
+              </div>
+              <div class="wind-demo-controls" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+                <button class="cap-badge wind-demo-btn" data-scenario="" style="cursor:pointer;${!OrcaApiService.getWindDemoScenario() ? 'background:var(--primary);color:#fff;' : ''}">Normal</button>
+                <button class="cap-badge wind-demo-btn" data-scenario="match" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='match' ? 'background:var(--primary);color:#fff;' : ''}">Match</button>
+                <button class="cap-badge wind-demo-btn" data-scenario="moderate" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='moderate' ? 'background:var(--primary);color:#fff;' : ''}">Moderate</button>
+                <button class="cap-badge wind-demo-btn" data-scenario="high_divergence" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='high_divergence' ? 'background:var(--primary);color:#fff;' : ''}">High</button>
+              </div>
+              <div style="display:flex;gap:4px;">
+                <button class="icon-btn" id="btn-wind-clear" title="Clear wind demo" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">Clear</button>
+                <button class="icon-btn" id="btn-wind-refresh" title="Refresh satellite wind status" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">↻ Refresh</button>
+              </div>
+              <div id="wind-status-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:6px;max-height:60px;overflow-y:auto;"></div>
+            </div>
           </div>
-          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4;">
-            Compares forecast model wind with independent satellite scatterometer observation. <span style="color:var(--text-tertiary);">High divergence flags confidence, never overrides safety.</span>
-          </div>
-          <div class="wind-demo-controls" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
-            <button class="cap-badge wind-demo-btn" data-scenario="" style="cursor:pointer;${!OrcaApiService.getWindDemoScenario() ? 'background:var(--primary);color:#fff;' : ''}">Normal</button>
-            <button class="cap-badge wind-demo-btn" data-scenario="match" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='match' ? 'background:var(--primary);color:#fff;' : ''}">Match (18→19kn)</button>
-            <button class="cap-badge wind-demo-btn" data-scenario="moderate" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='moderate' ? 'background:var(--primary);color:#fff;' : ''}">Moderate</button>
-            <button class="cap-badge wind-demo-btn" data-scenario="high_divergence" style="cursor:pointer;${OrcaApiService.getWindDemoScenario()==='high_divergence' ? 'background:var(--primary);color:#fff;' : ''}">High (18→27kn)</button>
-          </div>
-          <div style="display:flex;gap:4px;">
-            <button class="icon-btn" id="btn-wind-clear" title="Clear wind demo" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">Clear Simulation</button>
-            <button class="icon-btn" id="btn-wind-refresh" title="Refresh satellite wind status" style="font-size:11px;padding:4px 8px;width:auto;height:auto;">↻ Refresh</button>
-          </div>
-          <div id="wind-status-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:6px;max-height:60px;overflow-y:auto;"></div>
-          <div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;">Real provider: MOSDAC OSCAT-3 (ISRO Oceansat-3) — <em>SIMULATED</em> when highlighted • Thresholds 9/15 kn • <span id="wind-real-badge"></span></div>
-        </div>
+        </details>
+
 
         <!-- Active Advisory Persona Info -->
         <div style="padding:var(--space-3);background:var(--bg-card);border:1px solid var(--border-default);border-radius:var(--radius-md);">

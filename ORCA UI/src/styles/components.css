@@ -1935,10 +1935,310 @@
   transition: all var(--transition-fast);
 }
 
-.btn-popover-action:hover {
-  background: var(--bg-surface-hover);
-  border-color: var(--primary);
-  color: var(--primary);
+/* =========================================================================
+   ORCA CLEAN & CLUTTER-FREE HERO WORKSPACE STYLES
+   ========================================================================= */
+.orca-clean-hero {
+  max-width: 780px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 16px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
+
+.hero-brand-emblem {
+  margin-bottom: 12px;
+}
+
+.emblem-radar-glow {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(14, 124, 134, 0.25) 0%, rgba(14, 124, 134, 0.05) 70%, transparent 100%);
+  border: 1.5px solid var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 20px rgba(14, 124, 134, 0.35);
+  animation: pulseRadarGlow 3s ease-in-out infinite;
+}
+
+@keyframes pulseRadarGlow {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 16px rgba(14, 124, 134, 0.3); }
+  50% { transform: scale(1.05); box-shadow: 0 0 26px rgba(14, 124, 134, 0.55); }
+}
+
+.emblem-icon {
+  font-size: 26px;
+}
+
+.hero-clean-title {
+  font-family: var(--font-sans);
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+
+.hero-clean-subtitle {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  max-width: 580px;
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+
+.hero-role-badge-card {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 22px;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+}
+
+.hero-role-badge-card:hover {
+  border-color: var(--primary);
+  background: var(--bg-surface-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.role-badge-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.role-badge-left .role-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.role-text-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.role-badge-title {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.role-badge-title strong {
+  color: var(--primary);
+  margin-left: 4px;
+}
+
+.role-badge-desc {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+.btn-hero-change-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.btn-hero-change-role:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.orca-capabilities-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 26px;
+  text-align: left;
+}
+
+@media (max-width: 768px) {
+  .orca-capabilities-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.capability-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all var(--transition-normal);
+}
+
+.capability-item:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-surface-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.capability-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.capability-text h4 {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.capability-text p {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.hero-starters-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.starters-header-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.quick-inquiry-pills {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .quick-inquiry-pills {
+    grid-template-columns: 1fr;
+  }
+}
+
+.inquiry-pill-btn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.inquiry-pill-btn:hover {
+  border-color: var(--primary);
+  background: var(--bg-surface-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.inquiry-pill-btn .pill-icon {
+  font-size: 18px;
+  color: var(--primary);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.inquiry-pill-btn .pill-text-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inquiry-pill-btn .pill-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.inquiry-pill-btn .pill-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.35;
+}
+
+.empty-telemetry-panel-card {
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 20px 16px;
+  text-align: center;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.empty-telemetry-panel-card .empty-telemetry-icon {
+  font-size: 28px;
+  margin-bottom: 2px;
+}
+
+.empty-telemetry-panel-card .empty-telemetry-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.empty-telemetry-panel-card .empty-telemetry-desc {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  max-width: 280px;
+}
+
+.simulation-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+
 
 

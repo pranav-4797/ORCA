@@ -126,7 +126,7 @@ class AppStore {
   // UI Drawer / Modal States
   public sidebarCollapsed: boolean = false;
   public mobileSidebarOpen: boolean = false;
-  public agentPanelOpen: boolean = true;
+  public agentPanelOpen: boolean = false;
   public mobileAgentDrawerOpen: boolean = false;
   public searchModalOpen: boolean = false;
   public settingsModalOpen: boolean = false;
@@ -139,7 +139,7 @@ class AppStore {
   public settings: AppSettings = {
     theme: 'dark',
     sidebarCollapsed: false,
-    agentPanelOpen: true,
+    agentPanelOpen: false,
     soundEnabled: true,
     sendOnEnter: true,
     streamSpeed: 'normal',
