@@ -651,6 +651,90 @@
   color: var(--text-primary);
 }
 
+/* =========================================================================
+   AI MESSAGE BODY — well-organized structured response formatting
+   ========================================================================= */
+.ai-msg-body {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+/* Section headings inside responses (### Ocean Conditions, etc.) */
+.ai-msg-body .md-h3 {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+  margin: 14px 0 4px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ai-msg-body .md-h2 {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--primary);
+  margin: 14px 0 5px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Bullet lists: clean, compact, with accent marker */
+.ai-msg-body .md-ul {
+  list-style: none;
+  margin: 4px 0 10px 0;
+  padding-left: 0;
+  gap: 3px;
+}
+
+.ai-msg-body .md-ul .md-li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ai-msg-body .md-ul .md-li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+  opacity: 0.7;
+}
+
+/* Ordered lists inside responses */
+.ai-msg-body .md-ol {
+  margin: 4px 0 10px 16px;
+  gap: 3px;
+}
+
+.ai-msg-body .md-ol .md-oli {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Paragraphs inside response body */
+.ai-msg-body .md-p {
+  margin-bottom: 6px;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+/* Bold verdict lines (first bold text is the verdict) */
+.ai-msg-body strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
 /* Tables in ORCA */
 .table-wrapper {
   width: 100%;

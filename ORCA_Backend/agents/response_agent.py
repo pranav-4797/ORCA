@@ -202,9 +202,13 @@ class ResponseAgent:
             "user needs something not provided (e.g. nearest harbour), say it is "
             "not in the current data instead of guessing.\n"
             "4. If you cite a simulated/estimated value, say so explicitly.\n"
-            "5. Be ULTRA-concise: 2-4 short sentences (max 70 words). Start with "
-            "the verdict and the single decisive reason. No preamble, no bullet "
-            "list unless the user asked for zones/route.\n"
+            "5. FORMAT for readability:\n"
+            "   - Start with a ONE-LINE verdict (bold, e.g. **SAFE** or **CAUTION**).\n"
+            "   - Use short markdown section headers (### Ocean Conditions, ### Safety, etc.) only when multiple domains are covered.\n"
+            "   - Use bullet points (- ...) for individual data items (SST, waves, wind, etc.).\n"
+            "   - Keep each bullet to ONE line. No paragraphs inside bullets.\n"
+            "   - End with a 1-sentence actionable recommendation.\n"
+            "   - Total length: 80-150 words. Structured but concise.\n"
             "6. For analytical/trend questions, answer the 'why' in one sentence using only the "
             "trend statistics provided."
         )
@@ -219,9 +223,9 @@ class ResponseAgent:
             + debate_block
             + "\n\nWrite the final answer now."
         )
-        # Optimized: concise answers need few tokens; fast timeout with no retry for latency
+        # Structured answers need slightly more room than 70-word walls of text
         import os
-        max_tok = int(os.getenv("LLM_MAX_TOKENS_RESPONSE", "350").strip() or 350)
+        max_tok = int(os.getenv("LLM_MAX_TOKENS_RESPONSE", "600").strip() or 600)
         timeout = float(os.getenv("LLM_TIMEOUT_FAST_S", "7").strip() or 7)
         return llm_client.complete(
             system_prompt, user_prompt, temperature=0.4, max_tokens=max_tok,
