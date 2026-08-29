@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import operator
 import os
+import logging
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -249,14 +250,8 @@ def _detect_romanized_language(text: str) -> str | None:
     return None
 
 
-def resolve_location(place_name: str) -> Location:
-    """Free-text place name -> Location.
-
-    Order: exact known-key hit -> in-session geocode cache -> live
-    Nominatim lookup -> DEFAULT_LOCATION. Every resolved point is real;
-    nothing is invented when resolution fails (the default point is named
-    honestly as such).
-    """
+def resolve_location(place_name: str) -> Location | None:
+    """Free-text place name -> Location or None. Never defaults to Panaji."""
     key = " ".join((place_name or "").strip().lower().split())
     if key in KNOWN_LOCATIONS:
         return KNOWN_LOCATIONS[key]
@@ -267,20 +262,19 @@ def resolve_location(place_name: str) -> Location:
             import data_connectors.geocode as geocode
 
             hit = geocode.geocode(key)
-        except Exception as exc:  # network down etc. -> honest default below
+        except Exception as exc:  # network down -> no location
             import logging
 
             logging.getLogger("orca.orchestrator").warning(
-                "geocoding '%s' failed (%s); using default location",
-                place_name, exc,
+                "geocoding '%s' failed (%s); no location", place_name, exc,
             )
-            return DEFAULT_LOCATION
+            return None
         if hit:
             lat, lon, display = hit
             loc = Location(name=display.split(",")[0].strip() + " Coast", lat=lat, lon=lon)
             _geocode_cache[key] = loc
             return loc
-    return DEFAULT_LOCATION
+    return None
 
 KNOWN_TIME_WINDOWS = ["today", "tomorrow", "tomorrow_morning"]
 
@@ -333,6 +327,7 @@ SPECIALIST_REGISTRY = {
 # intent -> default specialist set when the planner names none explicitly
 INTENT_DEFAULT_AGENTS = {
     "safety_check": ["OceanStateAgent", "HazardAgent", "GeospatialAgent"],
+    "ocean_state": ["OceanStateAgent"],
     "pfz_lookup": ["PFZAgent", "OceanStateAgent", "GeospatialAgent"],
     "route_plan": ["GeospatialAgent", "OceanStateAgent", "HazardAgent"],
     "geofence_check": ["GeospatialAgent"],
@@ -348,6 +343,7 @@ PLANNING_TOOL_SCHEMA = {
             "type": "string",
             "enum": [
                 "safety_check",    # safe to go into/on the sea?
+                "ocean_state",     # sea/weather conditions: wind, waves, SST, tide
                 "pfz_lookup",      # where is the nearest fishing zone?
                 "route_plan",      # safest route from A to B
                 "geofence_check",  # am I near/inside restricted waters?
@@ -358,7 +354,9 @@ PLANNING_TOOL_SCHEMA = {
             ],
             "description": (
                 "The query type. safety_check = is it safe to venture out "
-                "(fishing/boating). pfz_lookup = finding fishing zones. "
+                "(fishing/boating). ocean_state = sea/weather conditions only "
+                "(weather, forecast, wind, waves, swell, SST, chlorophyll, tide). "
+                "pfz_lookup = finding fishing zones. "
                 "route_plan = navigating somewhere safely. geofence_check = "
                 "boundary/restricted-zone proximity. hazard_alerts = active "
                 "weather/marine alerts. trend_analysis = analytical questions "
@@ -425,6 +423,7 @@ PLANNING_TOOL_SCHEMA = {
 
 class Intent:
     SAFETY_CHECK = "safety_check"
+    OCEAN_STATE = "ocean_state"
     PFZ_LOOKUP = "pfz_lookup"
     ROUTE_PLAN = "route_plan"
     GEOFENCE_CHECK = "geofence_check"
@@ -445,6 +444,7 @@ class ORCAGraphState(TypedDict, total=False):
     raw_query: str
     session_id: str
     device_gps: Optional[tuple]
+    map_point: Optional[tuple] = None
     destination: Optional[Location]
     vessel_class: str
 
@@ -563,7 +563,11 @@ class Orchestrator:
         # Dependency repair: hazard needs an ocean reading.
         if "HazardAgent" in chosen:
             chosen.add("OceanStateAgent")
-        if live_position:
+        # Geospatial only runs for intents that actually ask about boundaries /
+        # routes / zones — NEVER blanket-forced just because GPS was sent (an
+        # "SST near me" query must stay ocean_state-only).
+        _intent_defaults = INTENT_DEFAULT_AGENTS.get(plan.get("intent"), []) or []
+        if live_position and "GeospatialAgent" in _intent_defaults:
             chosen.add("GeospatialAgent")
         nodes: List[str] = []
         if "TrendAgent" in chosen and plan["intent"] == Intent.TREND_ANALYSIS:
@@ -664,6 +668,29 @@ class Orchestrator:
             pass
 
     # ------------------------------------------------------------------
+    # Lightweight routing debug log (Step 10) — never fails the query.
+    # ------------------------------------------------------------------
+    def _log_routing(self, state, plan: dict) -> None:
+        try:
+            import logging
+            log = logging.getLogger("orca.orchestrator")
+            intent = plan.get("intent", "unknown")
+            agents = INTENT_DEFAULT_AGENTS.get(intent, []) or plan.get("agents_needed", [])
+            sel = self._selected_specialists(
+                plan,
+                live_position=bool(state.get("device_gps") or state.get("destination")),
+            )
+            log.info(
+                "Detected Intent: %s | Selected Agent(s): %s | [%s] %s",
+                intent,
+                ", ".join(a.replace("Agent", "").strip() for a in sel) or "(none)",
+                plan.get("routing_mode", "rules"),
+                plan.get("why", ""),
+            )
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
     # Public entrypoint — now supports auto | panel | agent
     # ------------------------------------------------------------------
     def handle_query(
@@ -672,6 +699,7 @@ class Orchestrator:
         session_id: str | None = None,
         device_gps: tuple | None = None,
         destination: Location | None = None,
+        map_point: tuple | None = None,
         mode: str = "auto",
         target_agent: str | None = None,
         vessel_class: str | None = None,
@@ -699,6 +727,7 @@ class Orchestrator:
             "raw_query": raw_query,
             "session_id": session_id,
             "device_gps": device_gps,
+            "map_point": map_point,
             "destination": destination,
             "vessel_class": vessel_class or "small_fishing_boat",
             "mode": mode_norm,
@@ -937,6 +966,9 @@ class Orchestrator:
         """
         t_dispatch0 = time.perf_counter()
         plan = state["plan"]
+        # If location unresolved, skip all specialists — response will ask user
+        if plan.get("needs_location"):
+            return {"ocean_state": None, "pfz": None, "geofence": None, "route": None, "trend": None, "risk": None, "timings": {}, "traces": []}
         ctx = state["context"]
         location = state["location"]
         selected = self._selected_specialists(
@@ -1005,7 +1037,7 @@ class Orchestrator:
             # Timeout env-configurable: fast fail to simulated fallback rather than hanging 30s
             ocean_reading = None
             ocean_trace = None
-            _OCEAN_FUTURE_TIMEOUT = float(os.getenv("ORCA_OCEAN_FUTURE_TIMEOUT_S", "12").strip() or 12)
+            _OCEAN_FUTURE_TIMEOUT = float(os.getenv("ORCA_OCEAN_FUTURE_TIMEOUT_S", "22").strip() or 22)
             if "ocean" in futures:
                 try:
                     ocean_reading, ocean_trace = futures["ocean"].result(timeout=_OCEAN_FUTURE_TIMEOUT)  # type: ignore
@@ -1019,6 +1051,33 @@ class Orchestrator:
                         futures["ocean"].result(timeout=0)  # ensure exception consumed
                     except:  # noqa
                         pass
+                    # Timeout → inject an explicit "unavailable" reading so weather
+                    # queries still return a structured response with a clear reason
+                    # (never fabricate marine values).
+                    if ocean_reading is None and "ocean_state" in selected:
+                        try:
+                            from models import AgentTrace as _AT
+                            import time as _t
+                            _s = _t.perf_counter()
+                            ocean_reading = self.ocean_state_agent._unavailable_reading(
+                                location,
+                                reason=f"INCOIS Ocean State Forecast timed out after {_OCEAN_FUTURE_TIMEOUT:.0f}s",
+                            )
+                            ocean_trace = _AT(
+                                agent_name=self.ocean_state_agent.name,
+                                action="Ocean-State degraded fallback after timeout",
+                                result_summary=(
+                                    "Live INCOIS value unavailable (timeout) — no fabricated "
+                                    "marine conditions; all fields unavailable"
+                                ),
+                                data_sources=["unavailable"],
+                                duration_ms=(_t.perf_counter() - _s) * 1000,
+                            )
+                            traces.append(ocean_trace)
+                            results["ocean_state"] = ocean_reading
+                            logger.warning("ocean_state timeout fallback: unavailable reading for %s", getattr(location, "name", ""))
+                        except Exception as _e2:
+                            logger.warning("ocean unavailable fallback also failed: %s", _e2)
                 finally:
                     futures.pop("ocean", None)
 
@@ -1035,8 +1094,8 @@ class Orchestrator:
             trend_res = None
             for key in ("pfz", "geofence", "trend"):
                 if key in futures:
-                    # Shorter timeouts: geofence is <10ms, pfz ~1s, trend may be longer (network heavy)
-                    _to = 15.0 if key in ("pfz","geofence") else 25.0
+                    # PFZ needs longer for INCOIS fetch (500KB + inland SST ring)
+                    _to = 35.0 if key == "pfz" else (15.0 if key == "geofence" else 25.0)
                     try:
                         val = futures[key].result(timeout=_to)  # type: ignore
                         if key == "pfz":
@@ -1456,6 +1515,24 @@ class Orchestrator:
 
     def _node_response(self, state: ORCAGraphState) -> dict:
         t0 = time.perf_counter()
+        # Location unresolved → ask user (never default to Panaji)
+        plan = state.get("plan") or {}
+        if plan.get("needs_location"):
+            ask_msg = plan.get("ask_message") or "I couldn't determine your location. Please enable GPS or tell me a coastal location such as Ratnagiri, Veraval, Kochi, or coordinates."
+            resp_trace = AgentTrace(
+                agent_name="ResponseAgent",
+                action="Location unresolved — asked user for location",
+                result_summary="No GPS, map selection, or chat location; prompted user.",
+                data_sources=[],
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
+            timings = dict(state.get("timings") or {})
+            timings["response_ms"] = round(resp_trace.duration_ms, 1)
+            response = self._assemble_response(state, ask_msg)
+            response.trace.append(resp_trace)
+            # Override assembled answer with ask message
+            response.answer = ask_msg
+            return {"response": response, "traces": [resp_trace], "timings": timings}
         # For fast auto queries with single authoritative hazard verdict, use deterministic template (no LLM call)
         mode = (state.get("mode") or "auto").lower()
         complexity = (state.get("complexity") or state.get("plan", {}).get("complexity") or "fast")
@@ -1521,22 +1598,121 @@ class Orchestrator:
         # Verdict line is authoritative and already rendered as HUD; answer complements it concisely.
         if risk is not None:
             if risk.status.value == "UNSAFE":
-                # Include dominant threshold reason
                 flag_txt = "; ".join(f"{f.label}: {f.detail}" for f in risk.flags[:2]) if risk.flags else risk.headline
                 wave_txt = ""
                 if ocean is not None:
-                    wave_txt = f" Wave height {ocean.wave_height_m} m, wind gusts {ocean.wind_gust_kmh} km/h."
-                parts.append(f"UNSAFE: {flag_txt}.{wave_txt} Do not venture out. {risk.headline}")
+                    wh = f"{ocean.wave_height_m} m" if getattr(ocean, "wave_height_m", None) is not None else "—"
+                    gs = f"{ocean.wind_gust_kmh} km/h" if getattr(ocean, "wind_gust_kmh", None) is not None else "—"
+                    wave_txt = f"  \nWave: {wh} · Gusts: {gs}"
+                parts.append(f"### 🔴 UNSAFE — Do not venture out\n**{flag_txt}.**{wave_txt}  \n{risk.headline}")
             elif risk.status.value == "CAUTION":
-                parts.append(f"CAUTION: {risk.headline} Wave {ocean.wave_height_m if ocean else '?'} m / gusts {ocean.wind_gust_kmh if ocean else '?'} km/h borderline.")
+                wv = f"{ocean.wave_height_m} m" if ocean and getattr(ocean, "wave_height_m", None) is not None else "—"
+                gs = f"{ocean.wind_gust_kmh} km/h" if ocean and getattr(ocean, "wind_gust_kmh", None) is not None else "—"
+                parts.append(f"### 🟠 CAUTION — Borderline conditions\n**{risk.headline}**  \nWave: {wv} · Gusts: {gs}")
             else:
-                parts.append(f"SAFE: {risk.headline} Wave {ocean.wave_height_m if ocean else '?'} m and wind moderate.")
-            # Exceedance windows
+                wh = f"{ocean.wave_height_m} m" if ocean and getattr(ocean, "wave_height_m", None) is not None else "—"
+                parts.append(f"### 🟢 SAFE — {risk.headline}  \nWave: {wh} · Wind moderate")
             for w in getattr(risk, "exceedance_windows", [])[:1]:
-                parts.append(f"Conditions worsen {w.start_local}–{w.end_local} (peak {w.peak_value}{w.unit}).")
-            # Marine bulletins
+                parts.append(f"⏰ Conditions worsen {w.start_local}–{w.end_local} (peak {w.peak_value}{w.unit}).")
             for m in getattr(risk, "marine_bulletins", [])[:1]:
-                parts.append(m)
+                parts.append(f"⚠️ {m}")
+        # Ocean State — live marine weather (inserted before PFZ so weather queries are not empty)
+        if ocean is not None:
+            loc = getattr(ocean, "location", None)
+            loc_name = getattr(loc, "name", "") if loc else ""
+            # Prefer a short display name (Ratnagiri, Mumbai) over "Unknown Coast"
+            short_name = loc_name.split(" (")[0].split(" Coast")[0].strip() if loc_name else "this location"
+            tw = getattr(context, "time_window", None) or (state.get("plan", {}) or {}).get("time_window") or "today"
+            tw_label = tw.replace("_", " ")
+            fs = getattr(ocean, "field_sources", {}) or {}
+            src_val = getattr(getattr(ocean, "source", None), "value", "") or "live"
+            def _sim(field: str) -> str:
+                # No simulated / derived labels ever reach the answer.
+                return ""
+
+            # Filter to fields that are truly available (not None/unavailable
+            # placeholders). Unavailable fields are simply omitted (never shown
+            # as a fabricated number); the footer still states the live source.
+            def _have(field_key: str) -> bool:
+                if str(fs.get(field_key, "")) == "unavailable":
+                    return False
+                return True
+
+            marine_note = getattr(ocean, "marine_location_note", "") or ""
+            header = f"### 🌊 Marine Conditions — {short_name} ({tw_label})"
+            coord_line = ""
+            if loc and getattr(loc, "lat", None) is not None:
+                coord_line = f"📍 {loc.lat:.4f}°N, {loc.lon:.4f}°E"
+            # Query-aware filtering: only show fields the user asked for
+            raw_q = (getattr(context, "raw_query", "") or state.get("plan", {}).get("raw_query", "") or "").lower()
+            def _wants(field: str) -> bool:
+                if not raw_q:
+                    return True
+                sst_kw = any(k in raw_q for k in ("sst", "sea surface temp", "sea temp", "temperature"))
+                wind_kw = any(k in raw_q for k in ("wind", "gust"))
+                wave_kw = any(k in raw_q for k in ("wave", "swell", "surf"))
+                curr_kw = any(k in raw_q for k in ("current", "currents"))
+                chl_kw = any(k in raw_q for k in ("chlorophyll", "chl", "productivity"))
+                tide_kw = any(k in raw_q for k in ("tide", "tidal"))
+                specific = sst_kw or wind_kw or wave_kw or curr_kw or chl_kw or tide_kw
+                if not specific:
+                    return True
+                mapping = {"sst_celsius": sst_kw, "wind_speed_kmh": wind_kw, "wind_gust_kmh": wind_kw,
+                           "wave_height_m": wave_kw, "primary_swell_height_m": wave_kw,
+                           "surface_current_mps": curr_kw, "chlorophyll_mg_m3": chl_kw, "tide_level_m": tide_kw, "tide_extremes": tide_kw}
+                return mapping.get(field, False)
+            detail: list[str] = []
+            if _have("sst_celsius") and getattr(ocean, "sst_celsius", None) is not None and _wants("sst_celsius"):
+                detail.append(f"| 🌡️ SST | **{ocean.sst_celsius}°C** |")
+            w_dir = getattr(ocean, "wind_direction", None)
+            if _have("wind_speed_kmh") and getattr(ocean, "wind_speed_kmh", None) is not None and _wants("wind_speed_kmh"):
+                wdtxt = f" {w_dir}" if w_dir else ""
+                detail.append(f"| 💨 Wind | **{ocean.wind_speed_kmh} km/h{wdtxt}** |")
+            cur = getattr(ocean, "surface_current_mps", None)
+            if _have("surface_current_mps") and cur is not None and _wants("surface_current_mps"):
+                detail.append(f"| 🌊 Current | **{cur} m/s** |")
+            swell_val = getattr(ocean, "primary_swell_height_m", None) if hasattr(ocean, "primary_swell_height_m") else getattr(ocean, "wave_height_m", None)
+            if _have("primary_swell_height_m") and swell_val is not None and _wants("primary_swell_height_m"):
+                detail.append(f"| 🌊 Swell | **{swell_val} m** |")
+            elif _have("wave_height_m") and getattr(ocean, "wave_height_m", None) is not None and _wants("wave_height_m"):
+                detail.append(f"| 🌊 Waves | **{ocean.wave_height_m} m** |")
+            extremes = getattr(ocean, "tide_extremes", []) or []
+            if extremes and _wants("tide_extremes"):
+                tide_txt = ", ".join(f"{e.kind} at {e.time_local[11:16]} ({e.height_m} m)" for e in extremes[:4])
+                detail.append(f"| 🌗 Tide | {tide_txt} |")
+            elif _have("tide_level_m") and getattr(ocean, "tide_level_m", None) not in (None, 0.0) and _wants("tide_level_m"):
+                detail.append(f"| 🌗 Tide | {ocean.tide_level_m} m |")
+            if _have("chlorophyll_mg_m3") and getattr(ocean, "chlorophyll_mg_m3", None) is not None and _wants("chlorophyll_mg_m3"):
+                detail.append(f"| 🟢 Chlorophyll | **{ocean.chlorophyll_mg_m3} mg/m³** |")
+
+            debug_lines = getattr(ocean, "debug_incois", None) or {}
+            _DEBUG = os.getenv("ORCA_DEBUG_INCOIS", "").strip().lower() in ("1", "true", "yes")
+            if detail:
+                table = "| Parameter | Value |\n|---|---|\n" + "\n".join(detail)
+                block = header
+                if coord_line:
+                    block += f"  \n{coord_line}"
+                block += f"\n\n{table}"
+                parts.append(block)
+                if marine_note:
+                    parts.append(f"_{marine_note}_")
+                if _DEBUG and debug_lines:
+                    dbg = "\n".join(f"- {_k}: {debug_lines[_k]}" for _k in ("SST", "Wind", "Current", "Swell", "Chlorophyll") if _k in debug_lines)
+                    parts.append(f"**Debug INCOIS**\n{dbg}")
+                parts.append("*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*")
+            else:
+                # No live ocean fields — honest unavailability, never fabricated numbers
+                unavailable_reason = getattr(ocean, "unavailable_reason", None) or ""
+                _is_current_loc = bool(state.get("device_gps")) and not state.get("map_point")
+                _hint = (
+                    " If you are inland, select an offshore point on the map or "
+                    "specify a coastal location for live marine data."
+                    if _is_current_loc else ""
+                )
+                parts.append(
+                    f"{header}: Live INCOIS value unavailable.{_hint}"
+                    + (f" ({unavailable_reason})" if unavailable_reason else "")
+                )
         # PFZ + Fleet Convergence
         if pfz is not None:
             if fleet and fleet.get("recommendation_changed") and fleet.get("final_zone") and fleet.get("raw_best_zone"):
@@ -1572,11 +1748,7 @@ class Orchestrator:
                 parts.append("No restricted boundary within alert buffer.")
         if route is not None:
             parts.append(f"Route {route.estimated_distance_km:.0f} km via {len(route.waypoints)} waypoints avoiding {', '.join(route.avoided_zones) or 'nothing'}.")
-        # Ensure language? For now English deterministic; LLM path handles i18n. Fast path keeps English concise.
-        answer = " ".join(parts) if parts else (risk.headline if risk else "Assessment complete.")
-        # Add provenance hint for simulated fields
-        if ocean is not None and ocean.source.value == "simulated":
-            answer += " [Note: some fields simulated due to live feed unavailability.]"
+        answer = "\n\n".join(parts) if parts else (risk.headline if risk else "Assessment complete.")
         # Safety note if fleet tried to override unsafe
         if fleet and fleet.get("status") != "UNAVAILABLE" and risk and risk.status.value == "UNSAFE":
             answer += " Fleet optimization did not override safety — unsafe zones remain excluded."
@@ -1713,9 +1885,13 @@ class Orchestrator:
 
         prior = session_store.get(state["session_id"])
         plan, plan_mode = self._plan(normalized_query, prior=prior)
+        self._log_routing(state, plan)
 
         device_gps = state.get("device_gps") or (
             tuple(prior.device_gps) if (prior and prior.device_gps) else None
+        )
+        map_point = state.get("map_point") or (
+            tuple(getattr(prior, "map_point", None)) if (prior and getattr(prior, "map_point", None)) else None
         )
         destination = state.get("destination") or (
             Location(**prior.destination) if (prior and prior.destination) else None
@@ -1724,9 +1900,39 @@ class Orchestrator:
         # Live Device GPS resolution (P0): if query asks about current location or names no specific town,
         # and device_gps is available, bind to the user's live position directly and reverse-geocode it.
         loc_name = str(plan.get("location_name") or "").strip().lower()
-        is_my_location_query = any(k in normalized_query.lower() for k in ("where am i", "my location", "my position", "current position", "here", "around me", "where i am"))
-        
-        if (loc_name in ("", "unknown", "same", "here", "there", "current", "my location", "where am i") or is_my_location_query) and device_gps:
+        is_my_location_query = any(k in normalized_query.lower() for k in (
+            "where am i", "my location", "my position", "current position",
+            "here", "around me", "where i am", "near me", "nearby"))
+
+        _glog = logging.getLogger("orca.orchestrator")
+
+        # Map-tap selection (Part A2 — highest priority): the user explicitly
+        # tapped a coastal/offshore point. Used directly, never snapped, and it
+        # wins over GPS / typed / PFZ coordinates.
+        if map_point is not None and len(map_point) >= 2:
+            mp_lat, mp_lon = float(map_point[0]), float(map_point[1])
+            _glog.info("Map tap coordinate selected: %.4f,%.4f", mp_lat, mp_lon)
+            location = Location(
+                name=f"Selected Location ({mp_lat:.4f}°N, {mp_lon:.4f}°E)",
+                lat=mp_lat, lon=mp_lon,
+            )
+            plan["location_name"] = location.name
+            # Propagate to device_gps so every downstream consumer (Geospatial,
+            # PFZ reference, ocean) resolvs against the selected point.
+            device_gps = (mp_lat, mp_lon)
+
+        if device_gps:
+            _glog.info(
+                "GPS acquired: %.4f,%.4f | Using GPS coordinates%s",
+                device_gps[0], device_gps[1],
+                f" for '{loc_name or 'current position'}'" if is_my_location_query else "",
+            )
+        else:
+            _glog.info("GPS unavailable — falling back to selected location")
+
+        if map_point is not None and len(map_point) >= 2:
+            pass  # location already bound above (highest priority)
+        elif (loc_name in ("", "unknown", "same", "here", "there", "current", "my location", "where am i") or is_my_location_query) and device_gps:
             try:
                 import data_connectors.geocode as geocode
                 resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
@@ -1737,6 +1943,23 @@ class Orchestrator:
                 plan["location_name"] = location.name
         else:
             location = resolve_location(plan["location_name"])
+            if location is None:
+                if device_gps:
+                    try:
+                        import data_connectors.geocode as geocode
+                        resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
+                        location = Location(name=f"Current Position ({resolved_name})", lat=device_gps[0], lon=device_gps[1])
+                        plan["location_name"] = location.name
+                        _glog.info("Geocode failed for '%s' — falling back to GPS %.4f,%.4f", plan.get("location_name"), device_gps[0], device_gps[1])
+                    except Exception:
+                        location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
+                        plan["location_name"] = location.name
+                else:
+                    ask_msg = "I couldn't determine your location. Please enable GPS or tell me a coastal location such as Ratnagiri, Veraval, Kochi, or coordinates."
+                    _glog.warning("Location unresolved — asking user for location")
+                    plan["needs_location"] = True
+                    plan["ask_message"] = ask_msg
+                    location = Location(name="ASK_LOCATION", lat=0, lon=0)
 
         context = QueryContext(
             raw_query=raw_query,
@@ -1759,6 +1982,7 @@ class Orchestrator:
             target_hour=plan.get("target_hour"),
             language=state.get("language", "en"),
             device_gps=list(device_gps) if device_gps else None,
+            map_point=list(map_point) if map_point else None,
             destination=(
                 {"lat": destination.lat, "lon": destination.lon, "name": destination.name}
                 if destination else None
@@ -1850,7 +2074,9 @@ class Orchestrator:
             tiers.insert(0, {"source": "device_gps", "tier": tier, "kind": kind})
 
         sim_tagged = DataSource.SIMULATED.value
-        liveish = [s for s in sources if s and s != sim_tagged]
+        unavailable_tag = "unavailable"
+        tide_tag = "tide_gauge_model"
+        liveish = [s for s in sources if s and s not in (sim_tagged, unavailable_tag, tide_tag)]
         live_fraction = (len(liveish) / len(sources)) if sources else 0.0
 
         verdict_conf = (
@@ -2468,6 +2694,12 @@ class Orchestrator:
         # 3. Deterministic rule fallback (no LLM)
         # If fast router gave a low-confidence hint, reuse its intent to avoid re-parsing
         fallback_intent = (fast_decision.intent if fast_decision is not None else self._route_intent(normalized_query))
+        # Derive agents from the intent table so the rule path selects the right
+        # specialist (e.g. OceanStateAgent for weather) even when fast routing
+        # returned none — never fall through to PFZ for a conditions query.
+        fallback_agents = INTENT_DEFAULT_AGENTS.get(fallback_intent) or []
+        if not fallback_agents and fast_decision is not None:
+            fallback_agents = list(fast_decision.agents or [])
         plan = {
             "intent": fallback_intent,
             "location_name": self._extract_place_name(normalized_query),
@@ -2475,7 +2707,7 @@ class Orchestrator:
             "target_hour": self._extract_target_hour(normalized_query),
             "months_back": 6 if "trend" in normalized_query.lower() or
                             "declined" in normalized_query.lower() else None,
-            "agents_needed": (fast_decision.agents if fast_decision is not None else []),
+            "agents_needed": fallback_agents,
             "why": "[rules] Rule-based keyword parsing used (fast router uncertain, LLM unavailable).",
             "duration_ms": (time.perf_counter() - start) * 1000,
             "routing_mode": "rules",
@@ -2527,13 +2759,26 @@ class Orchestrator:
         if any(kw in q for kw in ["which zones", "which regions", "zones to avoid",
                                   "where should i fish", "good zones"]):
             return Intent.ZONE_SCAN
+        # Ocean/weather state questions route to OceanStateAgent BEFORE the
+        # PFZ check so pure sea-conditions queries never fall through to PFZ.
+        OCEAN_STATE_KEYWORDS = (
+            "weather", "forecast", "marine weather", "ocean state", "sea condition",
+            "wind", "wind speed", "wind gust", "waves", "wave", "wave height",
+            "swell", "sst", "sea surface temperature", "chlorophyll", "tide",
+            "high tide", "low tide", "current", "currents",
+        )
+        if any(kw in q for kw in OCEAN_STATE_KEYWORDS):
+            if any(kw in q for kw in ["fishing zone", "fish zone", "pfz",
+                                      "where to fish", "where should i fish"]):
+                return Intent.PFZ_LOOKUP
+            return Intent.OCEAN_STATE
         if any(kw in q for kw in ["fishing zone", "fish zone", "pfz", "where to fish"]):
             return Intent.PFZ_LOOKUP
         if any(kw in q for kw in ["route", "navigate", "safest path", "how do i get"]):
             return Intent.ROUTE_PLAN
-        if any(kw in q for kw in ["boundary", "border", "restricted", "geofence", "imbl"]):
+        if any(kw in q for kw in ["boundary", "border", "restricted", "geofence", "imbl", "eez", "mpa"]):
             return Intent.GEOFENCE_CHECK
-        if any(kw in q for kw in ["alert", "cyclone warning", "lightning"]):
+        if any(kw in q for kw in ["alert", "cyclone", "cyclone warning", "lightning"]):
             return Intent.HAZARD_ALERTS
         if any(kw in q for kw in ["safe", "safety", "go fishing", "venture", "risky", "danger"]):
             return Intent.SAFETY_CHECK

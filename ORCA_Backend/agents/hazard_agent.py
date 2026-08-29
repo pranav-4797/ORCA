@@ -82,38 +82,45 @@ class HazardAgent:
         flags: list[HazardFlag] = []
         reasoning: list[str] = []
 
+        wave_m = ocean_state.wave_height_m
+        gust_kmh = ocean_state.wind_gust_kmh
+
         # --- Wave height check ---
-        if ocean_state.wave_height_m > thr["wave_height_unsafe_m"]:
+        if wave_m is not None and wave_m > thr["wave_height_unsafe_m"]:
             flags.append(HazardFlag(
                 label="High wave height",
-                detail=f"{ocean_state.wave_height_m} m forecast",
+                detail=f"{wave_m} m forecast",
                 threshold_crossed=(
                     f"> {thr['wave_height_unsafe_m']} m "
                     f"(unsafe for {vessel_class.replace('_', ' ')})"
                 ),
             ))
-        elif ocean_state.wave_height_m > thr["wave_height_caution_m"]:
+        elif wave_m is not None and wave_m > thr["wave_height_caution_m"]:
             reasoning.append(
-                f"Wave height {ocean_state.wave_height_m} m is moderate "
+                f"Wave height {wave_m} m is moderate "
                 f"(caution range starts at {thr['wave_height_caution_m']} m)"
             )
+        elif wave_m is not None:
+            reasoning.append(f"Wave height {wave_m} m is within normal range")
         else:
-            reasoning.append(f"Wave height {ocean_state.wave_height_m} m is within normal range")
+            reasoning.append("Wave height unavailable (live INCOIS value)")
 
         # --- Wind gust check ---
-        if ocean_state.wind_gust_kmh > thr["wind_gust_unsafe_kmh"]:
+        if gust_kmh is not None and gust_kmh > thr["wind_gust_unsafe_kmh"]:
             flags.append(HazardFlag(
                 label="High wind gusts",
-                detail=f"{ocean_state.wind_gust_kmh} km/h forecast",
+                detail=f"{gust_kmh} km/h forecast",
                 threshold_crossed=f"> {thr['wind_gust_unsafe_kmh']} km/h (unsafe threshold)",
             ))
-        elif ocean_state.wind_gust_kmh > thr["wind_gust_caution_kmh"]:
+        elif gust_kmh is not None and gust_kmh > thr["wind_gust_caution_kmh"]:
             reasoning.append(
-                f"Wind gusts {ocean_state.wind_gust_kmh} km/h are moderate "
+                f"Wind gusts {gust_kmh} km/h are moderate "
                 f"(caution range starts at {thr['wind_gust_caution_kmh']} km/h)"
             )
+        elif gust_kmh is not None:
+            reasoning.append(f"Wind gusts {gust_kmh} km/h are within normal range")
         else:
-            reasoning.append(f"Wind gusts {ocean_state.wind_gust_kmh} km/h are within normal range")
+            reasoning.append("Wind gust unavailable (live INCOIS value)")
 
         # --- Live IMD CAP checks (Tier 1, keyless feed, ONE fetch) ---
         # The same fetched alert list feeds three checks: cyclone/depression,
@@ -188,23 +195,28 @@ class HazardAgent:
                 name = cyclone.get("name") or "unknown"
                 category = cyclone.get("category") or "unknown severity"
                 covering = cyclone.get("areas_covering_location") or []
-                flags.append(HazardFlag(
-                    label="Active cyclone system",
-                    detail=f"{name} ({category}), {cyclone_source_label}",
-                    threshold_crossed="active cyclone/depression CAP warning",
-                ))
-                cyclone_state = "ACTIVE" if covering else "ACTIVE (elsewhere)"
+                # Only flag UNSAFE when the cyclone actually covers this location/route.
                 if covering:
+                    flags.append(HazardFlag(
+                        label="Active cyclone system",
+                        detail=f"{name} ({category}), {cyclone_source_label}",
+                        threshold_crossed="active cyclone/depression CAP warning",
+                    ))
+                    cyclone_state = "ACTIVE"
                     cyclone_note = (
                         f"{cyclone_source_label} has an ACTIVE warning affecting "
                         f"this area: {name} ({category}), zones: "
                         f"{', '.join(covering)}. This forces the verdict to UNSAFE."
                     )
                 else:
+                    cyclone_state = "ACTIVE (elsewhere)"
                     cyclone_note = (
                         f"{cyclone_source_label} shows an ACTIVE warning: {name} "
-                        f"({category}); its zone does not cover this exact point, "
-                        f"but a nearby system still forces the verdict to UNSAFE."
+                        f"({category}); its zone does not cover this exact point. "
+                        f"Noted but not forcing UNSAFE."
+                    )
+                    reasoning.append(
+                        f"Cyclone {name} active elsewhere, not covering this location"
                     )
 
             # -- 2. Marine bulletins (fishermen warnings, squally wind...) --
@@ -218,11 +230,18 @@ class HazardAgent:
             if non_cyclone_marine:
                 _a, info = non_cyclone_marine[-1]
                 label_txt = info["event"] or info["headline"] or "marine advisory"
-                if marine_matched["covering"]:
+                # Only covering from non-cyclone marine matches counts.
+                marine_covering = [c for c in marine_matched["covering"]
+                                   if not any(t in c.lower() for t in imd_cap._CYCLONE_TERMS)]
+                # If covering list is empty due to filtering, re-check non-cyclone matches directly
+                if not marine_covering:
+                    marine_covering = [c for (a, i) in non_cyclone_marine
+                                       for c in imd_cap.match_alerts_by_terms([a], imd_cap._MARINE_TERMS, loc_pair).get("covering", [])]
+                if marine_covering:
                     flags.append(HazardFlag(
                         label="Marine warning in force",
                         detail=f"{label_txt}, zones: "
-                               f"{', '.join(marine_matched['covering'])}",
+                               f"{', '.join(marine_covering)}",
                         threshold_crossed="IMD fishermen/sea-area bulletin active here",
                     ))
                     marine_lines.append(
@@ -272,8 +291,8 @@ class HazardAgent:
         if flags:
             status = SafetyStatus.UNSAFE
             headline = "Not safe to go fishing -- hazardous conditions forecast"
-        elif ocean_state.wave_height_m > thr["wave_height_caution_m"] or \
-                ocean_state.wind_gust_kmh > thr["wind_gust_caution_kmh"]:
+        elif (wave_m is not None and wave_m > thr["wave_height_caution_m"]) or \
+                (gust_kmh is not None and gust_kmh > thr["wind_gust_caution_kmh"]):
             status = SafetyStatus.CAUTION
             headline = "Proceed with caution -- borderline conditions forecast"
         else:
@@ -340,16 +359,20 @@ class HazardAgent:
         # Example: "UNSAFE because significant wave height exceeds the small-boat threshold."
         if risk.status.value == "UNSAFE":
             base = f"UNSAFE: {flags_text}."
-            if ocean_state.wave_height_m > thr['wave_height_unsafe_m']:
+            if ocean_state.wave_height_m is not None and ocean_state.wave_height_m > thr['wave_height_unsafe_m']:
                 base = f"UNSAFE because wave height {ocean_state.wave_height_m} m exceeds the {thr['wave_height_unsafe_m']} m small-boat threshold."
-            elif ocean_state.wind_gust_kmh > thr['wind_gust_unsafe_kmh']:
+            elif ocean_state.wind_gust_kmh is not None and ocean_state.wind_gust_kmh > thr['wind_gust_unsafe_kmh']:
                 base = f"UNSAFE because wind gusts {ocean_state.wind_gust_kmh} km/h exceed the {thr['wind_gust_unsafe_kmh']} km/h threshold."
             else:
                 base = f"UNSAFE: {flags_text}."
         elif risk.status.value == "CAUTION":
-            base = f"CAUTION: wave {ocean_state.wave_height_m} m / gusts {ocean_state.wind_gust_kmh} km/h are borderline (caution thresholds {thr['wave_height_caution_m']} m / {thr['wind_gust_caution_kmh']} km/h)."
+            wave_txt = f"{ocean_state.wave_height_m} m" if ocean_state.wave_height_m is not None else "unavailable"
+            gust_txt = f"{ocean_state.wind_gust_kmh} km/h" if ocean_state.wind_gust_kmh is not None else "unavailable"
+            base = f"CAUTION: wave {wave_txt} / gusts {gust_txt} are borderline (caution thresholds {thr['wave_height_caution_m']} m / {thr['wind_gust_caution_kmh']} km/h)."
         else:
-            base = f"SAFE: wave {ocean_state.wave_height_m} m and gusts {ocean_state.wind_gust_kmh} km/h within safe limits."
+            wave_txt = f"{ocean_state.wave_height_m} m" if ocean_state.wave_height_m is not None else "unavailable"
+            gust_txt = f"{ocean_state.wind_gust_kmh} km/h" if ocean_state.wind_gust_kmh is not None else "unavailable"
+            base = f"SAFE: wave {wave_txt} and gusts {gust_txt} within safe limits."
         if cyclone_note:
             base += f" Cyclone check: {cyclone_note}"
         for m in (marine_lines or []):

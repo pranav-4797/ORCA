@@ -1,7 +1,7 @@
 """
 Satellite-Model Wind Divergence Flag -- ORCA Innovation #4.
 
-    forecast wind (Open-Meteo, existing OceanStateAgent)
+    forecast wind (INCOIS, existing OceanStateAgent)
             +
     satellite-observed wind (data_connectors/satellite_wind.py)
             v

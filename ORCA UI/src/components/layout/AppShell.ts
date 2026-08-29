@@ -22,9 +22,9 @@ export class AppShell {
   private authModal: AuthModal;
   private categoryModal: CategoryModal;
   private mobileBackdrop: HTMLElement;
+  private locationBanner: HTMLElement;
 
-  constructor() {
-    this.element = document.createElement('div');
+  constructor() {    this.element = document.createElement('div');
     this.element.className = 'app-layout';
 
     // Initialize core components
@@ -48,6 +48,13 @@ export class AppShell {
 
     const centerWorkspace = document.createElement('div');
     centerWorkspace.className = 'main-workspace';
+
+    // Location banner (GPS permission denied / fallback notice)
+    this.locationBanner = document.createElement('div');
+    this.locationBanner.className = 'orca-location-banner';
+    this.locationBanner.style.display = 'none';
+    centerWorkspace.appendChild(this.locationBanner);
+
     centerWorkspace.appendChild(this.header.getElement());
 
     // Dual-Pane Maritime Console Stage (Left: Chat, Right: Operations Map & HUD)
@@ -71,11 +78,24 @@ export class AppShell {
     ToastManager.getInstance();
 
     this.attachGlobalEvents();
-    store.subscribe(() => this.updateDrawerBackdrop());
+    store.subscribe(() => {
+      this.updateDrawerBackdrop();
+      this.updateLocationBanner();
+    });
   }
 
   public getElement(): HTMLElement {
     return this.element;
+  }
+
+  private updateLocationBanner(): void {
+    const msg = store.locationBanner;
+    if (msg) {
+      this.locationBanner.textContent = msg;
+      this.locationBanner.style.display = 'block';
+    } else {
+      this.locationBanner.style.display = 'none';
+    }
   }
 
   private updateDrawerBackdrop(): void {

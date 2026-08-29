@@ -32,7 +32,7 @@ class DataSource(str, Enum):
     IMD_LIVE = "imd_live"
     MOSDAC_LIVE = "mosdac_live"
     INCOIS_LIVE = "incois_live"
-    LIVE = "live"  # keyless live feed (Open-Meteo Marine/Weather)
+    LIVE = "live"  # keyless live feed (INCOIS OSF/WW3/Currents)
     TIDE_GAUGE_MODEL = "tide_gauge_model"  # harmonic fit on real UHSLC gauge obs
     DERIVED_LIVE = "derived_from_live_data"  # computed FROM live fields (not invented)
     STATIC_DERIVED = "static_derived"
@@ -154,6 +154,21 @@ class OceanStateReading:
     # Hourly series for charting (/viz endpoints). Keys are metric names,
     # values are {"times": [...], "values": [...]} local ISO strings.
     hourly_series: dict = field(default_factory=dict)
+    # ---- Extra marine fields (official INCOIS), optional so None = unavailable ----
+    # Surface current speed (m/s) — INCOIS OSF Currents layer.
+    surface_current_mps: float | None = None
+    # Primary swell height (m) — INCOIS OSF PHS01 layer.
+    primary_swell_height_m: float | None = None
+    # Wind direction as a compass point ("N".."NW") and degrees (meteorological "from").
+    wind_direction: str | None = None
+    wind_direction_deg: float | None = None
+    # Free-text note about where the reading applies (e.g. nearest marine point).
+    marine_location_note: str | None = None
+    # Why a field/reading is unavailable (degraded-mode disclosure).
+    unavailable_reason: str | None = None
+    # Per-layer INCOIS fetch status for ORCA_DEBUG_INCOIS mode, e.g.
+    # {"SST": "HTTP 200 ✓", "Swell": "HTTP failed ✗"}.
+    debug_incois: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -221,7 +236,7 @@ class PFZRecommendation:
     distance_from_reference_km: float
     bearing_deg: float  # compass bearing from reference point to zone centre
     sst_at_zone_celsius: float
-    chlorophyll_at_zone_mg_m3: float
+    chlorophyll_at_zone_mg_m3: float | None
     source: DataSource
     confidence: float
     reasoning_note: str = ""

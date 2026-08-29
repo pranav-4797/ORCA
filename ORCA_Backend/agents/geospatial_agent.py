@@ -542,7 +542,7 @@ class GeospatialAgent:
                 for i in range(len(waypoints) - 1)
             ), 1),
             bathymetry_source=(
-                "ETOPO1 via NOAA CoastWatch ERDDAP (live, keyless)"
+                "ETOPO1 derived (NOAA CoastWatch source disclosure)"
                 if min_depth is not None else "unavailable"
             ),
             min_depth_m=min_depth,

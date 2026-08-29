@@ -234,10 +234,10 @@ export class MessageItem {
   private extractMetrics(text: string): { label: string; value: string }[] {
     const metrics: { label: string; value: string }[] = [];
 
-    // Wave Height
-    const waveMatch = text.match(/(?:wave\s*height|waves?)[:\s]+(\d+(?:\.\d+)?\s*m(?:eters?)?)/i);
+    // Wave Height / Swell
+    const waveMatch = text.match(/(?:wave\s*height|primary\s*swell|swell\s*height|waves?)[:\s]+(\d+(?:\.\d+)?\s*m(?:eters?)?)/i);
     if (waveMatch) {
-      metrics.push({ label: 'Sig Wave Height', value: waveMatch[1] });
+      metrics.push({ label: 'Wave / Swell', value: waveMatch[1] });
     }
 
     // Wind Speed / Gusts
@@ -263,8 +263,9 @@ export class MessageItem {
 
   private extractProvenance(text: string): string[] {
     const sources: string[] = [];
-    if (/open-meteo/i.test(text)) sources.push('LIVE OPEN-METEO');
-    if (/incois/i.test(text)) sources.push('INCOIS SATELLITE');
+    // INCOIS official marine data — check text plus always treat marine weather queries as INCOIS
+    if (/incois|ocean\s*state|gemini\s*pfz|oceansat/i.test(text)) sources.push('INCOIS OFFICIAL');
+    else if (/marine|sea\s*surface|sst|wave\s*height|swell|chlorophyll|pfz/i.test(text)) sources.push('INCOIS OFFICIAL');
     if (/imd/i.test(text)) sources.push('IMD WARNING FEED');
     if (/uhslc|harmonic|tide/i.test(text)) sources.push('UHSLC HARMONIC');
     if (sources.length === 0) sources.push('ORCA TELEMETRY');

@@ -21,6 +21,14 @@ from .state import (
 
 from models import AgentTrace, Location, QueryContext
 
+# Keywords that classify a query as an OCEAN_STATE / weather intent (Step 1).
+OCEAN_STATE_KEYWORDS = (
+    "weather", "forecast", "marine weather", "ocean state", "sea condition",
+    "wind", "wind speed", "wind gust", "waves", "wave", "wave height",
+    "swell", "sst", "sea surface temperature", "chlorophyll", "tide",
+    "high tide", "low tide", "current", "currents",
+)
+
 class PlanningMixin:
     """Planning-related helpers for Orchestrator."""
 
@@ -54,13 +62,20 @@ class PlanningMixin:
             return Intent.TREND_ANALYSIS
         if any(kw in q for kw in ["which zones", "which regions", "zones to avoid", "where should i fish", "good zones"]):
             return Intent.ZONE_SCAN
+        # Ocean/weather state questions (sea conditions, wind, waves, SST,
+        # chlorophyll, tide) are routed to OceanStateAgent BEFORE the PFZ
+        # check so pure-conditions queries never fall through to fishing zones.
+        if any(kw in q for kw in OCEAN_STATE_KEYWORDS):
+            if any(kw in q for kw in ["fishing zone", "fish zone", "pfz", "where to fish", "where should i fish"]):
+                return Intent.PFZ_LOOKUP
+            return Intent.OCEAN_STATE
         if any(kw in q for kw in ["fishing zone", "fish zone", "pfz", "where to fish"]):
             return Intent.PFZ_LOOKUP
         if any(kw in q for kw in ["route", "navigate", "safest path", "how do i get"]):
             return Intent.ROUTE_PLAN
-        if any(kw in q for kw in ["boundary", "border", "restricted", "geofence", "imbl"]):
+        if any(kw in q for kw in ["boundary", "border", "restricted", "geofence", "imbl", "eez", "mpa"]):
             return Intent.GEOFENCE_CHECK
-        if any(kw in q for kw in ["alert", "cyclone warning", "lightning"]):
+        if any(kw in q for kw in ["alert", "cyclone", "cyclone warning", "lightning"]):
             return Intent.HAZARD_ALERTS
         if any(kw in q for kw in ["safe", "safety", "go fishing", "venture", "risky", "danger"]):
             return Intent.SAFETY_CHECK
@@ -163,13 +178,19 @@ class PlanningMixin:
             except llm_client.LLMUnavailableError:
                 pass
         fallback_intent = (fast_decision.intent if fast_decision is not None else self._route_intent(normalized_query))
+        # Derive needed agents from the intent table so the rule path selects the
+        # right specialist (e.g. OceanStateAgent for weather) even when the fast
+        # router returned none (Step 3 — never fall through to PFZ for conditions).
+        fallback_agents = INTENT_DEFAULT_AGENTS.get(fallback_intent) or []
+        if not fallback_agents and fast_decision is not None:
+            fallback_agents = list(fast_decision.agents or [])
         plan = {
             "intent": fallback_intent,
             "location_name": self._extract_place_name(normalized_query),
             "time_window": self._extract_time_window(normalized_query),
             "target_hour": self._extract_target_hour(normalized_query),
             "months_back": 6 if "trend" in normalized_query.lower() or "declined" in normalized_query.lower() else None,
-            "agents_needed": (fast_decision.agents if fast_decision is not None else []),
+            "agents_needed": fallback_agents,
             "why": "[rules] Rule-based keyword parsing used (fast router uncertain, LLM unavailable).",
             "duration_ms": (time.perf_counter() - start) * 1000,
             "routing_mode": "rules",
@@ -265,7 +286,20 @@ class PlanningMixin:
             Location(**prior.destination) if (prior and prior.destination) else None
         )
         loc_name = str(plan.get("location_name") or "").strip().lower()
-        is_my_location_query = any(k in normalized_query.lower() for k in ("where am i", "my location", "my position", "current position", "here", "around me", "where i am"))
+        is_my_location_query = any(k in normalized_query.lower() for k in (
+            "where am i", "my location", "my position", "current position",
+            "here", "around me", "where i am", "near me", "nearby"))
+
+        import logging as _logging
+        _glog = _logging.getLogger("orca.orchestrator")
+        if device_gps:
+            _glog.info(
+                "GPS acquired: %.4f,%.4f | Using GPS coordinates%s",
+                device_gps[0], device_gps[1],
+                f" for '{loc_name or 'current position'}'" if is_my_location_query else "",
+            )
+        else:
+            _glog.info("GPS unavailable — falling back to selected location")
 
         if (loc_name in ("", "unknown", "same", "here", "there", "current", "my location", "where am i") or is_my_location_query) and device_gps:
             try:
@@ -278,6 +312,26 @@ class PlanningMixin:
                 plan["location_name"] = location.name
         else:
             location = resolve_location(plan["location_name"])
+            if location is None:
+                # If chat location failed but GPS is available, use GPS as fallback (per priority)
+                if device_gps:
+                    try:
+                        import data_connectors.geocode as geocode
+                        resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
+                        location = Location(name=f"Current Position ({resolved_name})", lat=device_gps[0], lon=device_gps[1])
+                        plan["location_name"] = location.name
+                        _glog.info("Geocode failed for '%s' — falling back to GPS %.4f,%.4f", plan.get("location_name"), device_gps[0], device_gps[1])
+                    except Exception:
+                        location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
+                        plan["location_name"] = location.name
+                else:
+                    ask_msg = "I couldn't determine your location. Please enable GPS or tell me a coastal location such as Ratnagiri, Veraval, Kochi, or coordinates."
+                    _glog.warning("Location unresolved — asking user for location")
+                    plan["needs_location"] = True
+                    plan["ask_message"] = ask_msg
+                    # Dummy sentinel to keep context valid; response will intercept needs_location
+                    from models import Location as _Loc
+                    location = _Loc(name="ASK_LOCATION", lat=0, lon=0)
 
         from models import QueryContext
         context = QueryContext(

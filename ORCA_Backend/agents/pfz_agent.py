@@ -53,7 +53,7 @@ from models import (
 )
 _ENABLE_LLM_NOTE = os.getenv("ORCA_ENABLE_LLM_REASONING", "").strip().lower() in ("1", "true", "yes")
 
-_MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
+_MARINE_URL = "https://incois.gov.in/thredds/wms/osf/winds/SST_NIO"  # INCOIS SST (Open-Meteo removed)
 _HTTP_TIMEOUT_S = 10.0
 
 # Maximum distance (km) between the query point and the nearest INCOIS landing
@@ -357,10 +357,15 @@ class PFZAgent:
             )
             return self._seeded_fallback_zone(location, ocean_state), False
 
-        center_sst = samples[0]["sst"]
-        # Strongest gradient point = max |SST difference| vs the centre.
-        ranked = sorted(samples[1:], key=lambda s: abs(s["sst"] - center_sst),
-                        reverse=True)
+        # Find centre sample by coordinate match, not position 0 (as_completed order is random).
+        centre = next((s for s in samples if abs(s["lat"] - location.lat) < 1e-6 and abs(s["lon"] - location.lon) < 1e-6), None)
+        if centre is None:
+            centre = samples[0]
+        center_sst = centre["sst"]
+        ring = [s for s in samples if s is not centre]
+        ranked = sorted(ring, key=lambda s: abs(s["sst"] - center_sst), reverse=True)
+        if not ranked:
+            return self._seeded_fallback_zone(location, ocean_state), False
         best = ranked[0]
 
         # Region scan (P1 #12): rank secondary zones by thermal gradient,
@@ -412,7 +417,7 @@ class PFZAgent:
             distance_from_reference_km=round(dist, 1),
             bearing_deg=round(bear, 1),
             sst_at_zone_celsius=round(best["sst"], 2),
-            chlorophyll_at_zone_mg_m3=chl if chl is not None else 0.0,
+            chlorophyll_at_zone_mg_m3=chl if chl is not None else None,
             source=DataSource.DERIVED_LIVE,
             confidence=0.65,
             field_sources={
@@ -424,7 +429,10 @@ class PFZAgent:
         ), derived_live
 
     def _sample_sst_ring(self, location: Location) -> list[dict]:
-        """Live SST at the centre + ring points, one batched API call."""
+        """Live INCOIS SST at centre + ring points via WMS GetFeatureInfo."""
+        from datetime import datetime, timezone
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import data_connectors.incois_marine as im
         lats, lons = [location.lat], [location.lon]
         for r in _SAMPLE_RINGS_KM:
             for bearing in range(0, 360, 45):
@@ -433,39 +441,28 @@ class PFZAgent:
                 dlon = (r / (111.0 * max(math.cos(math.radians(location.lat)), 0.2))) * math.sin(rad)
                 lats.append(location.lat + dlat)
                 lons.append(location.lon + dlon)
-
-        params = urllib.parse.urlencode({
-            "latitude": ",".join(f"{v:.4f}" for v in lats),
-            "longitude": ",".join(f"{v:.4f}" for v in lons),
-            "hourly": "sea_surface_temperature",
-            "forecast_days": 1,
-            "timezone": "auto",
-        })
-        url = f"{_MARINE_URL}?{params}"
-        req = urllib.request.Request(url, headers={"User-Agent": "orca-backend/0.1"})
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-
-        results = payload if isinstance(payload, list) else [payload]
-        if len(results) != len(lats):
-            raise ValueError(f"expected {len(lats)} sample points, got {len(results)}")
-
+        ft = datetime.now(timezone.utc)
         out: list[dict] = []
-        for i, res in enumerate(results):
-            series = res["hourly"]["sea_surface_temperature"]
-            idx = min(range(len(series)),
-                      key=lambda k: (series[k] is None, k))
-            if series[idx] is None:
-                continue  # land/coastal cell -- skip, don't kill the sampling
-            out.append({"lat": lats[i], "lon": lons[i], "sst": float(series[idx])})
-        # Centre (index 0) must be valid as the gradient baseline, and we
-        # need a usable ring around it.
-        if not out or out[0]["lat"] != lats[0]:
-            raise ValueError("no live SST at reference point")
-        if len(out) < len(lats) * 0.6:
-            raise ValueError(
-                f"only {len(out) - 1}/{len(lats) - 1} ring samples had live SST"
-            )
+        def fetch_one(i):
+            try:
+                snap = im.get_marine_snapshot(lats[i], lons[i], ft)
+                sst = snap.get("sst")
+                if sst is not None:
+                    return {"lat": lats[i], "lon": lons[i], "sst": float(sst)}
+            except Exception:
+                pass
+            return None
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futs = {pool.submit(fetch_one, i): i for i in range(len(lats))}
+            for f in as_completed(futs):
+                r = f.result()
+                if r:
+                    out.append(r)
+        # Ensure centre present
+        if not any(abs(o["lat"]-lats[0])<1e-6 and abs(o["lon"]-lons[0])<1e-6 for o in out):
+            raise ValueError("no live INCOIS SST at reference point")
+        if len(out) < len(lats) * 0.5:
+            raise ValueError(f"only {len(out)-1}/{len(lats)-1} INCOIS SST samples had data")
         return out
 
     def _seeded_fallback_zone(

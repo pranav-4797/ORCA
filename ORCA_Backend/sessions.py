@@ -36,6 +36,7 @@ class SessionContext:
     target_hour: Optional[int] = None
     language: str = "en"
     device_gps: Optional[tuple] = None
+    map_point: Optional[tuple] = None
     destination: Optional[dict] = None          # {"lat","lon","name"}
     last_intent: str = ""
     last_query: str = ""

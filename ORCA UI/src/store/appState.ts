@@ -72,6 +72,20 @@ class AppStore {
   public backendOnline: boolean | null = null; // null = probing
   public backendUrl: string = BACKEND_URL;
 
+  // Device GPS / location (user's real position). gpsStatus:
+  //   'granted'  -> live browser GPS captured
+  //   'denied'   -> permission denied (banner shown)
+  //   'cached'   -> using a previously saved position
+  //   'none'     -> no location yet (Panaji last-resort on the backend)
+  public gpsCoords: [number, number] | null = null;
+  public gpsStatus: 'granted' | 'denied' | 'cached' | 'none' = 'none';
+  public locationBanner: string | null = null;
+
+  // Explicit map-tap coordinate selection (Part A2). The user tapped a
+  // coastal/offshore point on the map; it is the highest-priority location
+  // and overrides GPS / typed / PFZ coordinates. Never snapped.
+  public mapPoint: [number, number] | null = null;
+
   // Operational picture: /viz payloads for the last answered query.
   public vizGeojson: any = null;
   public vizSeries: OrcaVizSeries | null = null;
@@ -154,6 +168,7 @@ class AppStore {
 
   private constructor() {
     this.loadFromStorage();
+    this.preloadLocation();
     this.probeBackend();
 
     // Listen for Firebase Auth state changes & sync Firestore
@@ -403,6 +418,67 @@ class AppStore {
   public setDirectAgent(key: string): void {
     this.directAgentKey = key;
     this.notify();
+  }
+
+  /** Record the user's live GPS (or denial) so the map, banner and queries use
+   * the real location instead of the Panaji default.
+   * A live 'granted' fix is authoritative: it overwrites any stale stored
+   * position so a previously-saved city can never outrank where you actually are. */
+  public setGps(
+    coords: [number, number] | null,
+    status: 'granted' | 'denied' | 'cached' | 'none' = coords ? 'granted' : 'none',
+  ): void {
+    this.gpsCoords = coords;
+    this.gpsStatus = status;
+    if (status === 'denied' && !coords) {
+      this.locationBanner =
+        'Location permission denied. Using selected location.';
+    } else if (status === 'granted' && coords) {
+      // Live fix wins over any stored value -- persist only this and clear
+      // stale demo keys so we never come back to an old city.
+      this.locationBanner = null;
+      try {
+        localStorage.setItem('orca_device_gps', JSON.stringify(coords));
+        localStorage.setItem('orca_device_gps_ts', String(Date.now()));
+        localStorage.removeItem('orca_demo_gps');
+      } catch { /* storage unavailable */ }
+    } else if (coords) {
+      this.locationBanner = null;
+    }
+    this.notify();
+  }
+
+  /** Source of truth for the current location: device GPS -> stored position. */
+  public currentLocation(): [number, number] | null {
+    return this.gpsCoords;
+  }
+
+  /** Record an explicit map-tap coordinate selection. This is the highest
+   * priority location for the next query and is sent to the backend as
+   * `map_point` (a distinct field from GPS — it must never be snapped). */
+  public setMapPoint(coords: [number, number] | null): void {
+    this.mapPoint = coords;
+    this.notify();
+  }
+
+  /** Restore a previously saved GPS position so we never start on Panaji.
+   * Only restores if fresh (<5 min) — stale Pune from an old session is cleared. */
+  private preloadLocation(): void {
+    try {
+      const raw = localStorage.getItem('orca_device_gps');
+      const ts = Number(localStorage.getItem('orca_device_gps_ts') || 0);
+      if (raw && ts && Date.now() - ts < 300000) {
+        const v = JSON.parse(raw);
+        if (Array.isArray(v) && v.length >= 2) {
+          this.gpsCoords = [Number(v[0]), Number(v[1])];
+          this.gpsStatus = 'cached';
+        }
+      } else if (raw && !ts) {
+        // Legacy stale entry — clear Pune ghost
+        localStorage.removeItem('orca_device_gps');
+        localStorage.removeItem('orca_demo_gps');
+      }
+    } catch { /* no stored position */ }
   }
 
   /** Pull the operational picture (map GeoJSON + hourly series) for the
@@ -846,6 +922,7 @@ class AppStore {
         userCategory: this.userCategory?.category || 'fisherman',
         fleetDemoLevel: (OrcaApiService as any).getFleetDemoLevel ? (OrcaApiService as any).getFleetDemoLevel() : null,
         windDemoScenario: (OrcaApiService as any).getWindDemoScenario ? (OrcaApiService as any).getWindDemoScenario() : null,
+        mapPoint: this.mapPoint,
         voiceBlob: voice?.blob,
         speakReply: Boolean(voice),
         abortSignal: this.currentAbortController.signal,

@@ -93,6 +93,10 @@ class QueryRequest(BaseModel):
     session_id: str | None = None
     # Optional live inputs from the client's own device (Tier 1 data).
     device_gps: list[float] | None = None            # [lat, lon]
+    # Explicit map-tap coordinate selection (Part A2) — highest priority and
+    # never snapped; distinct from device_gps so GPS is only auto-used for
+    # "near me" queries.
+    map_point: list[float] | None = None             # [lat, lon]
     destination: dict | None = None                  # {"lat": .., "lon": .., "name": optional}
     # "auto"  -> fast intelligent routing, only needed specialists, no round-table unless complex (default).
     # "panel" -> full pipeline: specialists run, hold a round-table discussion, then reconcile (demo).
@@ -214,6 +218,11 @@ def query(request: QueryRequest):
         if request.device_gps and len(request.device_gps) >= 2
         else None
     )
+    map_point = (
+        tuple(float(x) for x in request.map_point[:2])
+        if request.map_point and len(request.map_point) >= 2
+        else None
+    )
     session_id = request.session_id or orchestrator_new_session()
 
     # Short-TTL cache of identical repeat requests (UI retries / double
@@ -223,7 +232,7 @@ def query(request: QueryRequest):
     _ttl = int(_os.getenv("ORCA_RESPONSE_CACHE_TTL_S", "60").strip() or 60)
     cache_key_src = "|".join([
         request.query.strip().lower(), request.mode, request.agent or "",
-        request.vessel_class or "", str(device_gps), str(destination),
+        request.vessel_class or "", str(device_gps), str(map_point), str(destination),
         session_id, request.query_depth or "", request.fleet_demo_level or "",
         request.wind_demo_scenario or "",
     ])
@@ -238,6 +247,7 @@ def query(request: QueryRequest):
         request.query,
         session_id,
         device_gps=device_gps,
+        map_point=map_point,
         destination=destination,
         mode=request.mode,
         target_agent=request.agent,
@@ -265,6 +275,8 @@ async def query_voice(
     session_id: str | None = Form(default=None),
     mode: str = Form(default="panel"),
     agent: str | None = Form(default=None),
+    device_gps: str | None = Form(default=None),
+    map_point: str | None = Form(default=None),
 ):
     """Voice query path (PS Sec 17): uploaded mic audio -> hosted Whisper STT
     -> the exact same multi-agent graph -> JSON answer (client speaks it)."""
@@ -280,7 +292,23 @@ async def query_voice(
         raise HTTPException(503, f"Speech-to-text unavailable: {exc}")
 
     sid = session_id or orchestrator_new_session()
-    response = orchestrator.handle_query(transcript, sid, mode=mode, target_agent=agent)
+
+    def _pair(s: str | None):
+        if not s:
+            return None
+        parts = s.split(",")
+        if len(parts) >= 2:
+            try:
+                return (float(parts[0]), float(parts[1]))
+            except ValueError:
+                return None
+        return None
+
+    response = await asyncio.to_thread(
+        orchestrator.handle_query,
+        transcript, sid, mode=mode, target_agent=agent,
+        device_gps=_pair(device_gps), map_point=_pair(map_point),
+    )
     _last_responses[sid] = response
     payload = _serialize(response)
     if isinstance(payload, dict):
@@ -591,7 +619,26 @@ def viz_series(session_id: str):
     if resp is None:
         raise HTTPException(404, "no response stored for this session")
     o = getattr(resp, "ocean_state", None)
-    series = getattr(o, "hourly_series", {}) if o else {}
+    raw_series = getattr(o, "hourly_series", {}) if o else {}
+    # Normalize to flat frontend shape {times, wave_height_m, wind_gust_kmh}
+    if raw_series and "times" in raw_series:
+        series = raw_series
+    elif raw_series:
+        # Per-metric dict {metric: {times, values}} -> flat
+        flat_times = None
+        flat_wave: list = []
+        flat_gust: list = []
+        for k, v in raw_series.items():
+            if isinstance(v, dict) and "times" in v:
+                if flat_times is None:
+                    flat_times = v["times"]
+                if "wave" in k.lower():
+                    flat_wave = v.get("values", [])
+                if "gust" in k.lower() or "wind" in k.lower():
+                    flat_gust = v.get("values", [])
+        series = {"times": flat_times or [], "wave_height_m": flat_wave, "wind_gust_kmh": flat_gust} if flat_times else raw_series
+    else:
+        series = raw_series
     windows = [
         {
             "metric": w.metric, "threshold": w.threshold, "unit": w.unit,
@@ -919,7 +966,7 @@ def satellite_wind_divergence(lat: float, lon: float, forecast_wind_kmh: float |
                                demo_scenario: str | None = None):
     """Standalone divergence check/demo trigger without running a full /query.
 
-    If forecast_wind_kmh is omitted, the live Open-Meteo forecast is fetched
+    If forecast_wind_kmh is omitted, the live INCOIS forecast is fetched
     for the point (same OceanStateAgent path used by /query).
     """
     import wind_divergence as wd

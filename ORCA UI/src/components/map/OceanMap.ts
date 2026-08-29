@@ -21,9 +21,13 @@ export class OceanMap {
   private element: HTMLElement;
   private map: L.Map | null = null;
   private layer: L.FeatureGroup | null = null;
+  private userLayer: L.FeatureGroup | null = null;
+  private mapPointLayer: L.FeatureGroup | null = null;
+  private lastMapPoint: [number, number] | null = null;
   private lastGeojson: any = null;
   private lastPfzToken: string = '';
   private queryPoint: { lat: number; lon: number } | null = null;
+  private lastUserPos: [number, number] | null = null;
 
   private readonly COLORS: Record<string, { color: string; fill: string }> = {
     query_point: { color: '#38bdf8', fill: '#38bdf8' },
@@ -33,7 +37,7 @@ export class OceanMap {
     fleet_candidate: { color: '#f59e0b', fill: '#f59e0b' },
     fleet_change: { color: '#a855f7', fill: '#a855f7' },
     pfz_landing: { color: '#e879f9', fill: '#e879f9' },
-    pfz_line: { color: '#facc15', fill: 'none' },
+    pfz_line: { color: '#00E5FF', fill: 'none' },
     landing_centre: { color: '#64748b', fill: '#64748b' },
     landing_centre_issued: { color: '#f472b6', fill: '#f472b6' },
     wind_divergence: { color: '#ef4444', fill: '#ef4444' },
@@ -103,19 +107,31 @@ export class OceanMap {
     const pfzToken =
       `${store.pfzLive?.fetched_at ?? ''}|${store.pfzLive?.forecast_date ?? ''}`;
 
+    this.syncUserMarker();
+    this.syncMapPointMarker();
+
+    const liveFix = store.gpsStatus === 'granted' ? store.gpsCoords : null;
+    const hereLabel = liveFix
+      ? `YOU ARE HERE ${liveFix[0].toFixed(4)}, ${liveFix[1].toFixed(4)}`
+      : null;
+
     if ((!geojson || !geojson.features || geojson.features.length === 0) &&
         !store.pfzLive) {
-      if (statusEl) statusEl.textContent = store.vizSessionId ? 'NO MAP DATA' : 'ASK A QUESTION';
+      if (statusEl) statusEl.textContent = hereLabel
+        ? hereLabel
+        : store.vizSessionId ? 'NO MAP DATA' : 'ASK A QUESTION';
       return;
     }
     if (geojson === this.lastGeojson && pfzToken === this.lastPfzToken) {
       // Same data, but the panel may have re-parented us -- resize only.
       this.map?.invalidateSize();
+      if (statusEl && hereLabel) statusEl.textContent = hereLabel;
       return;
     }
     this.lastGeojson = geojson;
     this.lastPfzToken = pfzToken;
     if (statusEl) statusEl.textContent =
+      (hereLabel ? hereLabel + ' · ' : '') +
       `${geojson?.session_id?.slice(0, 8) ?? ''}${store.pfzLive ? ' · PFZ ' + (store.pfzLive.valid_upto || 'live') : ''}`;
     this.renderFeatures(geojson);
     this.renderLegend(geojson);
@@ -130,9 +146,14 @@ export class OceanMap {
     const canvas = this.element.querySelector('#ocean-map-canvas') as HTMLElement | null;
     if (!canvas || !canvas.isConnected) return; // not mounted yet
 
+    // Prefer a live granted GPS fix as the initial centre; a stored position
+    // is only a query fallback and must NOT move the map to an old city.
+    const liveFix = store.gpsStatus === 'granted' ? store.gpsCoords : null;
+    const center: [number, number] = liveFix ? [liveFix[0], liveFix[1]] : [16.0, 74.5];
+
     this.map = L.map(canvas, {
-      center: [16.0, 74.5],          // Indian west-coast default until data arrives
-      zoom: 7,
+      center,                          // user GPS when granted, else default
+      zoom: liveFix ? 9 : 7,
       zoomControl: true,
       attributionControl: false,
       scrollWheelZoom: false,        // panel scrolls; enable on click
@@ -146,6 +167,174 @@ export class OceanMap {
     }).addTo(this.map);
 
     this.layer = L.featureGroup().addTo(this.map);
+    this.userLayer = L.featureGroup().addTo(this.map);
+    this.syncUserMarker();
+    this.bindMapTap();
+  }
+
+  /** Map-tap coordinate selection (Part A2): clicking anywhere on the sea
+   * records that exact point as the highest-priority location for the next
+   * query. A marker + popup shows the coordinates; clicking "Use this point"
+   * commits it to the store so it is sent as `map_point` (never snapped). */
+  private bindMapTap(): void {
+    if (!this.map) return;
+    let selectionLayer: L.FeatureGroup | null = null;
+    let selectionMarker: L.Marker | null = null;
+
+    const popupHtml = (lat: number, lon: number) =>
+      `<div style="max-width:260px;">
+         <b>Selected point</b><br>
+         <span style="font-size:11px;">${this.coordLabel(lat, lon)}</span><br><br>
+         <button id="orca-commit-map-point" data-lat="${lat}" data-lon="${lon}"
+           style="padding:6px 12px;border-radius:6px;border:1px solid #0e7c86;
+                  background:#0e7c86;color:#fff;cursor:pointer;font-size:12px;">
+           ✓ Use this point
+         </button>
+         <span style="font-size:11px;color:var(--text-tertiary);display:block;margin-top:6px;">
+           Drag the marker to fine-tune before choosing.
+         </span>
+       </div>`;
+
+    const wireButton = () => {
+      // Attach directly to the popup DOM after it is inserted (inline
+      // <script> tags are stripped by Leaflet, so bind here instead).
+      const btn: HTMLButtonElement | null = document.querySelector(
+        '#orca-commit-map-point',
+      );
+      if (!btn) return;
+      btn.onclick = () => {
+        const lat = Number(btn.getAttribute('data-lat'));
+        const lon = Number(btn.getAttribute('data-lon'));
+        store.setMapPoint([lat, lon]);
+      };
+    };
+
+    this.map.on('click', (e: L.LeafletMouseEvent) => {
+      if (e.originalEvent.defaultPrevented) return;
+      const { lat, lng } = e.latlng;
+      if (selectionLayer) selectionLayer.clearLayers();
+      selectionLayer = selectionLayer || L.featureGroup().addTo(this.map!);
+      selectionMarker = L.marker([lat, lng], {
+        draggable: true,
+        zIndexOffset: 2000,
+      }).addTo(selectionLayer);
+      selectionMarker.bindPopup(popupHtml(lat, lng), { autoPan: true });
+      selectionMarker.on('dragend', () => {
+        if (!selectionMarker) return;
+        const p = selectionMarker.getLatLng();
+        const el = selectionMarker.getPopup();
+        if (el) {
+          el.setContent(popupHtml(p.lat, p.lng));
+          el.update();
+        }
+        wireButton();
+      });
+      selectionMarker.on('popupopen', wireButton);
+      selectionMarker.openPopup();
+    });
+    // Show a short-lived "committed" note whenever mapPoint updates.
+    this.onMapPointCommitted();
+  }
+
+  /** Announces a successful map-point commit (after store.setMapPoint) in a
+   * lightweight toast-style overlay so the operator is not left guessing. */
+  private onMapPointCommitted(): void {
+    const prev = new WeakSet();
+    let last = store.mapPoint;
+    const unsubscribe = store.subscribe(() => {
+      if (store.mapPoint && store.mapPoint !== last) {
+        last = store.mapPoint;
+        const [lat, lon] = store.mapPoint;
+        const el = document.createElement('div');
+        el.textContent = `📍 Point locked: ${lat.toFixed(4)}°, ${lon.toFixed(4)}° — will be used for your next query`;
+        el.style.cssText =
+          `position:absolute;bottom:14px;left:50%;transform:translateX(-50%);z-index:4000;` +
+          `background:rgba(14,124,134,0.95);color:#fff;padding:8px 14px;border-radius:8px;` +
+          `font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.35);max-width:90%;`;
+        this.element.appendChild(el);
+        setTimeout(() => el.remove(), 3500);
+      }
+    });
+    this._mapPointCleanup = unsubscribe;
+  }
+  private _mapPointCleanup: (() => void) | null = null;
+
+  /** Blue "You are here" marker at the user's live GPS position. Centres the
+   * view the first time a real position arrives. Kept separate from the PFZ
+   * layer so overlays never erase it. */
+  private syncUserMarker(): void {
+    if (!this.map || !this.userLayer) return;
+    const gps = store.gpsCoords;
+    // Only draw the "You are here" marker for a live granted fix. A stored/
+    // cached position (e.g. an old session's city) is a query fallback, not
+    // proof of where the user actually is right now.
+    if (!gps || store.gpsStatus !== 'granted') return;
+
+    const posChanged = !this.lastUserPos || this.lastUserPos[0] !== gps[0] ||
+      this.lastUserPos[1] !== gps[1];
+    if (!posChanged) return;
+
+    this.lastUserPos = [gps[0], gps[1]];
+    this.userLayer.clearLayers();
+
+    const icon = L.divIcon({
+      className: 'orca-you-are-here',
+      html: `<div style="position:relative;width:18px;height:18px;">
+               <div style="position:absolute;inset:0;background:rgba(59,130,246,0.25);
+                            border-radius:50%;transform:scale(2.4);"></div>
+               <div style="position:absolute;inset:3px;background:#3b82f6;border:2px solid #fff;
+                            border-radius:50%;box-shadow:0 0 6px rgba(59,130,246,0.9);"></div>
+             </div>`,
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
+    this.userLayer.addLayer(
+      L.marker([gps[0], gps[1]], { icon, zIndexOffset: 1000 })
+        .bindPopup(`<b>You are here</b><br>${gps[0].toFixed(4)}, ${gps[1].toFixed(4)}`),
+    );
+    // Centre on the user only when nothing is pinned yet (first fix).
+    if (store.vizGeojson?.features?.length === 0) {
+      this.map.setView([gps[0], gps[1]], this.map.getZoom() >= 9 ? this.map.getZoom() : 9);
+    }
+  }
+
+  /** Persistent marker for the committed map-tap point (`store.mapPoint`).
+   * Drawn so a previously-selected offshore point stays visible until the
+   * next tap. Red, distinct from the blue "You are here" GPS dot. */
+  private syncMapPointMarker(): void {
+    if (!this.map) return;
+    if (!this.mapPointLayer) {
+      this.mapPointLayer = L.featureGroup().addTo(this.map);
+    }
+    const mp = store.mapPoint;
+    const same = this.lastMapPoint && mp &&
+      this.lastMapPoint[0] === mp[0] && this.lastMapPoint[1] === mp[1];
+    if (same) return;
+    this.lastMapPoint = mp ? [mp[0], mp[1]] : null;
+    this.mapPointLayer.clearLayers();
+    if (!mp) return;
+    const [lat, lon] = mp;
+    const icon = L.divIcon({
+      className: 'orca-map-point',
+      html: `<div style="position:relative;width:22px;height:22px;">
+               <div style="position:absolute;inset:0;background:rgba(239,68,68,0.25);
+                            border-radius:50%;transform:scale(2.2);"></div>
+               <div style="position:absolute;inset:3px;background:#ef4444;border:2px solid #fff;
+                            border-radius:50%;box-shadow:0 0 6px rgba(239,68,68,0.9);"></div>
+             </div>`,
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    });
+    this.mapPointLayer.addLayer(
+      L.marker([lat, lon], { icon, zIndexOffset: 1500 })
+        .bindPopup(
+          `<div style="max-width:220px;"><b>📍 Selected point</b><br>` +
+          `<span style="font-size:11px;">${this.coordLabel(lat, lon)}</span><br>` +
+          `<span style="font-size:11px;color:var(--text-tertiary);">This location is used for your next query.</span></div>`,
+        )
+        .openPopup(),
+    );
+    this.map.setView([lat, lon], Math.max(this.map.getZoom(), 9));
   }
 
   private renderFeatures(geojson: any): void {
@@ -284,10 +473,11 @@ export class OceanMap {
         );
         shape = L.polyline(latlngs, {
           color: isImbl ? '#f87171' : c.color,
-          weight: isPfzLine ? 1.5 : isImbl ? 2.5 : 3,
-          dashArray: isPfzLine ? '3 5' : isImbl ? '8 6' : '6 6',
-          opacity: isImbl ? 0.9 : isPfzLine ? 0.85 : 0.85,
+          weight: isPfzLine ? 4 : isImbl ? 2.5 : 3,
+          dashArray: isPfzLine ? undefined : isImbl ? '8 6' : '6 6',
+          opacity: isPfzLine ? 1 : isImbl ? 0.9 : 0.85,
         });
+        if (isPfzLine) (shape as any).setStyle?.({ pane: 'overlayPane' });
       } else if (geom.type === 'Polygon') {
         const rings = (geom.coordinates as [number, number][][]).map((ring) =>
           ring.map(([lon, lat]) => [lat, lon] as [number, number]),

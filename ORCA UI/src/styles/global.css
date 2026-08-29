@@ -143,3 +143,18 @@ input, textarea, select {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---- User location banner (GPS permission / fallback) ---- */
+.orca-location-banner {
+  position: relative;
+  z-index: 40;
+  padding: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #b45309;
+  background: #fffbeb;
+  border-bottom: 1px solid #fcd34d;
+  text-align: center;
+}
+

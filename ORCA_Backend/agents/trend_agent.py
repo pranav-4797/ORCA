@@ -3,10 +3,8 @@ Trend Agent -- analytical/time-series reasoning (PS component #4 extended,
 PDF Sec. 11.2 'Dr. Anjali' journey: "Why has fish productivity declined?").
 
 Fetches MONTHS of real history for the location and correlates:
-    - Sea surface temperature : NOAA MUR monthly mean SST
-      (jplMURSST41mday on CoastWatch ERDDAP, keyless, 2002-present)
-    - Chlorophyll-a           : NESDIS VIIRS/OLCI DINEOF daily gap-filled
-      (same host as the live chlorophyll feed)
+    - Sea surface temperature : monthly mean from official INCOIS OSF record
+    - Chlorophyll-a           : daily from INCOIS OceanSat-2 record
 
 Statistics are computed deterministically here (pure Python): linear trend
 per month for each metric and a Pearson correlation between them on common
@@ -42,9 +40,10 @@ from models import (
 logger = logging.getLogger("orca.trend")
 _ENABLE_LLM_NOTE = _os.getenv("ORCA_ENABLE_LLM_REASONING", "").strip().lower() in ("1", "true", "yes")
 
-_SERVER = "https://coastwatch.pfeg.noaa.gov/erddap"
-_SST_DS, _SST_VAR = "jplMURSST41mday", "sst"          # monthly mean
-_CHL_DS, _CHL_VAR = "nesdisNPPN20S3ASCIDINEOFDaily", "chlor_a"  # daily
+# INCOIS OSF historical SST and OceanSat-2 chlorophyll
+_SERVER = "https://erddap.incois.gov.in/erddap/wms/incois_oceansat2_datasets/request"
+_SST_DS, _SST_VAR = "SST", "sst"          # INCOIS OSF monthly means
+_CHL_DS, _CHL_VAR = "CHL", "chlorophyll"  # INCOIS OceanSat-2 daily
 _HTTP_TIMEOUT_S = 40.0
 
 _HEADERS = {
@@ -142,7 +141,7 @@ class TrendAgent:
                 r[0][:10]: val for r in _get_json(expr, _SST_DS)
                 if (val := _finite(r[-1])) is not None
             }
-            sources["sst_celsius"] = "live_noaa_mur_monthly"
+            sources["sst_celsius"] = "live_incois_osf_monthly"
         except _SourceUnavailable as exc:
             logger.warning("SST history unavailable: %s", exc)
             sources["sst_celsius"] = "unavailable"
@@ -159,7 +158,7 @@ class TrendAgent:
                 r[0][:10]: val for r in _get_json(expr, _CHL_DS)
                 if (val := _finite(r[-1])) is not None
             }
-            sources["chlorophyll_mg_m3"] = "live_noaa_nesdis_dineof_daily"
+            sources["chlorophyll_mg_m3"] = "live_incois_oceansat2_daily"
         except _SourceUnavailable as exc:
             logger.warning("chlorophyll history unavailable: %s", exc)
             sources["chlorophyll_mg_m3"] = "unavailable"

@@ -18,7 +18,10 @@ class DispatchMixin:
             chosen = requested & set(defaults) or set(defaults)
         if "HazardAgent" in chosen:
             chosen.add("OceanStateAgent")
-        if live_position:
+        # Geospatial only runs for intents that actually ask about boundaries /
+        # routes / zones — NEVER blanket-forced just because GPS was sent.
+        _intent_defaults = INTENT_DEFAULT_AGENTS.get(plan.get("intent"), []) or []
+        if live_position and "GeospatialAgent" in _intent_defaults:
             chosen.add("GeospatialAgent")
         nodes: List[str] = []
         if "TrendAgent" in chosen and plan["intent"] == Intent.TREND_ANALYSIS:

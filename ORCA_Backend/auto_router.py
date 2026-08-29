@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 INTENT_DEFAULT_AGENTS = {
     "safety_check": ["OceanStateAgent", "HazardAgent", "GeospatialAgent"],
+    "ocean_state": ["OceanStateAgent"],
     "pfz_lookup": ["PFZAgent", "OceanStateAgent", "GeospatialAgent"],
     "route_plan": ["GeospatialAgent", "OceanStateAgent", "HazardAgent"],
     "geofence_check": ["GeospatialAgent"],
@@ -42,6 +43,13 @@ INTENT_KEYWORDS = {
         r"over the last", r"productivity", r"correlation", r"correlate",
         r"sst.*changed", r"chlorophyll.*changed", r"months", r"years.*change",
     ],
+    "ocean_state": [
+        r"\bweather\b", r"\bforecast\b", r"marine weather", r"ocean state",
+        r"sea condition", r"\bwind\b", r"wind speed", r"wind gust",
+        r"\bwaves?\b", r"wave height", r"\bswell\b", r"\bsst\b",
+        r"sea surface temperature", r"chlorophyll", r"\btide\b",
+        r"high tide", r"low tide", r"\bcurrents?\b",
+    ],
     "zone_scan": [
         r"which zones", r"which regions", r"zones to avoid", r"where should i fish",
         r"good zones", r"avoid.*zone", r"seek.*zone", r"rank.*zone",
@@ -52,7 +60,7 @@ INTENT_KEYWORDS = {
     ],
     "geofence_check": [
         r"boundary", r"border", r"restricted", r"geofence", r"imbl",
-        r"mpa", r"eez.*limit", r"near.*restricted", r"inside.*zone",
+        r"mpa", r"eez", r"eez.*limit", r"near.*restricted", r"inside.*zone",
         r"am i near", r"am i inside", r"protected.*area",
     ],
     "hazard_alerts": [
@@ -241,6 +249,7 @@ def fast_route(normalized_query: str) -> RoutingDecision | None:
     # fast = skip discussion/synthesis LLM, standard = deterministic synthesis, deep = full deliberation
     reason_map = {
         "trend_analysis": "Analytical question about change over time requires historical correlation.",
+        "ocean_state": "Sea/weather conditions (wind, waves, SST, tide) require the Ocean State Agent.",
         "zone_scan": "Ranked zone comparison requires multiple specialists.",
         "route_plan": "Navigation request requires route+sea-state+hazards.",
         "geofence_check": "Boundary proximity check requires geospatial.",

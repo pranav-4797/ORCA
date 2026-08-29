@@ -272,7 +272,8 @@ export class OrcaApiService implements IAIService {
             body: JSON.stringify({
               query: prompt,
               session_id: chatId,
-              device_gps: OrcaApiService.demoGps(),
+              device_gps: OrcaApiService.effectiveGps(),
+              map_point: (options as any).mapPoint || undefined,
               mode: resolvedMode,
               agent: resolvedMode === 'agent' ? options.targetAgent : undefined,
               vessel_class: options.vesselClass || 'small_fishing_boat',
@@ -504,6 +505,12 @@ export class OrcaApiService implements IAIService {
     const form = new FormData();
     form.append('audio', options.voiceBlob!, 'speech.webm');
     if (options.chatId) form.append('session_id', options.chatId);
+    const _gps = OrcaApiService.effectiveGps();
+    if (_gps) form.append('device_gps', `${_gps[0]},${_gps[1]}`);
+    const _map = (options as any).mapPoint;
+    if (_map && Array.isArray(_map) && _map.length >= 2) {
+      form.append('map_point', `${_map[0]},${_map[1]}`);
+    }
     const mode = (options.queryMode as any) || 'auto';
     if (mode === 'agent' && options.targetAgent) {
       form.append('mode', 'agent');
@@ -611,31 +618,80 @@ export class OrcaApiService implements IAIService {
   }
 
   public static cachedGps: [number, number] | null = null;
+  /** Authoritative live grant (updated whenever the store records a granted
+   * fix). Always preferred over any stored/legacy position. */
+  public static liveGps: [number, number] | null = null;
 
-  /** Acquire live browser GPS coordinates for high-precision local forecasting */
+  /** Optional hook so the store can react to a live GPS fix or a denial
+   * (avoids a circular import between the service and the app store). */
+  public static onGpsChange:
+    ((coords: [number, number] | null, status: 'granted' | 'denied') => void) | null = null;
+
+  /** Acquire live browser GPS coordinates for local forecasting.
+   * Requested ONCE; the result is published through `onGpsChange` so the store
+   * can update the map's "You are here" marker and the request payload. */
   public static async acquireLiveGps(): Promise<[number, number] | null> {
-    if (!('geolocation' in navigator)) return null;
+    if (!('geolocation' in navigator)) {
+      console.warn('[ORCA] GPS unavailable — geolocation unsupported');
+      OrcaApiService.onGpsChange?.(null, 'denied');
+      return null;
+    }
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          OrcaApiService.cachedGps = [pos.coords.latitude, pos.coords.longitude];
-          localStorage.setItem('orca_device_gps', JSON.stringify(OrcaApiService.cachedGps));
-          resolve(OrcaApiService.cachedGps);
+          const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+          OrcaApiService.liveGps = coords;
+          OrcaApiService.cachedGps = coords;
+          localStorage.setItem('orca_device_gps', JSON.stringify(coords));
+          localStorage.setItem('orca_device_gps_ts', String(Date.now()));
+          localStorage.removeItem('orca_demo_gps');
+          console.info(`[ORCA] GPS acquired: ${coords[0].toFixed(4)},${coords[1].toFixed(4)}`);
+          OrcaApiService.onGpsChange?.(coords, 'granted');
+          resolve(coords);
         },
-        () => {
+        (err) => {
+          console.warn('[ORCA] GPS unavailable — falling back to selected location', err?.code ?? '');
+          OrcaApiService.onGpsChange?.(null, 'denied');
           const fallback = OrcaApiService.demoGps();
           resolve(fallback as [number, number] | null);
         },
-        { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
       );
     });
   }
 
   /** Live device GPS or cached position for local sea-state forecasting */
   public static demoGps(): number[] | null {
+    if (OrcaApiService.liveGps) return OrcaApiService.liveGps;
     if (OrcaApiService.cachedGps) return OrcaApiService.cachedGps;
-    const raw = localStorage.getItem('orca_device_gps') || localStorage.getItem('orca_demo_gps');
-    return raw ? JSON.parse(raw) : null;
+    // Use stored position only if fresh (5 min) — stale Pune from days ago must not masquerade as "me"
+    const raw = localStorage.getItem('orca_device_gps');
+    if (raw) {
+      const ts = Number(localStorage.getItem('orca_device_gps_ts') || 0);
+      const age = Date.now() - ts;
+      if (ts && age < 300000) {
+        try { return JSON.parse(raw); } catch { /* ignore */ }
+      } else if (!ts) {
+        // Legacy entry without timestamp — treat as stale, clear it
+        localStorage.removeItem('orca_device_gps');
+        localStorage.removeItem('orca_demo_gps');
+        return null;
+      } else {
+        // Expired (>5 min) — don't use as live
+        return null;
+      }
+    }
+    // orca_demo_gps is legacy demo key — never use for live queries
+    return null;
+  }
+
+  /** Resolve the effective coordinates for a request: live/cached GPS first,
+   * else a stored position, else null (backend falls back to Panaji). */
+  public static effectiveGps(): number[] | null {
+    if (OrcaApiService.liveGps) return OrcaApiService.liveGps;
+    if (OrcaApiService.cachedGps) return OrcaApiService.cachedGps;
+    const stored = OrcaApiService.demoGps();
+    return stored && stored.length >= 2 ? stored : null;
   }
 
   // -------------------------------------------------------------------------

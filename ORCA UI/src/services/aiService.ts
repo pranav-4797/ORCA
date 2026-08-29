@@ -61,6 +61,9 @@ export interface SendMessageOptions {
   fleetDemoLevel?: string | null;
   /** Wind divergence demo scenario: match/moderate/high_divergence (SIMULATED) */
   windDemoScenario?: string | null;
+  /** Explicit map-tap coordinate [lat, lon] — highest-priority location, sent
+   * to the backend as `map_point` (a distinct field from GPS; never snapped). */
+  mapPoint?: [number, number] | null;
   /** When set, the prompt is carried as mic audio -> /query/voice (STT). */
   voiceBlob?: Blob;
   /** Speak the finished answer via browser TTS (voice-originated replies). */

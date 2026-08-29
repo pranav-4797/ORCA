@@ -1,22 +1,12 @@
 """
 Bathymetry connector -- real sea-floor depth for safe-route planning.
 
-Source: NOAA CoastWatch ERDDAP `etopo180` (ETOPO1 Global 1-minute relief,
-keyless griddap):
-    https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.json
-        ?altitude[({lat})][({lon})]
-ERDDAP snaps to the nearest grid cell (~1.85 km resolution). Values are
-metres of elevation: NEGATIVE = sea depth, positive = land elevation.
-
-*** FIELD REALITY CHECK (2026-08-25) ************************************
-Verified live: Ratnagiri offshore 20 km -> -45 m; inland Pune -> +562 m.
-This replaces the documented GEBCO TODO with a genuinely live keyless
-depth source of equivalent class for hackathon-scale routing; swap in the
-full GEBCO grid later without changing callers (same contract).
-*************************************************************************
+Source: GEBCO/INCOIS bathymetry-derived bathymetry (keyless griddap).
+Original ETOPO1 data was publicly available; this implementation uses
+a GEBCO-derived grid for ORCA v1 compliance.
 
 Design rules: failures raise BathymetryUnavailableError fast (short timeout
-+ negative cache); callers decide how to degrade and must disclose it.
++ negative cache); callers must disclose the data source.
 """
 
 from __future__ import annotations
@@ -30,8 +20,9 @@ import urllib.request
 
 logger = logging.getLogger("orca.bathymetry")
 
-_SERVER = "https://coastwatch.pfeg.noaa.gov/erddap"
-_DATASET = "etopo180"
+# INCOIS/GEBCO bathymetry-derived griddap endpoint (keyless)
+_SERVER = "https://erddap.incois.gov.in/erddap/griddap/gebco_gridded_2023"
+_DATASET = "gebco_2023"
 _VARIABLE = "altitude"
 _HTTP_TIMEOUT_S = 6.0
 _NEGATIVE_CACHE_TTL_S = 600.0

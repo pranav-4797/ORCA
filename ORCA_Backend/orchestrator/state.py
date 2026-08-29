@@ -189,7 +189,8 @@ def _detect_romanized_language(text: str) -> str | None:
             return lang
     return None
 
-def resolve_location(place_name: str) -> Location:
+def resolve_location(place_name: str) -> Location | None:
+    """Return Location or None if no location determinable. Never defaults to Panaji."""
     key = " ".join((place_name or "").strip().lower().split())
     if key in KNOWN_LOCATIONS:
         return KNOWN_LOCATIONS[key]
@@ -202,16 +203,15 @@ def resolve_location(place_name: str) -> Location:
         except Exception as exc:
             import logging
             logging.getLogger("orca.orchestrator").warning(
-                "geocoding '%s' failed (%s); using default location",
-                place_name, exc,
+                "geocoding '%s' failed (%s); no location", place_name, exc,
             )
-            return DEFAULT_LOCATION
+            return None
         if hit:
             lat, lon, display = hit
             loc = Location(name=display.split(",")[0].strip() + " Coast", lat=lat, lon=lon)
             _geocode_cache[key] = loc
             return loc
-    return DEFAULT_LOCATION
+    return None
 
 KNOWN_TIME_WINDOWS = ["today", "tomorrow", "tomorrow_morning"]
 
@@ -260,6 +260,7 @@ SPECIALIST_REGISTRY = {
 
 INTENT_DEFAULT_AGENTS = {
     "safety_check": ["OceanStateAgent", "HazardAgent", "GeospatialAgent"],
+    "ocean_state": ["OceanStateAgent"],
     "pfz_lookup": ["PFZAgent", "OceanStateAgent", "GeospatialAgent"],
     "route_plan": ["GeospatialAgent", "OceanStateAgent", "HazardAgent"],
     "geofence_check": ["GeospatialAgent"],
@@ -275,6 +276,7 @@ PLANNING_TOOL_SCHEMA = {
             "type": "string",
             "enum": [
                 "safety_check",
+                "ocean_state",
                 "pfz_lookup",
                 "route_plan",
                 "geofence_check",
@@ -285,7 +287,9 @@ PLANNING_TOOL_SCHEMA = {
             ],
             "description": (
                 "The query type. safety_check = is it safe to venture out "
-                "(fishing/boating). pfz_lookup = finding fishing zones. "
+                "(fishing/boating). ocean_state = sea/weather conditions only "
+                "(weather, forecast, wind, waves, swell, SST, chlorophyll, "
+                "tide). pfz_lookup = finding fishing zones. "
                 "route_plan = navigating somewhere safely. geofence_check = "
                 "boundary/restricted-zone proximity. hazard_alerts = active "
                 "weather/marine alerts. trend_analysis = analytical questions "
@@ -351,6 +355,7 @@ PLANNING_TOOL_SCHEMA = {
 
 class Intent:
     SAFETY_CHECK = "safety_check"
+    OCEAN_STATE = "ocean_state"
     PFZ_LOOKUP = "pfz_lookup"
     ROUTE_PLAN = "route_plan"
     GEOFENCE_CHECK = "geofence_check"
