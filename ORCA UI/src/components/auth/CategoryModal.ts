@@ -102,7 +102,6 @@ export class CategoryModal {
           <div class="category-radio-indicator"></div>
         </div>
         <div class="category-card-title">${cat.name}</div>
-        <div class="category-card-tagline">${cat.tagline}</div>
         <div class="category-vessel-tag">${cat.vesselClass.replace(/_/g, ' ')}</div>
       </div>
     `;
