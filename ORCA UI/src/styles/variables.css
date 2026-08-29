@@ -44,12 +44,12 @@
   --transition-fast: 120ms ease;
   --transition-normal: 200ms ease;
 
-  /* Z-Index */
+  /* Z-Index Hierarchy (Elevated above Leaflet map layers z:400) */
   --z-base: 1;
-  --z-sticky: 20;
-  --z-drawer: 40;
-  --z-modal: 50;
-  --z-toast: 70;
+  --z-sticky: 100;
+  --z-drawer: 500;
+  --z-modal: 1000;
+  --z-toast: 2000;
 
   /* =========================================================================
       LIGHT MARITIME PALETTE — DESIGN.md Maritime Precision (Teal)
