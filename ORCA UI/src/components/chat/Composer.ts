@@ -49,38 +49,6 @@ export class Composer {
     const isStreaming = store.isStreaming;
 
     this.element.innerHTML = `
-      <!-- Coastal Fishermen & Divers Quick-Action Deck -->
-      <div class="fisherman-deck-scroll">
-        <button class="fisherman-quick-chip" data-preset="pfz" title="Potential Fishing Zone & Chlorophyll">
-          <span class="chip-icon">🐟</span>
-          <div class="chip-text-col">
-            <span class="chip-badge" style="color:#22c55e;">PFZ HOTSPOT</span>
-            <span class="chip-title">Fish Zones &amp; SST</span>
-          </div>
-        </button>
-        <button class="fisherman-quick-chip" data-preset="waves" title="24h Wave Height & Sea Swell">
-          <span class="chip-icon">🌊</span>
-          <div class="chip-text-col">
-            <span class="chip-badge" style="color:#0ea5e9;">24H SWELL</span>
-            <span class="chip-title">Wave &amp; Swell</span>
-          </div>
-        </button>
-        <button class="fisherman-quick-chip" data-preset="cyclone" title="Emergency Cyclone & Wind Warnings">
-          <span class="chip-icon">⚠️</span>
-          <div class="chip-text-col">
-            <span class="chip-badge" style="color:#f59e0b;">LIVE ALERTS</span>
-            <span class="chip-title">Cyclone Warnings</span>
-          </div>
-        </button>
-        <button class="fisherman-quick-chip" data-preset="diving" title="Diving Depth, Current & Underwater Clearance">
-          <span class="chip-icon">🤿</span>
-          <div class="chip-text-col">
-            <span class="chip-badge" style="color:#10b981;">BATHYMETRY</span>
-            <span class="chip-title">Diving &amp; Depth</span>
-          </div>
-        </button>
-      </div>
-
       <div class="composer-box" id="composer-dropzone">
         <input type="file" id="file-input" style="display:none;" multiple accept="image/*,.pdf,.txt,.ts,.js,.json,.csv,.md">
 
@@ -252,23 +220,6 @@ export class Composer {
     });
 
     // Send button click
-    // Quick Action Chips for Fishermen & Divers
-    const quickChips = this.element.querySelectorAll('.fisherman-quick-chip');
-    quickChips.forEach(chip => {
-      chip.addEventListener('click', () => {
-        const preset = chip.getAttribute('data-preset');
-        if (preset === 'pfz') {
-          store.sendMessage('Where is the nearest Potential Fishing Zone (PFZ) with high chlorophyll and thermal front today?');
-        } else if (preset === 'waves') {
-          store.sendMessage('What is the significant wave height, sea swell period, and wind speed forecast for the next 24 hours?');
-        } else if (preset === 'cyclone') {
-          store.sendMessage('Are there any active cyclone, depression, or rough sea warning bulletins in this sector?');
-        } else if (preset === 'diving') {
-          store.sendMessage('What is the underwater depth, tidal clearance (UKC), and diving visibility near these waters?');
-        }
-      });
-    });
-
     const sendBtn = this.element.querySelector('#btn-send-msg');
     sendBtn?.addEventListener('click', () => {
       this.handleSend();
