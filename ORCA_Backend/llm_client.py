@@ -39,6 +39,11 @@ LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").
 LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile").strip()
 # Hosted speech-to-text on the same Groq account (no extra key needed).
 STT_MODEL: str = os.getenv("STT_MODEL", "whisper-large-v3-turbo").strip()
+# Timeouts & token budgets — tuned for latency (env-overridable)
+LLM_TIMEOUT_S: float = float(os.getenv("LLM_TIMEOUT_S", "12").strip() or 12)
+LLM_TIMEOUT_FAST_S: float = float(os.getenv("LLM_TIMEOUT_FAST_S", "7").strip() or 7)
+LLM_MAX_TOKENS_ROUTING: int = int(os.getenv("LLM_MAX_TOKENS_ROUTING", "400").strip() or 400)
+LLM_MAX_TOKENS_RESPONSE: int = int(os.getenv("LLM_MAX_TOKENS_RESPONSE", "350").strip() or 350)
 
 _client: Optional[OpenAI] = None
 
@@ -52,15 +57,19 @@ def is_available() -> bool:
     return bool(GROQ_API_KEY)
 
 
-def _get_client() -> OpenAI:
+def _get_client(timeout: float | None = None) -> OpenAI:
     global _client
     if not GROQ_API_KEY:
         raise LLMUnavailableError(
             "GROQ_API_KEY is not set. Get a free key at https://console.groq.com/keys "
             "and put it in your .env file (see .env.example)."
         )
-    if _client is None:
-        _client = OpenAI(api_key=GROQ_API_KEY, base_url=LLM_BASE_URL, timeout=12.0)
+    # Re-create client if requested timeout differs (cheap vs default)
+    # Keep simple: use provided timeout if given, else default; cache per timeout bucket
+    effective = timeout if timeout is not None else LLM_TIMEOUT_S
+    if _client is None or getattr(_client, "_orca_timeout", None) != effective:
+        _client = OpenAI(api_key=GROQ_API_KEY, base_url=LLM_BASE_URL, timeout=effective)
+        _client._orca_timeout = effective  # type: ignore
     return _client
 
 
@@ -80,9 +89,10 @@ def _call_with_retry(fn, *, attempts: int = 2, delay_s: float = 0.8):
 
 
 def complete(system_prompt: str, user_prompt: str, *, temperature: float = 0.3,
-             max_tokens: int = 400) -> str:
-    """Free-form text completion with retry-once."""
-    client = _get_client()
+             max_tokens: int = 400, timeout: float | None = None,
+             attempts: int = 2) -> str:
+    """Free-form text completion with retry-once. Use attempts=1 + low timeout for fast fallback."""
+    client = _get_client(timeout=timeout)
 
     def _do() -> str:
         response = client.chat.completions.create(
@@ -104,7 +114,7 @@ def complete(system_prompt: str, user_prompt: str, *, temperature: float = 0.3,
             raise ValueError("empty completion")
         return content.strip()
 
-    return _call_with_retry(_do)
+    return _call_with_retry(_do, attempts=attempts)
 
 
 def transcribe_audio(
@@ -142,13 +152,16 @@ def complete_structured(    system_prompt: str,
     schema: dict[str, Any],
     temperature: float = 0.1,
     max_tokens: int = 700,
+    timeout: float | None = None,
+    attempts: int = 2,
 ) -> dict[str, Any]:
     """Forced-tool-call completion that returns schema-shaped arguments.
 
     The model is forced to call `tool_name`; its arguments are parsed as
     JSON and returned as a dict. Retries once on API or parse failure.
+    For fast routing use max_tokens=300-400, timeout=7, attempts=1 so fallback is instant.
     """
-    client = _get_client()
+    client = _get_client(timeout=timeout)
 
     def _do() -> dict[str, Any]:
         response = client.chat.completions.create(
@@ -179,4 +192,4 @@ def complete_structured(    system_prompt: str,
             raise ValueError("tool arguments were not a JSON object")
         return args
 
-    return _call_with_retry(_do)
+    return _call_with_retry(_do, attempts=attempts)

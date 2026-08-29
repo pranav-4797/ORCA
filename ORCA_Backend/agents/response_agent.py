@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 
 import llm_client
+from agents.pfz_output import format_pfz_answer, is_pfz_lookup_query
 from models import (
     AgentTrace,
     GeofenceStatus,
@@ -52,13 +53,24 @@ class ResponseAgent:
         language = context.language or "en"
         lang_name = _LANGUAGE_NAMES.get(language, language)
 
-        try:
-            answer = self._compose_with_llm(
-                context, synthesis, lang_name, ocean_state, pfz, geofence, route,
-                trend, discussion=discussion or {},
+        # Official-PFZ lookups get the documented INCOIS template verbatim
+        # (deterministic, no LLM needed for distance/bearing/coords facts).
+        official_pfz = None
+        if pfz is not None and is_pfz_lookup_query(context.raw_query):
+            official_pfz = format_pfz_answer(
+                pfz, verdict=(synthesis or {}).get("verdict", "CAUTION")
             )
-        except llm_client.LLMUnavailableError:
-            answer = self._fallback_answer(context, synthesis, risk, pfz, geofence, route)
+
+        if official_pfz is not None:
+            answer = official_pfz
+        else:
+            try:
+                answer = self._compose_with_llm(
+                    context, synthesis, lang_name, ocean_state, pfz, geofence, route,
+                    trend, discussion=discussion or {},
+                )
+            except llm_client.LLMUnavailableError:
+                answer = self._fallback_answer(context, synthesis, risk, pfz, geofence, route)
 
         duration_ms = (time.perf_counter() - start) * 1000
         trace = AgentTrace(
@@ -107,15 +119,28 @@ class ResponseAgent:
                 extras.append(f"- Predicted tides: {tide_txt}")
             # Ranked secondary zones (P1 #12) come via pfz below.
         if pfz is not None:
+            lc_txt = ""
+            lc = getattr(pfz, "landing_center", None) or {}
+            if lc:
+                lc_txt = (
+                    f" official INCOIS advisory via landing centre "
+                    f"{lc.get('name')} (sector {lc.get('sector_id')}); zone "
+                    f"{lc.get('advisory_distance_km')} km to the "
+                    f"{lc.get('direction')}, depth {lc.get('advisory_depth_m')} m, "
+                    f"valid {lc.get('forecast_date')} to {lc.get('valid_upto')}"
+                )
+                if pfz.advisory_text:
+                    lc_txt += f"; sector note: {pfz.advisory_text[:220]}"
             extras.append(
                 f"- PFZ zone: {pfz.distance_from_reference_km} km away, bearing "
-                f"{pfz.bearing_deg} deg, centre ({pfz.center_lat}, {pfz.center_lon}); "
-                f"zone position provenance: {pfz.field_sources.get('zone_position', 'simulated')}"
+                f"{pfz.bearing_deg} deg, centre ({pfz.center_lat}, {pfz.center_lon});"
+                f"{lc_txt or ' zone position provenance: ' + pfz.field_sources.get('zone_position', 'simulated')}"
             )
             for i, alt in enumerate(getattr(pfz, "alternates", []) or [], start=2):
                 extras.append(
                     f"- Alternative zone #{i}: {alt['distance_km']} km away, bearing "
-                    f"{alt['bearing_deg']} deg (SST {alt['sst_celsius']} C)"
+                    f"{alt['bearing_deg']} deg"
+                    + (f" (SST {alt['sst_celsius']} C)" if 'sst_celsius' in alt else "")
                 )
         if geofence is not None and not geofence.clear:
             for h in geofence.hits:
@@ -194,8 +219,13 @@ class ResponseAgent:
             + debate_block
             + "\n\nWrite the final answer now."
         )
+        # Optimized: concise answers need few tokens; fast timeout with no retry for latency
+        import os
+        max_tok = int(os.getenv("LLM_MAX_TOKENS_RESPONSE", "350").strip() or 350)
+        timeout = float(os.getenv("LLM_TIMEOUT_FAST_S", "7").strip() or 7)
         return llm_client.complete(
-            system_prompt, user_prompt, temperature=0.4, max_tokens=700
+            system_prompt, user_prompt, temperature=0.4, max_tokens=max_tok,
+            timeout=timeout, attempts=1
         )
 
     # ------------------------------------------------------------------
@@ -204,10 +234,21 @@ class ResponseAgent:
         if risk is not None:
             parts.append(risk.headline)
         if pfz is not None:
-            parts.append(
-                f"Nearest simulated fishing zone ~{pfz.distance_from_reference_km} km "
-                f"at bearing {pfz.bearing_deg:.0f} deg."
-            )
+            lc = getattr(pfz, "landing_center", None) or {}
+            if lc:
+                parts.append(
+                    f"Official INCOIS PFZ via {lc.get('name')}: zone "
+                    f"{lc.get('advisory_distance_km')} km to the {lc.get('direction')}, "
+                    f"depth {lc.get('advisory_depth_m')} m; "
+                    f"~{pfz.distance_from_reference_km} km from your point "
+                    f"at bearing {pfz.bearing_deg:.0f} deg."
+                )
+            else:
+                parts.append(
+                    f"Nearest {'derived' if pfz.source.value == 'derived_from_live_data' else 'simulated'} "
+                    f"fishing zone ~{pfz.distance_from_reference_km} km at bearing "
+                    f"{pfz.bearing_deg:.0f} deg."
+                )
         if geofence is not None and not geofence.clear:
             parts.append("Restricted boundary nearby: " + "; ".join(h.zone_name for h in geofence.hits))
         if route is not None:

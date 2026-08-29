@@ -31,8 +31,29 @@ _HEADERS = {
     "User-Agent": "orca-hackathon-proto/0.1 (SIH-2026 marine safety prototype)",
 }
 
-# In-process cache: {normalized_query: (lat, lon, display_name) | None}
-_cache: dict[str, tuple[float, float, str] | None] = {}
+# In-process cache with TTL: {normalized_query: (expiry_monotonic, (lat, lon, display_name) | None)}
+import os as _os
+import time as _time
+_GEOCODE_TTL_S = float(_os.getenv("ORCA_GEOCODE_TTL_S", "86400").strip() or 86400)
+_cache: dict[str, tuple[float, tuple[float, float, str] | None]] = {}
+
+def _cache_get(k: str):
+    hit = _cache.get(k)
+    if hit is None:
+        return None, False
+    exp, val = hit
+    if _time.monotonic() > exp:
+        _cache.pop(k, None)
+        return None, False
+    return val, True
+
+def _cache_set(k: str, val):
+    _cache[k] = (_time.monotonic() + _GEOCODE_TTL_S, val)
+    if len(_cache) > 2048:
+        now = _time.monotonic()
+        for kk, (exp, _) in list(_cache.items()):
+            if exp < now:
+                _cache.pop(kk, None)
 
 
 class GeocodeUnavailableError(Exception):
@@ -49,8 +70,9 @@ def geocode(query: str) -> tuple[float, float, str] | None:
     q = " ".join(query.strip().lower().split())
     if not q:
         return None
-    if q in _cache:
-        return _cache[q]
+    val, hit = _cache_get(q)
+    if hit:
+        return val
 
     params = {
         "q": q,
@@ -77,7 +99,7 @@ def geocode(query: str) -> tuple[float, float, str] | None:
             result = (lat, lon, name)
         except (KeyError, ValueError, IndexError):
             result = None
-    _cache[q] = result
+    _cache_set(q, result)
     return result
 
 
@@ -86,9 +108,10 @@ REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 
 def reverse_geocode(lat: float, lon: float) -> str:
     """Reverse geocode (lat, lon) into a clean coastal location name."""
-    cache_key = f"{round(lat, 3)},{round(lon, 3)}"
-    if cache_key in _cache and isinstance(_cache[cache_key], str):
-        return _cache[cache_key]
+    cache_key = f"rev:{round(lat, 3)},{round(lon, 3)}"
+    val, hit = _cache_get(cache_key)
+    if hit and isinstance(val, str):
+        return val
 
     params = {
         "lat": lat,
@@ -106,7 +129,7 @@ def reverse_geocode(lat: float, lon: float) -> str:
                 name = parts[0]
                 if len(parts) > 1 and not any(c.isdigit() for c in parts[1]):
                     name += f", {parts[1]}"
-                _cache[cache_key] = name
+                _cache_set(cache_key, name)
                 return name
     except Exception:
         pass

@@ -123,10 +123,10 @@ export class Composer {
               ${ICONS.paperclip}
             </button>
 
-            <!-- Query Routing Pill: panel discussion vs one direct agent -->
-            <button class="pill-selector ${store.queryMode === 'agent' ? 'mode-direct' : 'mode-panel'}"
-                    id="btn-pill-mode" title="Choose who answers: the full agent panel (round-table) or one specialist directly">
-              <span>${store.queryMode === 'agent' ? ICONS.user : ICONS.messageSquare}</span>
+            <!-- Query Routing Pill: auto / panel / direct -->
+            <button class="pill-selector ${store.queryMode === 'auto' ? 'mode-auto' : store.queryMode === 'agent' ? 'mode-direct' : 'mode-panel'}"
+                    id="btn-pill-mode" title="Choose who answers: AUTO (ORCA picks) / Panel (full deliberation) / Direct specialist">
+              <span>${store.queryMode === 'auto' ? '✨' : store.queryMode === 'agent' ? ICONS.user : ICONS.messageSquare}</span>
               <span class="pill-label">${this.modeLabel()}</span>
               <span>${ICONS.chevronDown}</span>
             </button>
@@ -167,6 +167,10 @@ export class Composer {
   }
 
   private modeLabel(): string {
+    if (store.queryMode === 'auto') {
+      const autoLabel = store.getAutoRoutingLabel();
+      return autoLabel ? autoLabel : 'Auto · ORCA picks';
+    }
     if (store.queryMode === 'agent') {
       const spec = store.backendAgents.find(a => a.key === store.directAgentKey);
       return spec ? `${spec.name.replace(' Agent', '')} · direct` : 'Direct agent';
@@ -178,16 +182,17 @@ export class Composer {
     const isStreaming = store.isStreaming;
     const sendBtnContainer = this.element.querySelector('.composer-toolbar-right');
 
-    // Query-routing pill label + tint
+    // Query-routing pill label + tint (auto/panel/direct)
     const modePill = this.element.querySelector('#btn-pill-mode');
     if (modePill) {
       const label = modePill.querySelector('.pill-label');
       if (label && label.textContent !== this.modeLabel()) label.textContent = this.modeLabel();
-      modePill.classList.toggle('mode-panel', store.queryMode !== 'agent');
+      modePill.classList.toggle('mode-auto', store.queryMode === 'auto');
+      modePill.classList.toggle('mode-panel', store.queryMode === 'panel');
       modePill.classList.toggle('mode-direct', store.queryMode === 'agent');
       const iconSpan = modePill.querySelector('span');
       if (iconSpan) {
-        iconSpan.innerHTML = store.queryMode === 'agent' ? ICONS.user : ICONS.messageSquare;
+        iconSpan.innerHTML = store.queryMode === 'auto' ? '✨' : (store.queryMode === 'agent' ? ICONS.user : ICONS.messageSquare);
       }
     }
 
@@ -379,21 +384,31 @@ export class Composer {
 
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
-  /** Build (or rebuild) the panel-vs-direct dropdown inside the anchor. */
+  /** Build (or rebuild) the auto/panel-vs-direct dropdown inside the anchor. */
   private renderModeMenu(): void {
     const anchor = this.element.querySelector('#mode-menu-anchor') as HTMLElement | null;
     if (!anchor) return;
 
+    const isAuto = store.queryMode === 'auto';
     const isPanel = store.queryMode === 'panel';
     anchor.innerHTML = `
       <div class="composer-mode-menu" role="menu">
-        <div class="mode-menu-title">Who should answer?</div>
+        <div class="mode-menu-title">How should ORCA answer?</div>
+
+        <button class="mode-option ${isAuto ? 'selected' : ''}" data-mode="auto" role="menuitem" style="${isAuto ? 'border-color:var(--primary);background:rgba(14,124,134,0.06);' : ''}">
+          <span class="mode-option-icon">✨</span>
+          <span class="mode-option-body">
+            <span class="mode-option-name">✨ AUTO SELECT — ORCA picks best specialist(s)</span>
+            <span class="mode-option-desc">Fast intelligent routing — only needed agents run, no round-table unless complex. Recommended for normal chat.</span>
+          </span>
+          ${isAuto ? `<span class="mode-option-check">${ICONS.check}</span>` : ''}
+        </button>
 
         <button class="mode-option ${isPanel ? 'selected' : ''}" data-mode="panel" role="menuitem">
           <span class="mode-option-icon">${ICONS.messageSquare}</span>
           <span class="mode-option-body">
             <span class="mode-option-name">ORCA Panel — full discussion</span>
-            <span class="mode-option-desc">Every relevant specialist runs, debates the findings together, then reconciles one verdict</span>
+            <span class="mode-option-desc">Every relevant specialist runs, debates the findings together, then reconciles one verdict (demo/deep analysis)</span>
           </span>
           ${isPanel ? `<span class="mode-option-check">${ICONS.check}</span>` : ''}
         </button>
@@ -402,7 +417,7 @@ export class Composer {
         <div class="mode-menu-title">Ask one specialist directly</div>
 
         ${store.backendAgents.map(spec => {
-          const selected = !isPanel && store.directAgentKey === spec.key;
+          const selected = store.queryMode === 'agent' && store.directAgentKey === spec.key;
           return `
             <button class="mode-option mode-option-agent ${selected ? 'selected' : ''}"
                     data-mode="agent" data-agent-key="${spec.key}" role="menuitem"
@@ -422,7 +437,7 @@ export class Composer {
     anchor.querySelectorAll('.mode-option').forEach(opt => {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
-        const mode = opt.getAttribute('data-mode') as 'panel' | 'agent';
+        const mode = opt.getAttribute('data-mode') as 'auto' | 'panel' | 'agent';
         const agentKey = opt.getAttribute('data-agent-key');
         store.setQueryMode(mode);
         if (mode === 'agent' && agentKey) {
@@ -431,6 +446,8 @@ export class Composer {
           showToast(`Direct mode: only ${spec?.name || agentKey} will answer`, 'info');
         } else if (mode === 'panel') {
           showToast('Panel mode: agents will discuss before answering', 'success');
+        } else if (mode === 'auto') {
+          showToast('AUTO SELECT — ORCA will pick the best specialist(s)', 'success');
         }
         this.modeMenuOpen = false;
         this.removeModeMenu();

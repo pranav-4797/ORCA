@@ -8,8 +8,10 @@ import {
   OrcaApiService,
   BACKEND_URL,
   fetchOrcaAgents,
+  fetchPfzLive,
   fetchVizGeojson,
   fetchVizSeries,
+  OrcaPfzLive,
   OrcaSpecialist,
   OrcaVizSeries,
 } from '../services/orcaApiService';
@@ -69,9 +71,16 @@ class AppStore {
   public mapPanelOpen: boolean = true;
   public activityPanelOpen: boolean = false;
 
-  // Query routing: 'panel' = all specialists discuss then reconcile;
+// Query routing: 'auto' = ORCA picks best specialist(s) (default, fast);
+  // 'panel' = all specialists discuss then reconcile (demo/deep);
   // 'agent' = one named specialist answers directly (no discussion).
-  public queryMode: 'panel' | 'agent' = 'panel';
+
+  // Official INCOIS PFZ live layer (zone lines + landing centres), refreshed
+  // whenever the app comes online. Feed is cached server-side for 10 minutes.
+  public pfzLive: OrcaPfzLive | null = null;
+  public pfzLiveLoadedAt: number = 0;
+
+  public queryMode: 'auto' | 'panel' | 'agent' = 'auto';
   public directAgentKey: string = '';
   public backendAgents: OrcaSpecialist[] = [
     {
@@ -229,6 +238,7 @@ class AppStore {
         console.info('[ORCA] backend online at', BACKEND_URL);
         showToast('Connected to ORCA backend', 'success');
         void this.fetchBackendAgents();
+        void this.loadPfzLive();
         OrcaApiService.startAlertStream(
           'web-demo-user', 16.9902, 73.3120,
           (alert) => this.injectProactiveAlert(alert),
@@ -278,10 +288,23 @@ class AppStore {
       const spec = this.backendAgents.find(a => a.key === this.directAgentKey);
       return spec ? spec.name : 'Direct agent';
     }
+    if (this.queryMode === 'auto') {
+      return 'AUTO SELECT';
+    }
     return 'ORCA Panel';
   }
 
-  public setQueryMode(mode: 'panel' | 'agent'): void {
+  public getAutoRoutingLabel(): string | null {
+    if (this.queryMode !== 'auto' || !this.activeChatId) return null;
+    const msgs = this.messages[this.activeChatId] || [];
+    const last = [...msgs].reverse().find(m => m.role === 'assistant' && (m as any).autoRouting);
+    const routing: any = (last as any)?.autoRouting;
+    if (!routing) return null;
+    const agents = (routing.agents || []).map((a: string) => a.replace('Agent','').trim()).join(' + ');
+    return agents ? `AUTO → ${agents}` : null;
+  }
+
+  public setQueryMode(mode: 'auto' | 'panel' | 'agent'): void {
     this.queryMode = mode;
     this.notify();
   }
@@ -309,9 +332,28 @@ class AppStore {
     this.notify();
   }
 
+  public setSyntheticViz(geojson: any, sessionId: string): void {
+    this.vizGeojson = geojson;
+    this.vizSessionId = sessionId;
+    this.mapPanelOpen = true;
+    this.notify();
+  }
+
   public toggleMapPanel(open?: boolean): void {
     this.mapPanelOpen = open !== undefined ? open : !this.mapPanelOpen;
     this.notify();
+  }
+
+  /** Pull the official INCOIS PFZ feed (zone lines + landing centres) once
+   * when the backend comes online; the OceanMap renders it as a base layer.
+   * A failure here is non-fatal: the map simply keeps the viz-only view. */
+  public async loadPfzLive(): Promise<void> {
+    const feed = await fetchPfzLive();
+    if (feed) {
+      this.pfzLive = feed;
+      this.pfzLiveLoadedAt = Date.now();
+      this.notify();
+    }
   }
 
   public toggleActivityPanel(open?: boolean): void {
@@ -657,6 +699,8 @@ class AppStore {
     const answeringPath =
       this.queryMode === 'agent'
         ? `${this.getQueryModeLabel()} (direct)`
+        : this.queryMode === 'auto'
+        ? 'AUTO SELECT — ORCA picks best specialist(s)'
         : 'ORCA Panel — agents discussed';
     const assistantMsg: Message = {
       id: assistantMsgId,
@@ -707,6 +751,8 @@ class AppStore {
         attachments,
         queryMode: this.queryMode,
         targetAgent: this.directAgentKey || undefined,
+        fleetDemoLevel: (OrcaApiService as any).getFleetDemoLevel ? (OrcaApiService as any).getFleetDemoLevel() : null,
+        windDemoScenario: (OrcaApiService as any).getWindDemoScenario ? (OrcaApiService as any).getWindDemoScenario() : null,
         voiceBlob: voice?.blob,
         speakReply: Boolean(voice),
         abortSignal: this.currentAbortController.signal,
@@ -726,13 +772,47 @@ class AppStore {
             assistantMsg.activitySteps = [...this.executionState.steps];
             this.notify();
           } else if (chunk.type === 'token' && chunk.content) {
-            assistantMsg.content += chunk.content;
+            // Immediate rendering path sends full answer as one token; avoid += duplication if already full
+            if (chunk.content.length > 200 && assistantMsg.content.length === 0) {
+              assistantMsg.content = chunk.content;
+            } else {
+              assistantMsg.content += chunk.content;
+            }
             this.executionState.state = 'executing';
             this.executionState.currentAction = 'Generating structured response...';
             this.notify();
           } else if (chunk.type === 'done') {
             assistantMsg.isStreaming = false;
             assistantMsg.tokens = chunk.tokens;
+            // Structured status takes priority for HUD (fixes UNSAFE→SAFE bug) — merged with guest limit
+            if ((chunk as any).status) {
+              (assistantMsg as any).status = (chunk as any).status;
+            } else if ((chunk as any).content) {
+              if (!assistantMsg.content) assistantMsg.content = (chunk as any).content;
+            }
+            if ((chunk as any).routing) {
+              (assistantMsg as any).autoRouting = (chunk as any).routing;
+              const agents = ((chunk as any).routing.agents || []).map((a: string) => a.replace('Agent','').trim()).join(' + ');
+              if (agents && this.queryMode === 'auto') {
+                assistantMsg.modelUsed = `AUTO SELECT → ${agents}`;
+              }
+            }
+            if ((chunk as any).timings) {
+              const total = (chunk as any).timings.total_ms;
+              if (total) {
+                assistantMsg.modelUsed = `${assistantMsg.modelUsed} · ${total}ms`;
+              }
+            }
+            if ((chunk as any).fleetConvergence) {
+              (assistantMsg as any).fleetConvergence = (chunk as any).fleetConvergence;
+            }
+            if ((chunk as any).windDivergence) {
+              (assistantMsg as any).windDivergence = (chunk as any).windDivergence;
+            }
+            if (!(chunk as any).content && assistantMsg.content) {
+            } else if ((chunk as any).content && !assistantMsg.content) {
+              assistantMsg.content = (chunk as any).content;
+            }
             this.executionState.state = 'completed';
             this.executionState.currentAction = 'Completed response';
             this.executionState.finishedAt = Date.now();

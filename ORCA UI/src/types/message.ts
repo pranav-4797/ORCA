@@ -33,4 +33,46 @@ export interface Message {
     completionTokens?: number;
     totalTokens?: number;
   };
+  /** Structured safety verdict from backend (authoritative). Takes priority over text parsing. */
+  status?: 'SAFE' | 'CAUTION' | 'UNSAFE' | 'CRITICAL' | 'INFO';
+  /** Auto-routing explainability (which agents were selected and why). */
+  autoRouting?: {
+    intent: string;
+    agents: string[];
+    routing_mode: string;
+    reason: string;
+  };
+  /** Fleet Convergence Forecast — crowding-adjusted recommendation */
+  fleetConvergence?: {
+    status: string;
+    window_hours: number;
+    recommendation_changed: boolean;
+    change_reason: string;
+    candidates: Array<{
+      zone_id: string;
+      center_lat: number;
+      center_lon: number;
+      distance_km: number;
+      bearing_deg: number;
+      base_suitability: number;
+      fleet_count: number;
+      crowding_ratio: number;
+      crowding_penalty: number;
+      adjusted_suitability: number;
+      crowding_label?: string;
+      is_recommended?: boolean;
+    }>;
+    raw_best_zone?: any;
+    final_zone?: any;
+  };
+  /** Satellite–Model Wind Divergence Flag — forecast vs satellite wind comparison */
+  windDivergence?: {
+    status: string; // MATCH | MODERATE_DIVERGENCE | HIGH_DIVERGENCE | UNAVAILABLE | STALE
+    forecast_wind_kn: number;
+    satellite_wind_kn?: number | null;
+    diff_kn?: number | null;
+    warning: string;
+    satellite_status: string; // REAL | SIMULATED | UNAVAILABLE
+    is_simulated: boolean;
+  };
 }

@@ -2,24 +2,30 @@
 PFZ Agent ("Finds where the fish likely are")
 
 Responsibility: locate the nearest Potential Fishing Zone for the user's
-reference point, with distance, bearing and the SST/chlorophyll evidence
-that justifies it.
+reference point, with distance, bearing and the evidence that justifies it.
 
-Data source (per project documentation Section 9):
-    Tier 1 -- Bhuvan Ocean Tool WMS GetFeatureInfo (ISRO/NRSC PFZ layer).
-    The live call is implemented against Bhuvan's documented OGC request
-    pattern but DISABLED BY DEFAULT: endpoint paths require account/endpoint
-    verification (first probe returned 404). Flip USE_LIVE_BHUVAN_PFZ once
-    verified.
+Data source (per SIH-2026 decision -- replaces the unverified Bhuvan WMS):
+    Tier 1 -- OFFICIAL INCOIS / SAMUDRA feeds, reached through
+    data_connectors.incois_pfz (the ONLY module that talks to INCOIS):
+        * pfzMobile : 1,223 landing centres, each carrying today's official
+          PFZ advisory where one is issued (Direction, Distance, Depth and
+          the zone's lat/lon relative to the centre).
+        * pfzLines  : digitized PFZ zone LineStrings (official geometry).
+        * TextData  : per-sector advisory narrative text.
+    The nearest centre to the query point is found with a KD-tree spatial
+    index (agents.geospatial_agent.LandingCentreIndex) in well under 10 ms;
+    its PLatitude/PLongitude/Direction/Distance/Depth are parsed into the
+    PFZRecommendation WITHOUT any LLM step, so coordinates are always the
+    ones INCOIS actually issued. Tagged DataSource.INCOIS_LIVE (Tier 1/2).
 
-    Until then the zone is DERIVED FROM LIVE DATA: a ring of sample points
-    around the user is queried against Open-Meteo's live marine grid in ONE
-    batched request, and the strongest sea-surface-temperature front (the
-    classic PFZ proxy -- fish aggregate along thermal gradients) wins.
-    The result is tagged DataSource.DERIVED_LIVE ("derived_from_live_data")
-    -- real satellite-model SST driving a real computation, but still NOT an
-    official INCOIS/Bhuvan advisory. Only if even that live sampling fails
-    does the deterministic seeded fallback run, tagged DataSource.SIMULATED.
+    Fallback (unchanged behaviour): if the advisory cannot be reached OR no
+    zone is issued near the query point, the zone is DERIVED FROM LIVE DATA
+    (strongest SST front inside agents/pfz_agent._derive_zone) and tagged
+    DataSource.DERIVED_LIVE. Only if even that live sampling fails does the
+    deterministic seeded fallback run, tagged DataSource.SIMULATED.
+
+The public interface (run / name) is unchanged so the LangGraph Orchestrator
+(and its planner/dispatch) need no modifications.
 """
 
 from __future__ import annotations
@@ -27,11 +33,17 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import time
 import urllib.parse
 import urllib.request
 
 import llm_client
+from agents.geospatial_agent import LandingCentreIndex
+from data_connectors.incois_pfz import (
+    IncoisUnavailableError,
+    get_live_pfz_sync,
+)
 from models import (
     AgentTrace,
     DataSource,
@@ -39,17 +51,25 @@ from models import (
     OceanStateReading,
     PFZRecommendation,
 )
+_ENABLE_LLM_NOTE = os.getenv("ORCA_ENABLE_LLM_REASONING", "").strip().lower() in ("1", "true", "yes")
 
-USE_LIVE_BHUVAN_PFZ = False  # enable after verifying Bhuvan WMS endpoint/auth
-
-_BHUVAN_WMS_URL = (
-    "https://bhuvan-app1.nrsc.gov.in/cgi-bin/ocean/handler_ocn_WMS.cgi"
-)
 _MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
 _HTTP_TIMEOUT_S = 10.0
 
+# Maximum distance (km) between the query point and the nearest INCOIS landing
+# centre before we fall back to the derived zone. A 150 km cap stops the agent
+# recommending an advisory zone on the far side of India for a mid-sea query.
+_MAX_CENTRE_DIST_KM = 150.0
+_MAX_CENTRE_CANDIDATES = 40          # KD-tree lookup depth for issued-searching
+_MAX_ALTERNATES = 2                  # extra issued zones to offer
+_MAX_ZONE_LINES = 5                  # nearby official zone lines for context
+
 # Front-sampling geometry: rings around the reference point (km).
 _SAMPLE_RINGS_KM = [12.0, 25.0, 40.0]
+
+# PFZ calculation cache (expensive ring sampling) — short TTL, env-overridable
+_PFZ_TTL_S = int(os.getenv("ORCA_PFZ_TTL_S", "120").strip() or 120)
+_pfz_cache: dict[tuple, tuple[float, "PFZRecommendation"]] = {}
 
 # Compass bearings -> plain words, so notes read naturally.
 _BEARS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
@@ -57,6 +77,24 @@ _BEARS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 def _bearing_word(deg: float) -> str:
     return _BEARS[int((deg % 360) / 45) % 8]
+
+
+def _line_bbox(feature: dict) -> tuple[float, float, float, float]:
+    """[(lon,lat), ...] -> (min_lon, min_lat, max_lon, max_lat)."""
+    coords = feature.get("geometry", {}).get("coordinates") or []
+    lons = [c[0] for c in coords if c and c[0] is not None]
+    lats = [c[1] for c in coords if c and c[1] is not None]
+    if not lons or not lats:
+        return (0, 0, 0, 0)
+    return (min(lons), min(lats), max(lons), max(lats))
+
+
+def _bbox_distance_km(lat: float, lon: float, bbox) -> float:
+    """Distance from point to a (min_lon, min_lat, max_lon, max_lat) box."""
+    min_lon, min_lat, max_lon, max_lat = bbox
+    clat = max(min_lat, min(lat, max_lat))
+    clon = max(min_lon, min(lon, max_lon))
+    return PFZAgent._haversine_bearing(lat, lon, clat, clon)[0]
 
 
 class PFZAgent:
@@ -70,30 +108,50 @@ class PFZAgent:
     ) -> tuple[PFZRecommendation, AgentTrace]:
         start = time.perf_counter()
 
+        # Check PFZ cache (same location + time_window within TTL)
+        cache_key = (location.name, round(location.lat, 3), round(location.lon, 3), time_window)
+        hit = _pfz_cache.get(cache_key)
+        if hit is not None and time.monotonic() - hit[0] < _PFZ_TTL_S:
+            pfz = hit[1]
+            trace = AgentTrace(
+                agent_name=self.name,
+                action=f"Located nearest potential fishing zone for {location.name}",
+                result_summary=f"CACHED ({_PFZ_TTL_S//60} min TTL): {pfz.distance_from_reference_km:.1f} km {_bearing_word(pfz.bearing_deg)} of {location.name}",
+                data_sources=[pfz.source],
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            pfz.reasoning_note = self._generate_reasoning_note(pfz)
+            return pfz, trace
+
         degraded_reason: str | None = None
-        if USE_LIVE_BHUVAN_PFZ:
+        pfz: PFZRecommendation | None = None
+        derived_live = False
+        if not os.getenv("ORCA_DISABLE_INCOIS_PFZ"):
             try:
-                pfz = self._fetch_bhuvan_live(location)
-            except Exception as exc:
+                pfz = self._fetch_incois_live(location, ocean_state)
+            except (IncoisUnavailableError, ValueError) as exc:
                 degraded_reason = f"{type(exc).__name__}: {exc}"
-                pfz, derived_live = self._derive_zone(location, ocean_state)
-        else:
-            degraded_reason = "Bhuvan official PFZ layer not yet verified"
+        if pfz is None:
+            degraded_reason = degraded_reason or (
+                "INCOIS advisory disabled (ORCA_DISABLE_INCOIS_PFZ)"
+            )
             pfz, derived_live = self._derive_zone(location, ocean_state)
 
         pfz.reasoning_note = self._generate_reasoning_note(pfz)
 
         duration_ms = (time.perf_counter() - start) * 1000
-        if degraded_reason:
-            kind = "derived from live SST field" if derived_live else "simulated"
+        if pfz.source == DataSource.INCOIS_LIVE:
+            lc = pfz.landing_center or {}
             summary = (
-                f"{kind.capitalize()} zone [{kind}, reason: {degraded_reason}]: "
-                f"{pfz.distance_from_reference_km:.1f} km {_bearing_word(pfz.bearing_deg)} "
-                f"of {location.name}"
+                f"OFFICIAL INCOIS PFZ via {lc.get('name', 'landing centre')}: "
+                f"{pfz.distance_from_reference_km:.1f} km "
+                f"{_bearing_word(pfz.bearing_deg)} of {location.name}"
             )
         else:
+            kind = "derived from live SST field" if derived_live else "simulated"
             summary = (
-                f"LIVE Bhuvan PFZ: {pfz.distance_from_reference_km:.1f} km "
+                f"{kind.capitalize()} zone [{kind}, reason: {degraded_reason or 'fallback'}]: "
+                f"{pfz.distance_from_reference_km:.1f} km "
                 f"{_bearing_word(pfz.bearing_deg)} of {location.name}"
             )
         trace = AgentTrace(
@@ -103,51 +161,177 @@ class PFZAgent:
             data_sources=[pfz.source],
             duration_ms=duration_ms,
         )
+        # Cache only live-derived zones (simulated fallback already tagged)
+        if pfz.source != DataSource.SIMULATED:
+            _pfz_cache[cache_key] = (time.monotonic(), pfz)
         return pfz, trace
 
     # ------------------------------------------------------------------
-    # LIVE path (disabled until endpoint verification)
+    # LIVE INCOIS path (primary; Tier 1/2 -- official advisory)
     # ------------------------------------------------------------------
-    def _fetch_bhuvan_live(self, location: Location) -> PFZRecommendation:
-        params = {
-            "SERVICE": "WMS",
-            "VERSION": "1.1.1",
-            "REQUEST": "GetFeatureInfo",
-            "LAYERS": "pfz",  # TODO: confirm exact layer id on verified endpoint
-            "QUERY_LAYERS": "pfz",
-            "SRS": "EPSG:4326",
-            "BBOX": f"{location.lon - 0.5},{location.lat - 0.5},"
-                    f"{location.lon + 0.5},{location.lat + 0.5}",
-            "WIDTH": "256",
-            "HEIGHT": "256",
-            "X": "128",
-            "Y": "128",
-            "INFO_FORMAT": "application/json",
-        }
-        url = f"{_BHUVAN_WMS_URL}?{urllib.parse.urlencode(params)}"
-        req = urllib.request.Request(url, headers={"User-Agent": "orca-backend/0.1"})
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-        props = (payload.get("features") or [{}])[0].get("properties", {})
-        lat = float(props["lat"])
-        lon = float(props["lon"])
-        dist, bear = self._haversine_bearing(location.lat, location.lon, lat, lon)
+    def _fetch_incois_live(
+        self,
+        location: Location,
+        ocean_state: OceanStateReading | None,
+    ) -> PFZRecommendation:
+        """Official advisory for the nearest landing centre with a zone today.
+
+        Geometry is parsed from the INCOIS PLatitude/PLongitude fields -- NO
+        LLM, no fabrication. Raises IncoisUnavailableError (feeds unreachable)
+        or ValueError (no usable advisory near this point) -> caller falls
+        back to the derived path.
+        """
+        live = get_live_pfz_sync()
+        mobile = live.get("landing_centres") or {}
+        features = mobile.get("features") or []
+        if not features:
+            raise IncoisUnavailableError("empty pfzMobile feature set")
+
+        centres = [f["properties"] for f in features]
+        index = LandingCentreIndex(centres)
+        candidates = index.nearest_k(
+            location.lat, location.lon, k=_MAX_CENTRE_CANDIDATES
+        )
+
+        issued = [c for c in candidates if c.get("pfz_issued")]
+        if not issued:
+            near = candidates[0] if candidates else None
+            raise ValueError(
+                "no officially issued PFZ advisory within {} km of {}"
+                .format((near or {}).get("distance_km", "?"), location.name)
+            )
+        primary = issued[0]
+        if float(primary.get("distance_km", 0)) > _MAX_CENTRE_DIST_KM:
+            # Nearest issued advisory is on the far side of the country --
+            # do not mislead the user; derive locally instead.
+            raise ValueError(
+                f"nearest issued centre {primary.get('LANDINGNAM')} is "
+                f"{primary['distance_km']} km away (>{_MAX_CENTRE_DIST_KM} km cap)"
+            )
+
+        zone_lat, zone_lon = primary["pfz_lat"], primary["pfz_lon"]
+        distance_km, bearing_deg = self._haversine_bearing(
+            location.lat, location.lon, zone_lat, zone_lon
+        )
+
+        # Prefer the nearest spot on the OFFICIAL digitized PFZ geometry
+        # (pfzLines) as the target: distance/bearing/target-coordinates all
+        # come from a haversine against the real zone lines. Fall back to the
+        # advisory's zone position when no line is nearby.
+        nearest = self._nearest_point_on_lines(
+            location.lat, location.lon,
+            (live.get("pfz_lines") or {}).get("features") or [],
+        )
+        if nearest is not None:
+            zone_lat, zone_lon = nearest["lat"], nearest["lon"]
+            distance_km, bearing_deg = nearest["distance_km"], nearest["bearing_deg"]
+        else:
+            # nearest advisory zone position (still official, from pfzMobile)
+            distance_km, bearing_deg = self._haversine_bearing(
+                location.lat, location.lon, zone_lat, zone_lon
+            )
+
+        # sst/chl are not carried in the PFZ feed; reuse the ocean-state
+        # reading when available (still honestly tagged from whence it came).
+        sst = ocean_state.sst_celsius if ocean_state is not None else 0.0
+        chl = ocean_state.chlorophyll_mg_m3 if ocean_state is not None else 0.0
+        sst_source = (
+            ocean_state.field_sources.get("sst_celsius")
+            if ocean_state else DataSource.SIMULATED.value
+        )
+        chl_source = (
+            ocean_state.field_sources.get("chlorophyll_mg_m3")
+            if ocean_state else DataSource.SIMULATED.value
+        )
+
+        # Alternate issued zones (next nearest centres) so users can compare.
+        alternates: list[dict] = []
+        for c in issued[1:1 + _MAX_ALTERNATES]:
+            d, b = self._haversine_bearing(
+                location.lat, location.lon, c["pfz_lat"], c["pfz_lon"]
+            )
+            alternates.append({
+                "center_lat": c["pfz_lat"],
+                "center_lon": c["pfz_lon"],
+                "distance_km": round(d, 1),
+                "bearing_deg": round(b, 1),
+                "landing_center": c.get("LANDINGNAM"),
+                "state": c.get("STATENAME"),
+                "direction": c.get("Direction"),
+                "advisory_distance_km": c.get("Distance"),
+                "advisory_depth_m": c.get("Depth"),
+            })
+
+        # Candidate official zone lines within sight of the point (context
+        # for the synthesis/response agents -- full geometry stays in
+        # /api/pfz/live for the map).
+        zone_lines: list[dict] = []
+        pfz_lines = (live.get("pfz_lines") or {}).get("features") or []
+        ranked_lines = []
+        for f in pfz_lines:
+            d = _bbox_distance_km(zone_lat, zone_lon, _line_bbox(f))
+            props = f.get("properties") or {}
+            ranked_lines.append((d, {
+                "uid": props.get("UID"),
+                "length": props.get("Length"),
+                "distance_km": round(d, 1),
+            }))
+        ranked_lines.sort(key=lambda t: t[0])
+        zone_lines = [entry for _d, entry in ranked_lines[:_MAX_ZONE_LINES]]
+
+        advisory = live.get("advisory") or {}
+        # Best-effort sector narrative (small extra fetch; cached 10 min).
+        sector_text = None
+        secid = str(primary.get("SECTOR_ID", ""))
+        try:
+            adv2 = get_live_pfz_sync(sector_ids=[secid]) if secid else advisory
+            sector_text = (
+                (adv2.get("advisory") or advisory)
+                .get("sectors", {}).get(secid, {}).get("text")
+            )
+        except IncoisUnavailableError:
+            sector_text = None
+
         return PFZRecommendation(
             reference_location=location,
-            center_lat=lat,
-            center_lon=lon,
-            distance_from_reference_km=round(dist, 1),
-            bearing_deg=round(bear, 1),
-            sst_at_zone_celsius=float(props.get("sst", 0.0)),
-            chlorophyll_at_zone_mg_m3=float(props.get("chlorophyll", 0.0)),
-            source=DataSource.BHUVAN_LIVE,
+            center_lat=round(float(zone_lat), 4),
+            center_lon=round(float(zone_lon), 4),
+            distance_from_reference_km=round(distance_km, 1),
+            bearing_deg=round(bearing_deg, 1),
+            sst_at_zone_celsius=round(sst, 2),
+            chlorophyll_at_zone_mg_m3=round(chl, 3),
+            source=DataSource.INCOIS_LIVE,
             confidence=0.9,
             field_sources={
-                "center_lat": DataSource.BHUVAN_LIVE.value,
-                "center_lon": DataSource.BHUVAN_LIVE.value,
-                "sst_at_zone_celsius": DataSource.BHUVAN_LIVE.value,
-                "chlorophyll_at_zone_mg_m3": DataSource.BHUVAN_LIVE.value,
+                "zone_position": DataSource.INCOIS_LIVE.value,
+                "sst_at_zone_celsius": sst_source,
+                "chlorophyll_at_zone_mg_m3": chl_source,
+                "direction": DataSource.INCOIS_LIVE.value,
+                "distance": DataSource.INCOIS_LIVE.value,
+                "depth": DataSource.INCOIS_LIVE.value,
             },
+            alternates=alternates,
+            landing_center={
+                "name": primary.get("LANDINGNAM"),
+                "state": primary.get("STATENAME"),
+                "sector_id": secid,
+                "sector_name": (
+                    advisory.get("sectors", {}).get(secid, {}).get("name")
+                ),
+                "centre_lat": primary["lat"],
+                "centre_lon": primary["lon"],
+                "distance_km_to_centre": primary["distance_km"],
+                "direction": primary.get("Direction"),
+                "angle_deg": primary.get("Angle"),
+                "advisory_distance_km": primary.get("Distance"),
+                "advisory_depth_m": primary.get("Depth"),
+                "pfz_lat": round(float(zone_lat), 4),
+                "pfz_lon": round(float(zone_lon), 4),
+                "forecast_date": advisory.get("forecast_date"),
+                "valid_upto": advisory.get("valid_upto"),
+            },
+            zone_lines=zone_lines,
+            advisory_text=sector_text,
         )
 
     # ------------------------------------------------------------------
@@ -336,19 +520,119 @@ class PFZAgent:
         x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
         return dist, (math.degrees(math.atan2(y, x)) + 360) % 360
 
+    @staticmethod
+    def _point_on_segment(lat1: float, lon1: float, lat2: float, lon2: float,
+                          plat: float, plon: float) -> tuple[float, float, float, float]:
+        """Closest point on segment (a->b) to p, in equirectangular projection.
+
+        Returns (nlat, nlon, distance_km, bearing_deg) where the distance is
+        the haversine great-circle distance from p to the projected point.
+        """
+        cos_lat = max(math.cos(math.radians((lat1 + lat2) / 2.0)), 0.2)
+        dx = (lon2 - lon1) * cos_lat
+        dy = lat2 - lat1
+        px = (plon - lon1) * cos_lat
+        py = plat - lat1
+        seg2 = dx * dx + dy * dy
+        if seg2 == 0:
+            t = 0.0
+        else:
+            t = max(0.0, min(1.0, (px * dx + py * dy) / seg2))
+        nlat = lat1 + (lat2 - lat1) * t
+        nlon = lon1 + (lon2 - lon1) * t
+        d, b = PFZAgent._haversine_bearing(plat, plon, nlat, nlon)
+        return nlat, nlon, d, b
+
+    @staticmethod
+    def _nearest_point_on_lines(lat: float, lon: float, features: list) -> dict | None:
+        """Nearest point on the official digitized PFZ LineStrings to (lat, lon).
+
+        Scans every segment of every INCOIS zone line and returns the closest
+        spot with a haversine distance + compass bearing -- i.e. the nearest
+        actual PFZ point in the official geometry. None when no usable line
+        exists near the point (caller keeps the advisory zone position).
+        """
+        best: tuple[float, float, float, float] | None = None
+        for f in features or []:
+            geom = (f.get("geometry") or {})
+            lines: list[list] = []
+            if geom.get("type") == "LineString":
+                lines = [geom.get("coordinates") or []]
+            elif geom.get("type") == "MultiLineString":
+                lines = geom.get("coordinates") or []
+            for line in lines:
+                for a, b in zip(line, line[1:]):
+                    if not a or not b or len(a) < 2 or len(b) < 2:
+                        continue
+                    try:
+                        nlat, nlon, d, br = PFZAgent._point_on_segment(
+                            float(a[1]), float(a[0]), float(b[1]), float(b[0]),
+                            float(lat), float(lon),
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    if best is None or d < best[0]:
+                        best = (d, nlat, nlon, br)
+        if best is None:
+            return None
+        d, nlat, nlon, br = best
+        return {
+            "distance_km": round(d, 1),
+            "bearing_deg": round(br, 1),
+            "lat": round(nlat, 4),
+            "lon": round(nlon, 4),
+        }
+
     # ------------------------------------------------------------------
-    # LLM note: report to the Synthesis Agent like a colleague would.
+    # Deterministic note by default — no LLM needed for distance/bearing facts.
     # ------------------------------------------------------------------
     def _generate_reasoning_note(self, pfz: PFZRecommendation) -> str:
+        deterministic = (
+            f"Zone {pfz.distance_from_reference_km} km away at "
+            f"{pfz.bearing_deg:.1f}° bearing; "
+            f"SST {pfz.sst_at_zone_celsius} °C, chlorophyll "
+            f"{pfz.chlorophyll_at_zone_mg_m3} mg/m³."
+        )
+        if pfz.source == DataSource.INCOIS_LIVE:
+            lc = pfz.landing_center or {}
+            deterministic += (
+                f" Official INCOIS advisory via {lc.get('name') or 'landing centre'}, "
+                f"valid to {lc.get('valid_upto')}."
+            )
+        elif pfz.source == DataSource.DERIVED_LIVE:
+            deterministic += " Estimated zone — official INCOIS advisory unavailable for this spot today."
+        else:
+            deterministic += " Seeded estimate — live feeds were unreachable."
+        if not _ENABLE_LLM_NOTE:
+            return deterministic
         sources = ", ".join(f"{k.replace('_', ' ')} = {v}" for k, v in sorted(pfz.field_sources.items()))
+        lc = pfz.landing_center or {}
         system_prompt = (
-            "You are the PFZ Agent in a marine multi-agent system. You just located "
-            "the nearest potential fishing zone and are writing a short note to the "
-            "Synthesis Agent as if talking to a colleague. Rules: use ONLY the "
-            "values provided; do NOT invent numbers; do NOT give the final verdict; "
-            "2-3 sentences; explicitly mention that the zone position is derived "
-            "from live satellite-model SST data (a thermal-front heuristic) rather "
-            "than an official INCOIS/Bhuvan advisory."
+            "You are the PFZ Agent in a marine multi-agent system. You just "
+            "located the nearest potential fishing zone and are writing a short "
+            "note to the Synthesis Agent as if talking to a colleague. Rules: "
+            "use ONLY the values provided; do NOT invent numbers; do NOT give "
+            "the final verdict; 2-3 sentences."
+        )
+        if pfz.source == DataSource.INCOIS_LIVE:
+            system_prompt += (
+                " The zone comes from the OFFICIAL daily INCOIS advisory for the "
+                "nearest landing centre -- state that clearly (it is Tier 1/2 "
+                "data, not a private estimate)."
+            )
+        else:
+            system_prompt += (
+                " The zone is an alternative estimate because the daily official "
+                "advisory was not available for this exact spot -- say so honestly, "
+                "but keep the tone factual; the values themselves are from real "
+                "forecast data."
+            )
+        lc_line = (
+            f"\nOfficial landing centre: {lc.get('name')} ({lc.get('state')}, "
+            f"sector {lc.get('sector_id')}); advisory says zone is "
+            f"{lc.get('advisory_distance_km')} km to the {lc.get('direction')} "
+            f"at {lc.get('advisory_depth_m')} m depth, valid to "
+            f"{lc.get('valid_upto')}." if lc else ""
         )
         user_prompt = (
             f"Reference point: {pfz.reference_location.name}\n"
@@ -357,17 +641,22 @@ class PFZAgent:
             f"bearing {pfz.bearing_deg} deg\n"
             f"- SST at zone: {pfz.sst_at_zone_celsius} C, chlorophyll: "
             f"{pfz.chlorophyll_at_zone_mg_m3} mg/m3\n"
-            f"Provenance: {sources}\n\n"
+            f"Provenance: {sources}{lc_line}\n\n"
             "Write your note."
         )
         try:
-            return llm_client.complete(system_prompt, user_prompt, temperature=0.4, max_tokens=400)
+            return llm_client.complete(system_prompt, user_prompt, temperature=0.4, max_tokens=250,
+                                       timeout=7, attempts=1)
         except llm_client.LLMUnavailableError:
-            kind = "derived from live SST field" \
-                if pfz.source == DataSource.DERIVED_LIVE else "simulated"
+            kind = pfz.source.value
+            zone_txt = (
+                f"Official INCOIS PFZ ({kind}) via landing centre "
+                f"{lc.get('name')}: {pfz.distance_from_reference_km} km away; "
+                if lc else
+                f"{kind.capitalize()} zone {pfz.distance_from_reference_km} km away; "
+            )
             return (
-                f"[llm_unavailable] {kind.capitalize()} zone "
-                f"{pfz.distance_from_reference_km} km away; "
+                f"[llm_unavailable] {zone_txt}"
                 f"SST {pfz.sst_at_zone_celsius} C, chlorophyll "
                 f"{pfz.chlorophyll_at_zone_mg_m3} mg/m3."
             )

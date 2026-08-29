@@ -34,6 +34,7 @@ THRESHOLDS = {
     "wind_gust_unsafe_kmh": 45.0,
     "wind_gust_caution_kmh": 30.0,
 }
+_ENABLE_LLM_NOTE = os.getenv("ORCA_ENABLE_LLM_REASONING", "").strip().lower() in ("1", "true", "yes")
 
 # Per-vessel-class safety envelopes (PDF NFR: thresholds must reflect the
 # craft, not one hypothetical boat). Env override:
@@ -335,6 +336,27 @@ class HazardAgent:
             if risk.flags
             else "none"
         )
+        # Deterministic template — no LLM needed for threshold verdict
+        # Example: "UNSAFE because significant wave height exceeds the small-boat threshold."
+        if risk.status.value == "UNSAFE":
+            base = f"UNSAFE: {flags_text}."
+            if ocean_state.wave_height_m > thr['wave_height_unsafe_m']:
+                base = f"UNSAFE because wave height {ocean_state.wave_height_m} m exceeds the {thr['wave_height_unsafe_m']} m small-boat threshold."
+            elif ocean_state.wind_gust_kmh > thr['wind_gust_unsafe_kmh']:
+                base = f"UNSAFE because wind gusts {ocean_state.wind_gust_kmh} km/h exceed the {thr['wind_gust_unsafe_kmh']} km/h threshold."
+            else:
+                base = f"UNSAFE: {flags_text}."
+        elif risk.status.value == "CAUTION":
+            base = f"CAUTION: wave {ocean_state.wave_height_m} m / gusts {ocean_state.wind_gust_kmh} km/h are borderline (caution thresholds {thr['wave_height_caution_m']} m / {thr['wind_gust_caution_kmh']} km/h)."
+        else:
+            base = f"SAFE: wave {ocean_state.wave_height_m} m and gusts {ocean_state.wind_gust_kmh} km/h within safe limits."
+        if cyclone_note:
+            base += f" Cyclone check: {cyclone_note}"
+        for m in (marine_lines or []):
+            base += f" Marine bulletin: {m}"
+        # Opt-in LLM only if enabled
+        if not _ENABLE_LLM_NOTE:
+            return base
         cyclone_line = (
             f"Live cyclone warning check result: {cyclone_note}\n"
             if cyclone_note else ""
@@ -380,17 +402,8 @@ class HazardAgent:
         )
         try:
             return llm_client.complete(
-                system_prompt, user_prompt, temperature=0.4, max_tokens=600
+                system_prompt, user_prompt, temperature=0.4, max_tokens=250,
+                timeout=7, attempts=1
             )
         except llm_client.LLMUnavailableError:
-            base = (
-                f"[llm_unavailable] Verdict {risk.status.value} computed from thresholds: "
-                + (f"{len(risk.flags)} hazard flag(s): {flags_text}."
-                   if risk.flags else
-                   "no hazard flag crossed an unsafe threshold.")
-            )
-            if cyclone_note:
-                base += f" Cyclone check: {cyclone_note}"
-            for m in (marine_lines or []):
-                base += f" Marine bulletin: {m}"
             return base

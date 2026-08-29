@@ -216,7 +216,9 @@ class DiscussionAgent:
                 "required": ["turns", "consensus"],
             },
             temperature=0.3,
-            max_tokens=900,
+            max_tokens=600,
+            timeout=7,
+            attempts=1,
         )
 
         valid = set(present)

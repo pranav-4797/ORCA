@@ -42,6 +42,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
+import os as _os
+
 import data_connectors.chlorophyll as chlorophyll
 import data_connectors.tide as tide
 from models import (
@@ -64,17 +66,20 @@ _SERIES_HOURS_AHEAD = 48  # window for exceedance scan + chart series
 
 _MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
 _WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
-_HTTP_TIMEOUT_S = 10.0
+# Reduced timeouts for latency — env-overridable
+_HTTP_TIMEOUT_S = float(_os.getenv("ORCA_OCEAN_HTTP_TIMEOUT_S", "3").strip() or 3)
 
 # Whole-reading TTL cache: identical repeat queries within the TTL are
 # served instantly (live forecasts barely move in minutes). The trace
-# honestly marks cached responses.
-_READING_TTL_S = 15 * 60
+# honestly marks cached responses. Env-overridable for latency tuning.
+_READING_TTL_S = int(_os.getenv("ORCA_OCEAN_TTL_S", "120").strip() or 120)  # default 2 min (was 15)
 _reading_cache: dict[tuple, tuple[float, "OceanStateReading"]] = {}
+# Opt-in LLM reasoning notes (default: deterministic template, no LLM call)
+_ENABLE_LLM_NOTE = _os.getenv("ORCA_ENABLE_LLM_REASONING", "").strip().lower() in ("1", "true", "yes")
 
 # Marine dry-cell retries must respect a wall-clock budget so a coastal
 # point outside the marine grid can never stall a query for minutes.
-_MARINE_BUDGET_S = 30.0
+_MARINE_BUDGET_S = float(_os.getenv("ORCA_OCEAN_BUDGET_S", "6").strip() or 6)
 
 logger = logging.getLogger("orca.ocean_state")
 
@@ -126,7 +131,8 @@ class OceanStateAgent:
             degraded_reason = "USE_LIVE_DATA disabled manually"
             reading = self._fetch_simulated_fallback(location, time_window)
 
-        # LLM layer: reason ON TOP of the structured data (never replaces it).
+        # Deterministic reasoning note (no LLM by default) — structured data already authoritative.
+        # LLM note is opt-in via ORCA_ENABLE_LLM_REASONING=1 for complex analytical queries.
         reading.reasoning_note = self._generate_reasoning_note(reading, time_window)
 
         duration_ms = (time.perf_counter() - start) * 1000
@@ -197,15 +203,27 @@ class OceanStateAgent:
             marine["hourly"], weather["hourly"], utc_offset
         )
 
-        # Chlorophyll and tide are independent of each other -- fetch them
-        # concurrently too (each may hit its own slow external source).
+        # Chlorophyll and tide are independent — fetch concurrently but with short timeouts
+        # so live safety data (waves/wind) is not held hostage by slow satellite/tide hosts.
+        # Fallback to simulated quickly keeps simple queries <3s when external feeds are slow.
+        import os as _os_sub
+        _chl_timeout = float(_os_sub.getenv("ORCA_CHL_TIMEOUT_S", "3").strip() or 3)
+        _tide_timeout = float(_os_sub.getenv("ORCA_TIDE_TIMEOUT_S", "3").strip() or 3)
         with ThreadPoolExecutor(max_workers=2) as pool:
             f_chl = pool.submit(self._get_chlorophyll, location)
             f_tide = pool.submit(
                 self._get_tide, location, utc_offset, time_window, target_hour
             )
-            chl_value, chl_source = f_chl.result()
-            tide_value, tide_source, tide_extremes = f_tide.result()
+            try:
+                chl_value, chl_source = f_chl.result(timeout=_chl_timeout)
+            except Exception as exc:
+                logger.info("chlorophyll fetch timed out after %.1fs (%s); simulated fallback", _chl_timeout, exc)
+                chl_value, chl_source = self._simulate_chlorophyll(location), DataSource.SIMULATED.value
+            try:
+                tide_value, tide_source, tide_extremes = f_tide.result(timeout=_tide_timeout)
+            except Exception as exc:
+                logger.info("tide fetch timed out after %.1fs (%s); simulated fallback", _tide_timeout, exc)
+                tide_value, tide_source, tide_extremes = self._simulate_tide(location), DataSource.SIMULATED.value, []
 
         timestamp = datetime.now(timezone.utc)
 
@@ -504,6 +522,29 @@ class OceanStateAgent:
     # ------------------------------------------------------------------
     def _generate_reasoning_note(self, reading: OceanStateReading, time_window: str) -> str:
         sources = reading.field_sources or {}
+        # Deterministic template (no LLM by default — preserves provenance & thresholds without latency).
+        # Example: "Wave height 2.98 m exceeds the 2.5 m threshold."
+        sim_fields = ", ".join(k for k, v in sources.items() if v == "simulated") or "none"
+        wave_note = f"Wave height {reading.wave_height_m} m"
+        thr_wave = getattr(self, "_active_thresholds", {}).get("wave_height_unsafe_m", WAVE_UNSAFE_M)
+        if reading.wave_height_m > thr_wave:
+            wave_note += f" exceeds the {thr_wave} m small-boat safety limit."
+        else:
+            wave_note += f" within safe threshold (<{thr_wave} m)."
+        gust_thr = getattr(self, "_active_thresholds", {}).get("wind_gust_unsafe_kmh", GUST_UNSAFE_KMH)
+        gust_note = f"Wind gusts {reading.wind_gust_kmh} km/h"
+        if reading.wind_gust_kmh > gust_thr:
+            gust_note += f" exceed {gust_thr} km/h threshold."
+        else:
+            gust_note += " moderate."
+        deterministic = (
+            f"Reading for {reading.location.name}, {time_window}: "
+            f"SST {reading.sst_celsius}°C, {wave_note} {gust_note} "
+            f"Tide {reading.tide_level_m} m. Simulated fields: {sim_fields}."
+        )
+        if not _ENABLE_LLM_NOTE:
+            return deterministic
+        # Opt-in LLM embellishment (only when explicitly enabled)
         source_note = (
             "Field provenance: "
             + ", ".join(f"{k.replace('_', ' ')} = {v}" for k, v in sorted(sources.items()))
@@ -535,13 +576,8 @@ class OceanStateAgent:
         try:
             import llm_client
             return llm_client.complete(
-                system_prompt, user_prompt, temperature=0.4, max_tokens=600
+                system_prompt, user_prompt, temperature=0.4, max_tokens=250,
+                timeout=7, attempts=1
             )
         except Exception:
-            sim_fields = ", ".join(k for k, v in sources.items() if v == "simulated") or "none"
-            return (
-                f"[llm_unavailable] Reading for {reading.location.name}, {time_window}. "
-                f"Live fields fetched from Open-Meteo; simulated fields: {sim_fields}. "
-                f"Wave height {reading.wave_height_m} m and gusts "
-                f"{reading.wind_gust_kmh} km/h are the values most likely to matter downstream."
-            )
+            return deterministic

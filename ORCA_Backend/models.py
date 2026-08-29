@@ -17,6 +17,8 @@ class SafetyStatus(str, Enum):
     SAFE = "SAFE"
     CAUTION = "CAUTION"
     UNSAFE = "UNSAFE"
+    EXTREME = "EXTREME"
+    CRITICAL = "CRITICAL"  # alias for EXTREME, for synthesis compatibility
 
 
 class DataSource(str, Enum):
@@ -35,6 +37,21 @@ class DataSource(str, Enum):
     DERIVED_LIVE = "derived_from_live_data"  # computed FROM live fields (not invented)
     STATIC_DERIVED = "static_derived"
     SIMULATED = "simulated"
+
+
+class WindObsStatus(str, Enum):
+    """Provenance tag for a satellite wind observation -- never blended."""
+    REAL = "REAL"
+    SIMULATED = "SIMULATED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class DivergenceStatus(str, Enum):
+    MATCH = "MATCH"
+    MODERATE_DIVERGENCE = "MODERATE_DIVERGENCE"
+    HIGH_DIVERGENCE = "HIGH_DIVERGENCE"
+    UNAVAILABLE = "UNAVAILABLE"   # no satellite obs to compare against
+    STALE = "STALE"               # obs too old to trust
 
 
 @dataclass
@@ -140,6 +157,45 @@ class OceanStateReading:
 
 
 @dataclass
+class WindObservation:
+    """One satellite ocean-wind observation (Innovation #4).
+
+    `status` is the honesty tag: REAL only when an activated official
+    connector actually returned it; SIMULATED for the deterministic demo
+    provider; UNAVAILABLE when neither could serve this point/time -- the
+    numeric fields are meaningless (0.0 placeholders) in that case.
+    """
+    latitude: float
+    longitude: float
+    wind_speed_kmh: float
+    wind_direction_deg: Optional[float]   # None when the source has no direction
+    observation_timestamp: Optional[datetime]
+    source: str            # e.g. "MOSDAC_OSCAT3", "orca_demo_scatterometer"
+    dataset: str            # product/dataset name, "" when UNAVAILABLE
+    status: WindObsStatus
+    reason: str = ""        # why UNAVAILABLE/STALE, human-readable
+
+
+@dataclass
+class WindDivergenceResult:
+    """Output of the divergence engine comparing forecast vs. satellite wind."""
+    forecast_wind_kmh: float
+    satellite_wind_kmh: Optional[float]
+    abs_diff_kmh: Optional[float]
+    pct_diff: Optional[float]
+    direction_diff_deg: Optional[float]
+    status: DivergenceStatus
+    warning: str
+    satellite_status: WindObsStatus
+    satellite_source: str
+    satellite_dataset: str
+    observation_age_minutes: Optional[float]
+    spatial_offset_km: Optional[float]
+    confidence_penalty: float = 0.0     # subtracted from response confidence on HIGH_DIVERGENCE
+    reasoning_note: str = ""
+
+
+@dataclass
 class HazardFlag:
     label: str
     detail: str
@@ -150,10 +206,14 @@ class HazardFlag:
 class PFZRecommendation:
     """Output of the PFZ Agent: nearest potential fishing zone.
 
-    Tier 3 today: when the Bhuvan WMS GetFeatureInfo call is unavailable,
-    the zone is derived deterministically from the (simulated) chlorophyll
-    and SST fields -- every field is tagged in `field_sources` so responses
-    stay honest about what is live vs derived.
+    Tier 1/2 by default: the zone is parsed directly from the official daily
+    INCOIS / SAMUDRA advisory (landing-centre PFZ feed), so `source` is
+    DataSource.INCOIS_LIVE and `landing_center` carries the issued
+    Direction/Distance/Depth. When the INCOIS feeds are unreachable or no
+    zone is issued near the point, the zone falls back to a deterministic
+    DERIVED_LIVE (live SST front) or SIMULATED estimate -- every field is
+    tagged in `field_sources` so responses stay honest about what is live
+    vs derived vs advisory.
     """
     reference_location: Location
     center_lat: float
@@ -170,6 +230,13 @@ class PFZRecommendation:
     # {"center_lat", "center_lon", "distance_km", "bearing_deg",
     #  "sst_celsius", "rank"}.
     alternates: list = field(default_factory=list)
+    # Present only when source == INCOIS_LIVE: the nearest landing centre
+    # whose official advisory fired, with its issued direction/distance/depth.
+    landing_center: dict | None = None
+    # Nearby official PFZ zone lines (uid/length/distance_km), for context.
+    zone_lines: list = field(default_factory=list)
+    # Best-effort INCOIS sector narrative text for the matched sector.
+    advisory_text: str | None = None
 
 
 @dataclass
@@ -283,3 +350,12 @@ class OrchestratorResponse:
     # Region-scan avoid list (P1 #12): combined hazard+geofence zones to stay
     # clear of, each as {"zone", "reason", "distance_km"}.
     avoid_zones: list = field(default_factory=list)
+    # Latency telemetry (ms) — total and per-stage breakdown, for optimization verification
+    timings: dict = field(default_factory=dict)
+    # Auto routing explainability (which agents were selected and why)
+    routing: dict = field(default_factory=dict)
+    # Fleet Convergence Forecast (Innovation #1) — crowding-adjusted recommendation
+    fleet_convergence: Optional[dict] = None
+    # Satellite-Model Wind Divergence Flag (Innovation #4) — dict form of
+    # WindDivergenceResult, None when the check wasn't run for this query.
+    wind_divergence: Optional[dict] = None

@@ -75,11 +75,35 @@ export class MessageItem {
   private parseVerdict(rawContent: string): VerdictData | null {
     if (!rawContent) return null;
 
+    // 1) PREFER structured status from backend if available (authoritative, no text inference).
+    // MessageItem is called with this.message which now carries .status; check it first.
+    const structuredStatus = (this.message as any)?.status as string | undefined;
+    if (structuredStatus) {
+      const norm = structuredStatus.trim().toUpperCase();
+      // Exact normalized matching — NEVER substring match SAFE inside UNSAFE.
+      const exactTitleAndStatus = this.statusToVerdict(norm, rawContent);
+      if (exactTitleAndStatus) return exactTitleAndStatus;
+    }
+
     // Detect verdict patterns: e.g. > [!IMPORTANT] > 🟢 **VERDICT: SAFE** — ...
     const verdictRegex = /(?:>\s*\[!IMPORTANT\]\s*\n>\s*)?(?:[🟢🟠🔴⚪ℹ️●]\s*)?\*{0,2}(?:VERDICT|Overall\s*Status):\s*(SAFE(?:\s*TO\s*SAIL)?(?:\s*\(ALL\s*CLEAR\))?|CAUTION|UNSAFE|CRITICAL|INFO)\*{0,2}(?:\s*—\s*([^\n\r]+))?/i;
     const match = rawContent.match(verdictRegex);
 
     if (!match) {
+      // Fallback: only trigger on explicit full phrase, but still avoid UNSAFE->SAFE misclass.
+      // Require that UNSAFE not appear near SAFE TO SAIL.
+      const upper = rawContent.toUpperCase();
+      const hasUnsafe = /\bUNSAFE\b/.test(upper) || /\bCRITICAL\b/.test(upper);
+      if (hasUnsafe) {
+        return {
+          status: 'critical',
+          title: '🔴 CRITICAL HAZARD · DO NOT VENTURE',
+          summary: 'Hazardous conditions detected — do not venture out.',
+          metrics: this.extractMetrics(rawContent),
+          provenance: this.extractProvenance(rawContent),
+          cleanContent: rawContent.replace(/(?:>\s*\[!IMPORTANT\]\s*\n(?:>\s*[^\n]+\n*)+)/i, '').trim() || rawContent,
+        };
+      }
       if (/SAFE\s*TO\s*SAIL/i.test(rawContent)) {
         return {
           status: 'safe',
@@ -93,19 +117,42 @@ export class MessageItem {
       return null;
     }
 
-    const matchedStr = match[1].toUpperCase();
+    // Normalize matched status: strip extra qualifiers for exact comparison
+    const rawMatched = match[1].toUpperCase().trim().replace(/\s+/g, ' ');
+    // Exact matching first — order matters: UNSAFE/CRITICAL before SAFE to avoid substring bug.
+    // "UNSAFE".includes("SAFE") === true, so we never use includes() for SAFE.
     let status: 'safe' | 'caution' | 'critical' | 'unsafe' | 'info' = 'info';
     let title = 'MISSION ADVISORY';
 
-    if (matchedStr.includes('SAFE')) {
-      status = 'safe';
-      title = '🟢 ALL CLEAR · SAFE TO SAIL';
-    } else if (matchedStr.includes('CAUTION')) {
-      status = 'caution';
-      title = '🟠 CAUTION · MARGINAL CONDITIONS';
-    } else if (matchedStr.includes('UNSAFE') || matchedStr.includes('CRITICAL')) {
+    // Use exact equality checks against normalized variants
+    const isUnsafe = rawMatched === 'UNSAFE' || rawMatched === 'CRITICAL';
+    const isCaution = rawMatched === 'CAUTION';
+    const isSafe = rawMatched === 'SAFE' || rawMatched === 'SAFE TO SAIL' || rawMatched === 'SAFE TO SAIL (ALL CLEAR)' || rawMatched === 'SAFE (ALL CLEAR)';
+
+    if (isUnsafe) {
       status = 'critical';
       title = '🔴 CRITICAL HAZARD · DO NOT VENTURE';
+    } else if (isCaution) {
+      status = 'caution';
+      title = '🟠 CAUTION · MARGINAL CONDITIONS';
+    } else if (isSafe) {
+      status = 'safe';
+      title = '🟢 ALL CLEAR · SAFE TO SAIL';
+    } else {
+      // Fallback: handle slight variants but still avoid substring SAFE-in-UNSAFE by word boundary
+      const hasUnsafeWord = /\bUNSAFE\b/.test(rawMatched) || /\bCRITICAL\b/.test(rawMatched);
+      const hasCautionWord = /\bCAUTION\b/.test(rawMatched);
+      const hasSafeWord = /\bSAFE\b/.test(rawMatched);
+      if (hasUnsafeWord) {
+        status = 'critical';
+        title = '🔴 CRITICAL HAZARD · DO NOT VENTURE';
+      } else if (hasCautionWord) {
+        status = 'caution';
+        title = '🟠 CAUTION · MARGINAL CONDITIONS';
+      } else if (hasSafeWord) {
+        status = 'safe';
+        title = '🟢 ALL CLEAR · SAFE TO SAIL';
+      }
     }
 
     const summary = match[2] ? match[2].trim() : 'Operational assessment from multi-agent ocean telemetry.';
@@ -117,6 +164,45 @@ export class MessageItem {
       status,
       title,
       summary,
+      metrics: this.extractMetrics(rawContent),
+      provenance: this.extractProvenance(rawContent),
+      cleanContent,
+    };
+  }
+
+  private statusToVerdict(normalized: string, rawContent: string): VerdictData | null {
+    // Exact matching for structured status — authoritative
+    const upper = normalized.trim().toUpperCase();
+    let status: 'safe' | 'caution' | 'critical' | 'unsafe' | 'info' = 'info';
+    let title = 'MISSION ADVISORY';
+    if (upper === 'UNSAFE' || upper === 'CRITICAL') {
+      status = 'critical';
+      title = '🔴 CRITICAL HAZARD · DO NOT VENTURE';
+    } else if (upper === 'CAUTION') {
+      status = 'caution';
+      title = '🟠 CAUTION · MARGINAL CONDITIONS';
+    } else if (upper === 'SAFE' || upper === 'SAFE TO SAIL' || upper === 'SAFE TO SAIL (ALL CLEAR)' || upper === 'SAFE_TO_SAIL') {
+      status = 'safe';
+      title = '🟢 ALL CLEAR · SAFE TO SAIL';
+    } else if (upper === 'INFO') {
+      status = 'info';
+      title = 'ℹ️ MISSION ADVISORY';
+    } else {
+      return null;
+    }
+    // For structured verdict, summary comes from first line of content or generic
+    const verdictLine = rawContent.match(/(?:VERDICT|Overall\s*Status):\s*[^\n]+/i);
+    const summary = verdictLine ? verdictLine[0].replace(/.*?:\s*/,'').replace(/\*{1,2}/g,'').trim().slice(0,160) : (
+      status === 'safe' ? 'Conditions within safe thresholds.' :
+      status === 'caution' ? 'Borderline conditions — proceed with caution.' :
+      status === 'critical' ? 'Hazardous conditions — do not venture out.' :
+      'Operational assessment.'
+    );
+    let cleanContent = rawContent.replace(/(?:>\s*\[!IMPORTANT\]\s*\n(?:>\s*[^\n]+\n*)+)/i, '').trim() || rawContent;
+    return {
+      status,
+      title,
+      summary: summary || 'Operational assessment from multi-agent ocean telemetry.',
       metrics: this.extractMetrics(rawContent),
       provenance: this.extractProvenance(rawContent),
       cleanContent,
@@ -246,6 +332,9 @@ export class MessageItem {
           </div>
         ` : ''}
 
+        ${this.renderFleetConvergence()}
+        ${this.renderWindDivergence()}
+
         <div class="ai-msg-body">
           ${renderedHtml}
           ${isStreaming ? `<span class="streaming-cursor"></span>` : ''}
@@ -275,6 +364,101 @@ export class MessageItem {
         ` : ''}
       </div>
     `;
+  }
+
+  private renderFleetConvergence(): string {
+    const fc: any = (this.message as any).fleetConvergence;
+    if (!fc || !fc.candidates || fc.candidates.length === 0) return '';
+    if (fc.status === 'UNAVAILABLE') {
+      return `
+        <div class="fleet-hud-card" style="margin-top:10px;padding:10px 12px;border:1px dashed var(--border-default);border-radius:8px;background:var(--bg-surface);">
+          <div style="font-size:12px;color:var(--text-tertiary);">Fleet convergence unavailable — showing raw fishing suitability. Fleet data will appear when ORCA has recent recommendation history.</div>
+        </div>`;
+    }
+    const simBadge = fc.status && fc.status.startsWith('SIMULATED') ? '<span style="font-size:10px;background:#f59e0b;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">DEMO — SIMULATED FLEET ACTIVITY</span>' : '';
+    const changed = fc.recommendation_changed;
+    const raw = fc.raw_best_zone;
+    const fin = fc.final_zone;
+    let header = '';
+    if (changed && raw && fin) {
+      header = `
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+          <span style="font-weight:700;font-size:13px;color:var(--primary);">🎣 Fleet convergence detected</span>
+          ${simBadge}
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">
+          Zone ${raw.zone_id} has highest raw suitability ${raw.base_suitability} but ${raw.fleet_count} ORCA vessels concentrated there (adj ${raw.adjusted_suitability}). Nearby ${fin.zone_id} has raw ${fin.base_suitability} with only ${fin.fleet_count} vessels (adj ${fin.adjusted_suitability}).<br/>
+          <strong style="color:var(--text-primary);">Recommendation: ${fin.zone_id} ✓</strong> — better effective opportunity with less crowding.
+        </div>`;
+    } else if (fin) {
+      const cand = fc.candidates.find((c:any)=>c.is_recommended) || fin;
+      header = `
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+          <span style="font-weight:600;font-size:13px;">Fleet-checked recommendation: ${cand.zone_id} ✓</span>
+          ${simBadge}
+        </div>`;
+    } else {
+      header = `<div style="font-weight:600;font-size:13px;margin-bottom:8px;">Fleet Convergence — ${fc.status}${simBadge}</div>`;
+    }
+
+    const rows = fc.candidates.map((c:any) => `
+      <div class="fleet-candidate-row" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border:1px solid ${c.is_recommended ? 'var(--primary)' : 'var(--border-default)'};border-radius:6px;background:${c.is_recommended ? 'rgba(34,197,94,0.08)' : 'var(--bg-card)'};margin-bottom:4px;">
+        <div style="display:flex;flex-direction:column;">
+          <span style="font-weight:700;font-size:12px;">${c.zone_id} ${c.is_recommended ? '✓ Recommended' : ''}</span>
+          <span style="font-size:11px;color:var(--text-tertiary);">${c.distance_km}km ${c.bearing_deg}° • SST ${c.sst_celsius}°C</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);">Base</div>
+            <div style="font-weight:700;font-size:13px;">${c.base_suitability}</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);">Fleet</div>
+            <div style="font-weight:700;font-size:13px;">${c.fleet_count}</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);">Adj</div>
+            <div style="font-weight:700;font-size:13px;color:${c.is_recommended ? 'var(--status-safe)' : 'var(--text-primary)'};">${c.adjusted_suitability}</div>
+          </div>
+          <div style="font-size:11px;">${c.crowding_label || ''}</div>
+        </div>
+      </div>
+    `).join('');
+
+    return `
+      <div class="fleet-hud-card" style="margin-top:10px;padding:12px;border:1px solid var(--border-default);border-radius:8px;background:var(--bg-surface);">
+        ${header}
+        <div class="fleet-candidates-grid">
+          ${rows}
+        </div>
+        <div style="font-size:10px;color:var(--text-tertiary);margin-top:6px;">Window ${fc.window_hours}h • Crowding-adjusted suitability = base × (1 − penalty) • CPUE-inspired, not official CMFRI</div>
+      </div>`;
+  }
+
+  private renderWindDivergence(): string {
+    const wd: any = (this.message as any).windDivergence;
+    // Deliberately quiet for MATCH/UNAVAILABLE/STALE — only surface the card
+    // when there's an actual disagreement worth a fisherman's attention.
+    if (!wd || (wd.status !== 'MODERATE_DIVERGENCE' && wd.status !== 'HIGH_DIVERGENCE')) return '';
+    const isHigh = wd.status === 'HIGH_DIVERGENCE';
+    const badge = wd.is_simulated
+      ? '<span style="font-size:10px;background:#f59e0b;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">DEMO — SIMULATED SATELLITE DATA</span>'
+      : '<span style="font-size:10px;background:#0ea5e9;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">REAL SATELLITE DATA</span>';
+    const diffTxt = (wd.diff_kn ?? null) !== null ? `${wd.diff_kn >= 0 ? '+' : ''}${wd.diff_kn} kn` : 'n/a';
+    return `
+      <div class="wind-validation-card" style="margin-top:10px;padding:12px;border:1px solid ${isHigh ? 'var(--status-unsafe, #ef4444)' : 'var(--border-default)'};border-radius:8px;background:var(--bg-surface);">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+          <span style="font-weight:700;font-size:13px;">🌬️ WIND VALIDATION</span>
+          ${badge}
+        </div>
+        <div style="display:flex;gap:16px;align-items:center;margin-bottom:6px;">
+          <div><div style="font-size:10px;color:var(--text-tertiary);">Forecast</div><div style="font-weight:700;font-size:14px;">${wd.forecast_wind_kn} kn</div></div>
+          <div><div style="font-size:10px;color:var(--text-tertiary);">Satellite</div><div style="font-weight:700;font-size:14px;">${wd.satellite_wind_kn} kn</div></div>
+          <div><div style="font-size:10px;color:var(--text-tertiary);">Difference</div><div style="font-weight:700;font-size:14px;">${diffTxt}</div></div>
+          <div><div style="font-size:10px;color:var(--text-tertiary);">Status</div><div style="font-weight:700;font-size:13px;color:${isHigh ? 'var(--status-unsafe, #ef4444)' : 'var(--status-caution, #f59e0b)'};">${isHigh ? '⚠ HIGH DIVERGENCE' : 'MODERATE DIVERGENCE'}</div></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);">${wd.warning}</div>
+      </div>`;
   }
 
   private attachEvents(): void {
@@ -386,4 +570,26 @@ export class MessageItem {
       }
     });
   }
+}
+
+// Exported helpers for unit testing — exact matching logic, no substring SAFE-in-UNSAFE bug.
+export function parseVerdictForTest(rawContent: string, structuredStatus?: string): VerdictData | null {
+  const dummy = new MessageItem({
+    id: 'test',
+    chatId: 'test',
+    role: 'assistant',
+    content: rawContent,
+    timestamp: Date.now(),
+    status: structuredStatus as any,
+  } as any);
+  // Use the instance's parseVerdict via private access (type-cast)
+  return (dummy as any).parseVerdict(rawContent) as VerdictData | null;
+}
+
+export function verdictStatusFromStructured(status: string): 'safe' | 'caution' | 'critical' | 'info' {
+  const u = status.trim().toUpperCase();
+  if (u === 'UNSAFE' || u === 'CRITICAL') return 'critical';
+  if (u === 'CAUTION') return 'caution';
+  if (u === 'SAFE' || u === 'SAFE TO SAIL' || u === 'SAFE TO SAIL (ALL CLEAR)') return 'safe';
+  return 'info';
 }

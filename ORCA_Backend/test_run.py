@@ -33,6 +33,12 @@ SAMPLE_QUERIES = [
 
 
 def main():
+    # Telemetry: reset and collect for this run
+    try:
+        import routing_telemetry
+        routing_telemetry.reset()
+    except:
+        pass
     orchestrator = Orchestrator()
 
     for q, gps, dest in SAMPLE_QUERIES:
@@ -91,6 +97,26 @@ def main():
         for t in response.trace:
             print(f"   [{t.agent_name}] {t.action} ({t.duration_ms:.0f}ms)")
         print()
+
+    # Telemetry summary (Task 6)
+    try:
+        import routing_telemetry
+        stats = routing_telemetry.get_stats()
+        print("=" * 80)
+        print("TELEMETRY SUMMARY (Task 6 — lightweight routing counters)")
+        print(f"  Total queries: {stats['total_queries']}")
+        rc = stats['routing_counts']
+        total = stats['total_queries'] or 1
+        print(f"  Routing: fast-rules {rc['fast-rules']} ({rc['fast-rules']/total:.0%}), llm-planner {rc['llm-planner']}, rules {rc['rules']}, degraded {rc['degraded']}")
+        print(f"  No LLM (discussion+synthesis skipped): {stats['no_llm_queries']} ({stats['no_llm_percent']}%)")
+        print(f"  Discussion LLM ran: {stats['discussion_llm']}, skipped: {stats['discussion_skipped']}")
+        print(f"  Synthesis LLM ran: {stats['synthesis_llm']}, skipped: {stats['synthesis_skipped']}")
+        print(f"  Avg latency: {stats['avg_latency_ms']} ms")
+        # Also show recent
+        print(f"  Recent routing modes: {[r['routing_mode'] for r in stats['recent']]}")
+        print("=" * 80)
+    except Exception as e:
+        print(f"Telemetry unavailable: {e}")
 
 
 if __name__ == "__main__":
