@@ -38,17 +38,10 @@ export class Header {
           </div>
         </div>
 
-        <!-- Center Navigation Tabs (Clean single language) -->
-        <nav class="header-nav-tabs" role="tablist">
-          <button class="nav-tab-btn ${store.activeNavTab === 'overview' ? 'active' : ''}" id="tab-today" data-tab="overview">${t.tabToday}</button>
-          <button class="nav-tab-btn ${store.activeNavTab === 'chat' ? 'active' : ''}" id="tab-ask-orca" data-tab="chat">${t.tabAsk}</button>
-          <button class="nav-tab-btn ${store.activeNavTab === 'sar' ? 'active' : ''}" id="tab-authority" data-tab="sar">${t.tabAuthority}</button>
-          <button class="nav-tab-btn ${store.activeNavTab === 'system' ? 'active' : ''}" id="tab-system" data-tab="system">${t.tabSystem}</button>
-        </nav>
-
         <div class="header-right">
-          <button class="icon-btn" id="btn-theme-toggle" title="Toggle Theme (Night / Day)">
-            ${isDark ? ICONS.sun : ICONS.moon}
+          <!-- Settings Trigger -->
+          <button class="icon-btn" id="btn-header-open-settings" title="Workspace Settings & Navigation">
+            ${ICONS.settings}
           </button>
 
           <!-- Google Auth / Officer Profile Popover -->
@@ -72,6 +65,10 @@ export class Header {
                   <span>🔄</span>
                   <span>Switch Operational Role</span>
                 </button>
+                <button class="btn-popover-action" id="btn-popover-open-settings">
+                  <span>⚙️</span>
+                  <span>Workspace Settings</span>
+                </button>
                 <button class="btn-popover-logout" id="btn-header-logout">
                   <span>${ICONS.logOut || '⎋'}</span>
                   <span>Sign Out</span>
@@ -85,38 +82,6 @@ export class Header {
           `}
         </div>
       </div>
-
-      <!-- Rehearsed Coastal Scenarios Ribbon -->
-      <div class="scenarios-quick-ribbon">
-        <span class="scenarios-title">SCENARIOS</span>
-        <div class="scenarios-list">
-          <button class="scenario-btn" data-scenario="safe_goa">
-            <span class="sc-num">1</span>
-            <span class="sc-name">${t.sc1Title}</span>
-            <span class="sc-loc">${t.sc1Sub}</span>
-          </button>
-          <button class="scenario-btn" data-scenario="rough_mumbai">
-            <span class="sc-num">2</span>
-            <span class="sc-name">${t.sc2Title}</span>
-            <span class="sc-loc">${t.sc2Sub}</span>
-          </button>
-          <button class="scenario-btn" data-scenario="cyclone_paradip">
-            <span class="sc-num">3</span>
-            <span class="sc-name">${t.sc3Title}</span>
-            <span class="sc-loc">${t.sc3Sub}</span>
-          </button>
-          <button class="scenario-btn" data-scenario="pfz_kochi">
-            <span class="sc-num">4</span>
-            <span class="sc-name">${t.sc4Title}</span>
-            <span class="sc-loc">${t.sc4Sub}</span>
-          </button>
-          <button class="scenario-btn" data-scenario="safe_route_mumbai">
-            <span class="sc-num">5</span>
-            <span class="sc-name">${t.sc5Title}</span>
-            <span class="sc-loc">${t.sc5Sub}</span>
-          </button>
-        </div>
-      </div>
     `;
 
     this.attachEvents();
@@ -126,20 +91,16 @@ export class Header {
     const lang = store.activeLanguage || 'en';
     const t = I18N[lang] || I18N.en;
 
-    // Navigation Tabs Switching
-    this.element.querySelectorAll('.nav-tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tab = btn.getAttribute('data-tab') as 'overview' | 'chat' | 'sar' | 'system';
-        if (tab) {
-          store.setNavTab(tab);
-          if (tab === 'chat') {
-            (document.querySelector('#composer-textarea') as HTMLElement)?.focus();
-          } else if (tab === 'overview') {
-            const mapContainer = document.querySelector('#map-container') || document.querySelector('.console-dual-pane-stage');
-            mapContainer?.scrollIntoView({ behavior: 'smooth' });
-          }
-        }
-      });
+    // Settings button
+    this.element.querySelector('#btn-header-open-settings')?.addEventListener('click', () => {
+      store.toggleSettingsModal(true);
+    });
+
+    this.element.querySelector('#btn-popover-open-settings')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const popover = this.element.querySelector('#officer-popover') as HTMLElement | null;
+      if (popover) popover.style.display = 'none';
+      store.toggleSettingsModal(true);
     });
 
     // Toggle Sidebar

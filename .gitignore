@@ -18,6 +18,7 @@ venv/
 # ---- Node (ORCA UI) ----
 node_modules/
 dist/
+.firebase/
 *.local
 
 # ---- Logs / OS junk ----

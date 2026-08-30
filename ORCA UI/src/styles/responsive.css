@@ -229,6 +229,14 @@
     gap: 6px;
   }
 
+  .message-wrapper.user {
+    justify-content: flex-end;
+  }
+
+  .message-wrapper.assistant {
+    justify-content: flex-start;
+  }
+
   .message-avatar {
     width: 24px;
     height: 24px;
@@ -237,9 +245,10 @@
   }
 
   .message-bubble-user {
-    max-width: 90%;
-    padding: 8px 12px;
+    max-width: 88%;
+    padding: 9px 13px;
     font-size: 13px;
+    margin-left: auto;
   }
 
   .message-workspace-ai {

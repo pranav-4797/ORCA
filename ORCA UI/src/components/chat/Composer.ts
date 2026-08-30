@@ -114,8 +114,6 @@ export class Composer {
               <span class="pill-label">${activeAgent.shortName || activeAgent.name}</span>
               <span>${ICONS.chevronDown}</span>
             </button>
-
-            <div id="mode-menu-anchor" style="position:relative;display:flex;"></div>
           </div>
 
           <div class="composer-toolbar-right">
@@ -136,6 +134,9 @@ export class Composer {
             `}
           </div>
         </div>
+
+        <!-- Dropdown Menu Anchor -->
+        <div id="mode-menu-anchor"></div>
       </div>
     `;
 

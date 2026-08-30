@@ -1,6 +1,7 @@
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { store } from '../../store/appState';
+import { showToast } from '../ui/Toast';
 
 /**
  * Operational sea map -- renders the /viz/{session} GeoJSON FeatureCollection
@@ -233,18 +234,33 @@ export class OceanMap {
     let selectionLayer: L.FeatureGroup | null = null;
     let selectionMarker: L.Marker | null = null;
 
+    const selectionIcon = L.divIcon({
+      className: 'orca-selection-pin',
+      html: `<div style="position:relative;width:28px;height:36px;filter:drop-shadow(0 3px 6px rgba(0,0,0,0.45));cursor:pointer;">
+               <svg viewBox="0 0 24 32" width="28" height="36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                 <path d="M12 0C5.373 0 0 5.373 0 12c0 8.5 12 20 12 20s12-11.5 12-20c0-6.627-5.373-12-12-12z" fill="#0ea5e9"/>
+                 <circle cx="12" cy="12" r="5" fill="#ffffff"/>
+                 <circle cx="12" cy="12" r="2.5" fill="#0284c7"/>
+               </svg>
+             </div>`,
+      iconSize: [28, 36],
+      iconAnchor: [14, 36],
+      popupAnchor: [0, -34],
+    });
+
     const popupHtml = (lat: number, lon: number) =>
-      `<div style="max-width:260px;">
-         <b>Selected point</b><br>
-         <span style="font-size:11px;">${this.coordLabel(lat, lon)}</span><br><br>
-         <button id="orca-commit-map-point" data-lat="${lat}" data-lon="${lon}"
-           style="padding:6px 12px;border-radius:6px;border:1px solid #0e7c86;
-                  background:#0e7c86;color:#fff;cursor:pointer;font-size:12px;">
-           ✓ Use this point
+      `<div style="min-width:200px;max-width:260px;padding:4px 2px;">
+         <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:#0f172a;">📍 Selected Coordinates</div>
+         <div style="font-size:11.5px;color:#475569;margin-bottom:10px;font-family:var(--font-mono);">${this.coordLabel(lat, lon)}</div>
+         <button class="orca-commit-map-point-btn" data-lat="${lat}" data-lon="${lon}"
+           style="width:100%;padding:8px 12px;border-radius:6px;border:none;
+                  background:#0ea5e9;color:#ffffff;font-weight:700;cursor:pointer;font-size:12.5px;
+                  box-shadow:0 2px 8px rgba(14,165,233,0.4);display:flex;align-items:center;justify-content:center;gap:6px;">
+           <span>✓ Use this location</span>
          </button>
-         <span style="font-size:11px;color:var(--text-tertiary);display:block;margin-top:6px;">
-           Drag the marker to fine-tune before choosing.
-         </span>
+         <div style="font-size:10.5px;color:#64748b;margin-top:6px;text-align:center;">
+           Drag the pin to adjust position
+         </div>
        </div>`;
 
     // Event delegation: single listener on persistent widget container, survives
@@ -253,12 +269,14 @@ export class OceanMap {
       this._tapDelegationBound = true;
       this.element.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
-        const btn = target.closest('#orca-commit-map-point') as HTMLElement | null;
+        const btn = target.closest('.orca-commit-map-point-btn') as HTMLElement | null;
         if (!btn) return;
         const lat = Number(btn.getAttribute('data-lat'));
         const lon = Number(btn.getAttribute('data-lon'));
         if (!isNaN(lat) && !isNaN(lon)) {
           store.setMapPoint([lat, lon]);
+          showToast(`📍 Point locked: ${lat.toFixed(4)}°, ${lon.toFixed(4)}°`, 'success');
+          selectionMarker?.closePopup();
         }
       });
     }
@@ -269,6 +287,7 @@ export class OceanMap {
       if (selectionLayer) selectionLayer.clearLayers();
       selectionLayer = selectionLayer || L.featureGroup().addTo(this.map!);
       selectionMarker = L.marker([lat, lng], {
+        icon: selectionIcon,
         draggable: true,
         zIndexOffset: 2000,
       }).addTo(selectionLayer);
@@ -285,6 +304,7 @@ export class OceanMap {
       });
       selectionMarker.openPopup();
     });
+
     // Show a short-lived "committed" note whenever mapPoint updates.
     this.onMapPointCommitted();
   }
