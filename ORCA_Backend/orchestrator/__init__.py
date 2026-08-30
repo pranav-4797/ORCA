@@ -1807,11 +1807,106 @@ class Orchestrator:
                 parts.append("No restricted boundary within alert buffer.")
         if route is not None:
             parts.append(f"Route {route.estimated_distance_km:.0f} km via {len(route.waypoints)} waypoints avoiding {', '.join(route.avoided_zones) or 'nothing'}.")
+
+        # Context-aware summary (spec Parts 12-16): replace the old generic
+        # recommendation string with ONE query-specific line generated from
+        # the structured live data. This is what made every SST query end with
+        # "Monitor the sea-surface temperature closely...". Fast + defensive:
+        # on any LLM failure we simply omit it (the table above already stands
+        # on its own), so no generic filler is ever repeated.
+        try:
+            summary = self._context_summary(state, risk=risk, ocean=ocean, pfz=pfz,
+                                             geofence=geofence, route=route,
+                                             trend=state.get("trend"))
+            if summary:
+                parts.append(summary)
+        except Exception:
+            pass
+
         answer = "\n\n".join(parts) if parts else (risk.headline if risk else "Assessment complete.")
         # Safety note if fleet tried to override unsafe
         if fleet and fleet.get("status") != "UNAVAILABLE" and risk and risk.status.value == "UNSAFE":
             answer += " Fleet optimization did not override safety — unsafe zones remain excluded."
         return answer[:1500]
+
+    def _context_summary(self, state, risk=None, ocean=None, pfz=None,
+                         geofence=None, route=None, trend=None):
+        """Build structured dicts from live specialist findings and ask the
+        ResponseAgent's LLM summary generator for ONE query-specific line
+        (spec Parts 12-16). Returns None when the LLM is unavailable so the
+        caller simply omits the paragraph — never a generic template."""
+        from agents.response_agent import generate_context_summary
+        context = state.get("context")
+        plan = state.get("plan") or {}
+        user_query = getattr(context, "raw_query", "") or state.get("raw_query", "")
+        intent = plan.get("intent", "unknown")
+        language = getattr(context, "language", None) or state.get("language", "en")
+
+        ocean_d = None
+        if ocean is not None:
+            fs = getattr(ocean, "field_sources", {}) or {}
+            def _v(field, attr):
+                return getattr(ocean, attr, None) if str(fs.get(field, "")) != "unavailable" else None
+            loc = getattr(ocean, "location", None)
+            ocean_d = {
+                "location": getattr(loc, "name", None) if loc else None,
+                "time_window": getattr(context, "time_window", None) or plan.get("time_window"),
+                "sst_celsius": _v("sst_celsius", "sst_celsius"),
+                "wind_speed_kmh": _v("wind_speed_kmh", "wind_speed_kmh"),
+                "wind_direction": getattr(ocean, "wind_direction", None),
+                "wave_height_m": _v("wave_height_m", "wave_height_m"),
+                "swell_height_m": _v("primary_swell_height_m", "primary_swell_height_m"),
+                "surface_current_mps": _v("surface_current_mps", "surface_current_mps"),
+                "chlorophyll_mg_m3": _v("chlorophyll_mg_m3", "chlorophyll_mg_m3"),
+                "tide_level_m": _v("tide_level_m", "tide_level_m"),
+            }
+            ocean_d = {k: v for k, v in ocean_d.items() if v is not None}
+        pfz_d = None
+        if pfz is not None:
+            lc = getattr(pfz, "landing_center", None) or {}
+            pfz_d = {
+                "distance_km": getattr(pfz, "distance_from_reference_km", None),
+                "bearing_deg": getattr(pfz, "bearing_deg", None),
+                "sst_at_zone_celsius": getattr(pfz, "sst_at_zone_celsius", None),
+                "landing_centre": lc.get("name") if lc else None,
+                "nearest_landmark": getattr(pfz, "nearest_landmark", None),
+            }
+            pfz_d = {k: v for k, v in pfz_d.items() if v is not None}
+        hazard_d = None
+        if risk is not None:
+            hazard_d = {
+                "verdict": getattr(getattr(risk, "status", None), "value", None),
+                "headline": getattr(risk, "headline", None),
+                "marine_bulletins": "; ".join(getattr(risk, "marine_bulletins", []) or [])[:200] or None,
+            }
+            hazard_d = {k: v for k, v in hazard_d.items() if v is not None}
+        geo_d = None
+        if geofence is not None:
+            if getattr(geofence, "clear", True):
+                geo_d = {"boundary_status": "clear of IMBL/MPA within buffer"}
+            else:
+                geo_d = {"boundary_flags": "; ".join(
+                    f"{'inside ' if h.inside_zone else f'{h.distance_to_boundary_km} km from '}{h.zone_name}"
+                    for h in getattr(geofence, "hits", [])[:2])}
+        if route is not None:
+            geo_d = geo_d or {}
+            geo_d["route_km"] = getattr(route, "estimated_distance_km", None)
+            geo_d["avoided"] = ", ".join(getattr(route, "avoided_zones", []) or []) or "nothing"
+        trend_d = None
+        if trend is not None:
+            trend_d = {
+                "window_months": getattr(trend, "window_months", None),
+                "sst_trend_per_month": getattr(trend, "sst_trend_per_month", None),
+                "chl_trend_per_month": getattr(trend, "chl_trend_per_month", None),
+                "sst_chl_correlation": getattr(trend, "sst_chl_correlation", None),
+            }
+            trend_d = {k: v for k, v in trend_d.items() if v is not None}
+
+        return generate_context_summary(
+            user_query=user_query, intent=intent,
+            ocean_state=ocean_d, pfz=pfz_d, hazard=hazard_d,
+            geospatial=geo_d, trend=trend_d, language=language,
+        )
 
     def _node_unsupported(self, state: ORCAGraphState) -> dict:
         plan = state.get("plan") or {}
@@ -1969,8 +2064,33 @@ class Orchestrator:
         is_my_location_query = any(
             _re_fix.search(r'\b' + _re_fix.escape(k) + r'\b', _q_lower) for k in _my_location_phrases
         )
+        # Intent router (Part 9): an explicit relative_location=near_me is an
+        # authoritative "use my position" signal even if the phrase heuristic
+        # above missed the exact wording (e.g. romanised "mere paas").
+        if str(plan.get("router_relative_location") or "") == "near_me":
+            is_my_location_query = True
 
         _glog = logging.getLogger("orca.orchestrator")
+
+        # Typed coordinates (Part 8): the intent router extracted a lat/lon from
+        # the query text. Treat them like a map tap — bind the location directly,
+        # never snap — but they yield to an explicit map_point selection below.
+        router_coords = plan.get("router_coordinates") or None
+        _router_bound_coords = False
+        if router_coords and map_point is None:
+            try:
+                rc_lat, rc_lon = float(router_coords["lat"]), float(router_coords["lon"])
+                _glog.info("Typed coordinate selected (intent router): %.4f,%.4f", rc_lat, rc_lon)
+                location = Location(
+                    name=f"Selected Location ({rc_lat:.4f}°N, {rc_lon:.4f}°E)",
+                    lat=rc_lat, lon=rc_lon,
+                )
+                plan["location_name"] = location.name
+                device_gps = (rc_lat, rc_lon)
+                _router_bound_coords = True
+            except (KeyError, TypeError, ValueError):
+                pass
+
 
         # Map-tap selection (Part A2 — highest priority): the user explicitly
         # tapped a coastal/offshore point. Used directly, never snapped, and it
@@ -2003,6 +2123,8 @@ class Orchestrator:
 
         if map_point is not None and len(map_point) >= 2:
             pass  # location already bound above (highest priority)
+        elif _router_bound_coords:
+            pass  # typed coordinates already bound above (Part 8) — do not re-resolve
         else:
             # Structural safeguard: if a named place was extracted and resolves to a real
             # location, it always wins over the my-location heuristic. Only when
@@ -2704,7 +2826,68 @@ class Orchestrator:
         """
         start = time.perf_counter()
 
+        # 0. LLM Intent Router (new routing brain) — replaces keyword routing as
+        # the PRIMARY intent stage while leaving the plan builder, LangGraph
+        # dispatcher and every agent unchanged. It emits an ORCA-native plan
+        # dict, so nothing downstream needs to know it exists. Disabled with
+        # ORCA_INTENT_ROUTER=off (falls straight through to the legacy path).
+        try:
+            from orchestrator import intent_router
+        except Exception:
+            intent_router = None  # type: ignore
+        if intent_router is not None and intent_router.ROUTER_MODE != "off":
+            try:
+                decision = intent_router.route_intent(normalized_query, conversation_history=prior)
+            except Exception:
+                decision = None
+            if decision is not None and decision.orca_intent != "unknown":
+                _loc = decision.location_name
+                if (not _loc or _loc.lower() in ("same", "unknown")) and prior is not None and prior.location_name:
+                    _loc = prior.location_name
+                complexity = "fast"
+                if decision.orca_intent == Intent.TREND_ANALYSIS:
+                    complexity = "deep"
+                elif decision.is_compound or len(decision.agents) >= 4:
+                    complexity = "complex"
+                elif len(decision.agents) >= 2:
+                    complexity = "standard"
+                # Honour the router's explicit agent selection: if it picked
+                # agents outside this intent's default set (e.g. PFZ+Geospatial
+                # for "navigate to nearest PFZ"), flag compound so
+                # _selected_specialists uses the union directly instead of
+                # intersecting it away.
+                _defaults = set(INTENT_DEFAULT_AGENTS.get(decision.orca_intent, []))
+                _use_union = decision.is_compound or (
+                    bool(decision.agents) and not set(decision.agents).issubset(_defaults)
+                )
+                plan = {
+                    "intent": decision.orca_intent,
+                    "location_name": _loc or "unknown",
+                    "time_window": decision.time_window,
+                    "target_hour": decision.target_hour,
+                    "months_back": decision.months_back
+                        or (6 if decision.orca_intent == Intent.TREND_ANALYSIS else None),
+                    "agents_needed": list(decision.agents),
+                    "why": f"[intent-router:{decision.router_mode}] {decision.reason}".strip(),
+                    "duration_ms": (time.perf_counter() - start) * 1000,
+                    "routing_mode": "intent-router",
+                    "complexity": complexity,
+                    "confidence": decision.confidence,
+                    "is_compound": _use_union,
+                    "compound_intents": decision.compound_intents,
+                    # Router-extracted parameters (Part 8/9) consumed by _step_plan.
+                    "router_coordinates": (
+                        {"lat": decision.coordinates[0], "lon": decision.coordinates[1]}
+                        if decision.coordinates else None
+                    ),
+                    "router_relative_location": decision.relative_location,
+                    "router_intent": decision.intent,
+                    "vessel_class": decision.vessel_class,
+                }
+                return plan, "intent-router"
+
         # 1. Try fast deterministic router FIRST
+
         fast_decision = None
         if _AUTO_ROUTER_AVAILABLE and auto_router is not None:
             try:
