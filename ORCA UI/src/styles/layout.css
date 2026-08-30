@@ -28,7 +28,7 @@
 .sidebar {
   width: var(--sidebar-width);
   height: 100%;
-  background-color: rgba(241, 245, 249, 0.55);
+  background-color: #f8fafc;
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
@@ -36,6 +36,7 @@
   transition: width var(--transition-normal), transform var(--transition-normal);
   z-index: var(--z-sticky);
   user-select: none;
+  box-shadow: 1px 0 8px rgba(0, 0, 0, 0.04);
 }
 
 .sidebar.collapsed {
