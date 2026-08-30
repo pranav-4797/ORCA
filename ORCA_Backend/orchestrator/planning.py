@@ -22,10 +22,13 @@ from .state import (
 from models import AgentTrace, Location, QueryContext
 
 # Keywords that classify a query as an OCEAN_STATE / weather intent (Step 1).
+# Robust to paraphrases + common typos: 'tempreture'/'temprature' contain 'temp'/'temper'
 OCEAN_STATE_KEYWORDS = (
-    "weather", "forecast", "marine weather", "ocean state", "sea condition",
+    "weather", "forecast", "marine weather", "ocean state", "sea condition", "sea conditions",
+    "marine conditions", "ocean conditions", "sea state",
     "wind", "wind speed", "wind gust", "waves", "wave", "wave height",
-    "swell", "sst", "sea surface temperature", "chlorophyll", "tide",
+    "swell", "sst", "sea surface temperature", "sea temperature", "ocean temperature",
+    "temperature", "temp", "temper", "chlorophyll", "tide",
     "high tide", "low tide", "current", "currents",
 )
 
@@ -174,6 +177,16 @@ class PlanningMixin:
                     plan["complexity"] = "deep"
                 elif plan["intent"] in (Intent.ZONE_SCAN, Intent.ROUTE_PLAN) and len(plan.get("agents_needed") or []) >= 4:
                     plan["complexity"] = "complex"
+                # Robustness for typos/paraphrases: LLM may return UNKNOWN for "tempreture of sea"
+                # If keyword fallback has a strong signal, correct it
+                if plan["intent"] == Intent.UNKNOWN:
+                    _kw_intent = self._route_intent(normalized_query)
+                    if _kw_intent != Intent.UNKNOWN:
+                        plan["intent"] = _kw_intent
+                        # Ensure at least default agents for that intent
+                        if not plan.get("agents_needed"):
+                            plan["agents_needed"] = INTENT_DEFAULT_AGENTS.get(_kw_intent, [])
+                        plan["why"] = (plan.get("why","") + f" (corrected from UNKNOWN via keyword fallback: {_kw_intent})").strip()
                 return plan, "llm-planner"
             except llm_client.LLMUnavailableError:
                 pass

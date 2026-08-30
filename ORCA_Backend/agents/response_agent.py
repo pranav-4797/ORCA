@@ -71,7 +71,21 @@ class ResponseAgent:
                 )
                 # Guard: LLM sometimes returns a generic 30-token template without
                 # quoting the live numbers we just injected. Detect and patch.
-                if ocean_state is not None and ("km/h" not in answer or "°C" not in answer):
+                # Query-aware: don't require wind units when user asked only SST (and vice versa)
+                # — prevents double-print (LLM summarized SST block + appended full table).
+                _rq_guard = (getattr(context, "raw_query", "") or "").lower()
+                _sst_need = any(k in _rq_guard for k in ("sst","sea surface temp","sea temp","temperature","temp","temper"))
+                _wind_need = any(k in _rq_guard for k in ("wind","gust"))
+                _wave_need = any(k in _rq_guard for k in ("wave","swell","surf"))
+                _curr_need = any(k in _rq_guard for k in ("current","currents"))
+                _chl_need = any(k in _rq_guard for k in ("chlorophyll","chl","productivity"))
+                _tide_need = any(k in _rq_guard for k in ("tide","tidal"))
+                _specific_guard = _sst_need or _wind_need or _wave_need or _curr_need or _chl_need or _tide_need
+                _need_c = (not _specific_guard) or _sst_need
+                _need_kmh = (not _specific_guard) or _wind_need
+                _missing_c = _need_c and "°C" not in answer and "° C" not in answer
+                _missing_kmh = _need_kmh and "km/h" not in answer
+                if ocean_state is not None and (_missing_c or _missing_kmh):
                     patch = self._fallback_answer(
                         context, synthesis, risk, pfz, geofence, route, ocean_state, trend
                     )
@@ -137,9 +151,9 @@ class ResponseAgent:
             src_val = getattr(getattr(ocean_state, "source", None), "value", "") or "live"
             def _have(field: str) -> bool:
                 return str(fs.get(field, "")) != "unavailable"
-            # Query-aware: only expose fields the user asked for to the LLM
+            # Query-aware: only expose fields the user asked for to the LLM (robust to typo 'tempreture' via 'temp'/'temper')
             _rq = (getattr(context, "raw_query", "") or "").lower()
-            _sst_kw = any(k in _rq for k in ("sst","sea surface temp","sea temp","temperature"))
+            _sst_kw = any(k in _rq for k in ("sst","sea surface temp","sea temp","temperature","temp","temper"))
             _wind_kw = any(k in _rq for k in ("wind","gust"))
             _wave_kw = any(k in _rq for k in ("wave","swell","surf"))
             _curr_kw = any(k in _rq for k in ("current","currents"))
@@ -266,9 +280,9 @@ class ResponseAgent:
                    "concluded, in plain user-facing language.")
             )
 
-        # Query-aware: only include parameters the user asked about (SST vs wind vs all)
+        # Query-aware: only include parameters the user asked about (SST vs wind vs all) — robust to 'tempreture' via 'temp'/'temper'
         _rq = (context.raw_query or "").lower()
-        _specific = any(k in _rq for k in ("sst","wind","wave","swell","current","chlorophyll","chl","tide","sst "))
+        _specific = any(k in _rq for k in ("sst","wind","wave","swell","current","chlorophyll","chl","tide","temp","temper","temperature"))
         system_prompt = (
             "You are the Response Agent of ORCA, a marine-safety assistant for "
             "Indian coastal users. The specialist agents held a round-table "
@@ -294,8 +308,9 @@ class ResponseAgent:
             "     | 🌡️ SST | **28.5°C** |\n"
             "     | 💨 Wind | **31 km/h** |\n"
             "   - CRITICAL: Only include rows for parameters the user asked about. "
-            "If they asked 'sst' show ONLY SST. If 'wind' show ONLY wind. If they asked generically (ocean/marine/weather/conditions) show all available rows.\n"
-            "   - After the table, a 1-sentence actionable recommendation on its own line.\n"
+            "If they asked 'sst'/'temp'/'temperature' show ONLY SST. If 'wind' show ONLY wind. If they asked generically (ocean/marine/weather/conditions/sea) show all available rows.\n"
+            "   - After the table, a 1-2 sentence plain-language summary in very simple, easy-to-understand English (or the user's language). "
+            "MUST quote the live numbers you were given (e.g. 'SST is 28.6°C', 'wind is 19 km/h', 'PFZ 0.1 km away') and briefly say what it means for a fisher (e.g. is it safe/borderline, should they monitor, handle with caution). No jargon.\n"
             "   - End with '*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*' italic line.\n"
             "   - Total length: 80-150 words. Never cram everything into one line.\n"
             "6. For analytical/trend questions, answer the 'why' in one sentence using only the "
@@ -339,7 +354,7 @@ class ResponseAgent:
                 coord = f"📍 {loc.lat:.4f}°N, {loc.lon:.4f}°E"
             fs = getattr(ocean, "field_sources", {}) or {}
             rq = (getattr(context, "raw_query", "") or "").lower()
-            sst_kw = any(k in rq for k in ("sst","sea surface temp","sea temp","temperature"))
+            sst_kw = any(k in rq for k in ("sst","sea surface temp","sea temp","temperature","temp","temper"))
             wind_kw = any(k in rq for k in ("wind","gust"))
             wave_kw = any(k in rq for k in ("wave","swell","surf"))
             curr_kw = any(k in rq for k in ("current","currents"))
@@ -377,6 +392,51 @@ class ResponseAgent:
                     block += f"  \n{coord}"
                 block += "\n\n| Parameter | Value |\n|---|---|\n" + "\n".join(rows)
                 parts.append(block)
+                # Short AI-style actionable recommendation (was LLM-only, now also in fallback so
+                # SST/wind queries still get the 1-sentence summary even when LLM is unavailable)
+                _rec = ""
+                # query-aware, value-quoting recommendation in simple language (easy to understand)
+                _sst_v = getattr(ocean, "sst_celsius", None)
+                _wind_v = getattr(ocean, "wind_speed_kmh", None)
+                _wave_v = getattr(ocean, "wave_height_m", None) if getattr(ocean, "wave_height_m", None) is not None else getattr(ocean, "primary_swell_height_m", None)
+                _wdir = getattr(ocean, "wind_direction", "") or ""
+                if specific and _want("sst_celsius") and not _want("wind_speed_kmh") and not _want("wave_height_m") and not _want("surface_current_mps"):
+                    _rec = f"SST is {_sst_v}°C at this location — the sea surface is warm; monitor for rapid temperature changes that can affect fish movement and vessel comfort. Proceed with normal caution."
+                    if _sst_v is None:
+                        _rec = "Monitor the sea-surface temperature closely and be prepared for possible rapid changes that could affect vessel performance."
+                elif specific and _want("wind_speed_kmh") and not _want("sst_celsius"):
+                    _ws = _wind_v
+                    _tail = f" Wind is {_ws} km/h {_wdir}".strip() + "." if _ws is not None else ""
+                    if _ws is not None and _ws >= 30:
+                        _rec = f"Wind is strong ({_ws} km/h {_wdir}) with noticeable chop — small craft handling will be affected; delay departure or proceed with extra caution.{_tail if 'strong' not in _rec else ''}"
+                        _rec = f"Wind is {_ws} km/h {_wdir} — strong with noticeable chop; small craft handling will be affected. Delay departure or proceed with extra caution."
+                    elif _ws is not None and _ws >= 18:
+                        _rec = f"Wind is {_ws} km/h {_wdir} — moderate with a gentle surface chop. It can affect small craft handling, so proceed with caution."
+                    else:
+                        _rec = f"Wind is {_ws} km/h {_wdir} — light and generally favorable for handling, but keep monitoring for sudden gusts."
+                    _rec = _rec.replace("  ", " ").strip()
+                elif specific and (_want("wave_height_m") or _want("primary_swell_height_m")):
+                    _rec = f"Waves are {_wave_v} m at this location — even moderate seas can impact small vessels. Proceed carefully and keep monitoring the swell."
+                    if _wave_v is None:
+                        _rec = "Monitor wave/swell heights closely — even moderate seas can impact small vessels; proceed carefully."
+                elif specific and _want("surface_current_mps"):
+                    _cur = getattr(ocean, "surface_current_mps", None)
+                    _rec = f"Surface current is {_cur} m/s — account for drift in navigation and fishing operations." if _cur is not None else "Surface currents are present — account for drift in navigation and fishing operations."
+                else:
+                    # generic (all params) — brief overall guidance tied to verdict, quoting live numbers
+                    _vals = []
+                    if _sst_v is not None: _vals.append(f"SST {_sst_v}°C")
+                    if _wind_v is not None: _vals.append(f"wind {_wind_v} km/h")
+                    if _wave_v is not None: _vals.append(f"waves {_wave_v} m")
+                    _vals_txt = ", ".join(_vals) + ". " if _vals else ""
+                    if verdict == "SAFE":
+                        _rec = f"{_vals_txt}Conditions are generally favorable — suitable for venturing out, but keep monitoring official updates."
+                    elif verdict == "UNSAFE":
+                        _rec = f"{_vals_txt}Conditions are unsafe — avoid venturing out and wait for improvement in wind/wave parameters."
+                    else:
+                        _rec = f"{_vals_txt}Borderline conditions — proceed carefully, keep monitoring for rapid changes, and stay within safe limits for your vessel class."
+                if _rec:
+                    parts.append(_rec)
                 parts.append("*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*")
             else:
                 parts.append(f"_{loc_name or 'Selected Location'} ({tw}): Live INCOIS value unavailable._")

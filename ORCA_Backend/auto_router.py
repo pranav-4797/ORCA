@@ -45,9 +45,11 @@ INTENT_KEYWORDS = {
     ],
     "ocean_state": [
         r"\bweather\b", r"\bforecast\b", r"marine weather", r"ocean state",
-        r"sea condition", r"\bwind\b", r"wind speed", r"wind gust",
+        r"sea condition", r"sea conditions", r"marine conditions", r"ocean conditions", r"sea state",
+        r"\bwind\b", r"wind speed", r"wind gust",
         r"\bwaves?\b", r"wave height", r"\bswell\b", r"\bsst\b",
-        r"sea surface temperature", r"chlorophyll", r"\btide\b",
+        r"sea surface temperature", r"sea temperature", r"ocean temperature",
+        r"temperature", r"temp", r"temper", r"chlorophyll", r"\btide\b",
         r"high tide", r"low tide", r"\bcurrents?\b",
     ],
     "zone_scan": [
