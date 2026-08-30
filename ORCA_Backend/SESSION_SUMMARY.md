@@ -582,3 +582,28 @@ unit-checked (far line 441 km, local 0.2 km, empty → None). `py_compile` + `ts
 **Remaining (unchanged from before, all credential/polish blocked):** Bhuvan optional,
 `api.imd.gov.in` key + cyclone-cone overlays, Twilio live-fire, PostGIS/vector store,
 LLM fusion for latency.
+
+---
+
+## 15. Session 2026-08-31 — MOSDAC chlorophyll (primary) + honest-data backlog sweep
+
+**Context:** INCOIS ERDDAP OceanSat‑2:CHL is confirmed dead (archive `2011‑02‑02`, WMS `GetFeatureInfo` always empty for 2026). `isro_sources.MosdacConnector` was scaffolding only (`NotImplementedError`, placeholder `https://mosdac.gov.in/api`). Task: make MOSDAC the honest primary, keep INCOIS as free secondary, never simulate.
+
+**What was done:**
+
+| Area | Change | File:line |
+|---|---|---|
+| `MosdacConnector` | Real `fetch()` — `MOSDAC_API_KEY` (Bearer + `api_key` query), `MOSDAC_BASE_URL`/`MOSDAC_PRODUCT` env-overridable, JSON-first then text/CSV scan, `0-50 mg/m³` `_validate()`, `3‑day latency` note in returned dict; `build_request()` now returns real shape with `date=latest` | `data_connectors/isro_sources.py:47` |
+| `OceanStateAgent` | Chlorophyll order `MOSDAC → INCOIS ERDDAP → unavailable` (`chl_source_detail` + `chl_latency_note`); `field_sources["chlorophyll_mg_m3"]` is `"live"` only on genuine success, otherwise `"unavailable"` (same pattern as SST/wind/current/swell); latency appended to `AgentTrace` + `reading.chlorophyll_latency_note` | `agents/ocean_state_agent.py:155` |
+| `OceanStateReading` | Added `chlorophyll_latency_note: str | None` for provenance | `models.py:128` |
+| Docs | `ORCA_Backend/README.md` Ocean-State row now `MOSDAC OCM primary (3‑day latency) → INCOIS secondary → unavailable`; root `README.md` agents table + status same; `isro_sources.py` docstring no longer says "Open‑Meteo is primary" | `ORCA_Backend/README.md:15`, `README.md:61` |
+| Smoke test | `test_run.py:_smoke_chlorophyll()` — `Ratnagiri 17.0,73.3` asserts `0-50` + `live` or `None` + `unavailable`, never `simulated`, prints latency when present | `test_run.py:109` |
+| Backlog docs | `isro_sources` now documents Registered General User includes OCM, Anonymous does NOT; `.env.example` already reserves `MOSDAC_API_KEY` (+ `MOSDAC_BASE_URL`/`MOSDAC_PRODUCT` overrides); `imd_live.py:60` `DISTRICT_IDS={}` still TODO via devtools, `geospatial_agent:15`/`models:293` `GEBCO TODO` untouched (real GEBCO wiring is a separate large task), Bhuvan optional, Twilio/PostGIS/LLM fusion remain polish/blocked | `data_connectors/isro_sources.py:1`, `.env.example:12`, `imd_live.py:60` |
+
+**Verification:**
+- `py_compile` all changed files → `ALL COMPILE OK`
+- `test_run.py` smoke: `Ratnagiri 17.0,73.3 = unavailable [unavailable] ✓ (honest, no fab)` (MOSDAC no key + INCOIS dead → correctly `unavailable`, not `simulated`)
+- `py_compile` `data_connectors/isro_sources.py`, `agents/ocean_state_agent.py`, `models.py` → `0`
+- Existing suite (`test_optimized.py` etc.) still green — no regressions (INCOIS `500` for `20260830` is expected, not a code bug)
+
+**Remaining (still externally blocked, now accurately documented):** `api.imd.gov.in` key, Bhoonidhi SAR creds, Twilio live-fire, GEBCO bathymetry for depth-aware routing, Bhuvan WMS optional, PostGIS/vector store, LLM fusion/TTS polish.

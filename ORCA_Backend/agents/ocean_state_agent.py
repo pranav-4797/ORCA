@@ -100,6 +100,9 @@ class OceanStateAgent:
             sources = reading.field_sources or {}
             live_fields = sorted(k.replace("_mg_m3","").replace("_m","") for k,v in sources.items() if v in ("live", "tide_gauge_model"))
             result_summary = f"INCOIS live for {location.name} ({time_window}): live fields {', '.join(live_fields) or 'none'}"
+            chl_note = getattr(reading, "chlorophyll_latency_note", None)
+            if chl_note and sources.get("chlorophyll_mg_m3") == "live":
+                result_summary += f" | chlorophyll: {chl_note}"
             _reading_cache[cache_key] = (time.monotonic(), reading)
 
         trace = AgentTrace(
@@ -170,7 +173,45 @@ class OceanStateAgent:
         wind_dir_deg = snapshot.get("wind_direction_deg")
         current = snapshot.get("surface_current")
         swell = snapshot.get("primary_swell_height")
-        chl = snapshot.get("chlorophyll")
+        # Chlorophyll: MOSDAC (ISRO OCM) primary → INCOIS ERDDAP secondary → unavailable
+        # Never simulated; per-field provenance is "live" only on genuine success.
+        chl = None
+        chl_source_detail = "unavailable"
+        chl_latency_note = None
+        # Try MOSDAC first if key is configured
+        try:
+            import os
+
+            if os.getenv("MOSDAC_API_KEY", "").strip():
+                from data_connectors.isro_sources import MosdacConnector
+
+                mosdac = MosdacConnector()
+                try:
+                    mos_res = mosdac.fetch(location)
+                    v = mos_res.get("chlorophyll")
+                    if v is not None and 0.0 <= float(v) <= 50.0:
+                        chl = round(float(v), 3)
+                        chl_source_detail = "live"
+                        chl_latency_note = mos_res.get("latency_note")
+                        logger.info("MOSDAC chlorophyll live for %.4f,%.4f = %.3f mg/m³", location.lat, location.lon, chl)
+                    else:
+                        logger.warning("MOSDAC chlorophyll out of range %s for %.4f,%.4f", v, location.lat, location.lon)
+                except Exception as e:
+                    # MOSDAC failed — fall back to INCOIS ERDDAP (free, currently empty but harmless)
+                    logger.warning("MOSDAC chlorophyll failed for %s (%.4f,%.4f): %s — falling back to INCOIS ERDDAP", location.name, location.lat, location.lon, e)
+        except Exception:
+            pass
+        # Fallback to INCOIS ERDDAP if MOSDAC did not yield a value
+        if chl is None:
+            v2 = snapshot.get("chlorophyll")
+            if v2 is not None and 0.0 <= float(v2) <= 50.0:
+                chl = round(float(v2), 3)
+                chl_source_detail = "live"
+                logger.info("INCOIS ERDDAP chlorophyll live for %.4f,%.4f = %.3f mg/m³", location.lat, location.lon, chl)
+            else:
+                chl_source_detail = "unavailable"
+                if v2 is not None:
+                    logger.warning("INCOIS chlorophyll out of range %s for %.4f,%.4f", v2, location.lat, location.lon)
 
         # Primary Swell Height (PHS01) is the meaningful marine wave field.
         wave = swell if swell is not None else None
@@ -187,20 +228,21 @@ class OceanStateAgent:
             tide_val, tide_src = None, "unavailable"
 
         # Field sources: INCOIS live where available, otherwise unavailable.
-        # No simulated fallback, no derived gust.
+        # No simulated fallback, no derived gust. Chlorophyll provenance is
+        # "live" only on genuine MOSDAC or INCOIS success, per honest-data rule.
         field_sources = {
             "sst_celsius": "live" if sst is not None else "unavailable",
             "wave_height_m": "live" if swell is not None else "unavailable",
             "wind_speed_kmh": "live" if wind_speed is not None else "unavailable",
             "wind_gust_kmh": "unavailable",
-            "chlorophyll_mg_m3": "live" if chl is not None else "unavailable",
+            "chlorophyll_mg_m3": chl_source_detail,
             "tide_level_m": tide_src,
             "surface_current_mps": "live" if current is not None else "unavailable",
             "primary_swell_height_m": "live" if swell is not None else "unavailable",
         }
 
-        # Chlorophyll: real INCOIS only — never simulated.
-        chl_val = round(float(chl), 2) if chl is not None else None
+        # Chlorophyll: MOSDAC primary → INCOIS fallback — never simulated.
+        chl_val = round(float(chl), 3) if chl is not None else None
         has_live = any(v == "live" for v in field_sources.values())
 
         reading = OceanStateReading(
@@ -232,6 +274,8 @@ class OceanStateAgent:
         )
         reading.debug_incois = snapshot.get("debug") or {}
         reading.unavailable_reason = None if has_live else "Live INCOIS value unavailable"
+        if chl_latency_note:
+            reading.chlorophyll_latency_note = chl_latency_note
         return reading
 
     def _get_tide(self, location: Location, utc_offset_seconds: int, time_window: str, target_hour: int | None = None):

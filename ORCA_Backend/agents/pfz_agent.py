@@ -40,6 +40,7 @@ import urllib.request
 
 import llm_client
 from agents.geospatial_agent import LandingCentreIndex
+from data_connectors.geocode import GeocodeUnavailableError, reverse_geocode
 from data_connectors.incois_pfz import (
     IncoisUnavailableError,
     get_live_pfz_sync,
@@ -77,6 +78,19 @@ _BEARS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 def _bearing_word(deg: float) -> str:
     return _BEARS[int((deg % 360) / 45) % 8]
+
+
+def _nearest_landmark(lat: float, lon: float) -> str | None:
+    """Best-effort reverse-geocode to a town-level landmark (cached, keyless).
+
+    Returns None on failure/miss — never raises, never fabricates.
+    """
+    try:
+        return reverse_geocode(lat, lon)
+    except GeocodeUnavailableError:
+        return None
+    except Exception:
+        return None
 
 
 def _line_bbox(feature: dict) -> tuple[float, float, float, float]:
@@ -233,16 +247,30 @@ class PFZAgent:
 
         # sst/chl are not carried in the PFZ feed; reuse the ocean-state
         # reading when available (still honestly tagged from whence it came).
-        sst = ocean_state.sst_celsius if ocean_state is not None else 0.0
-        chl = ocean_state.chlorophyll_mg_m3 if ocean_state is not None else 0.0
+        # Never fabricate 0.0 — None means unavailable.
+        sst = None
+        chl = None
+        if ocean_state is not None:
+            sst = ocean_state.sst_celsius if ocean_state.sst_celsius is not None else None
+            chl = ocean_state.chlorophyll_mg_m3 if ocean_state.chlorophyll_mg_m3 is not None else None
         sst_source = (
             ocean_state.field_sources.get("sst_celsius")
-            if ocean_state else DataSource.SIMULATED.value
+            if ocean_state and ocean_state.field_sources.get("sst_celsius") not in (None, "")
+            and ocean_state.sst_celsius is not None else "unavailable"
         )
         chl_source = (
             ocean_state.field_sources.get("chlorophyll_mg_m3")
-            if ocean_state else DataSource.SIMULATED.value
+            if ocean_state and ocean_state.field_sources.get("chlorophyll_mg_m3") not in (None, "")
+            and ocean_state.chlorophyll_mg_m3 is not None else "unavailable"
         )
+        # If ocean_state is None or fields are None, source must be unavailable, not simulated
+        if sst is None:
+            sst_source = "unavailable"
+        if chl is None:
+            chl_source = "unavailable"
+
+        # Reverse-geocode primary zone to nearest landmark (town-level, zoom=14)
+        primary_landmark = _nearest_landmark(float(zone_lat), float(zone_lon))
 
         # Alternate issued zones (next nearest centres) so users can compare.
         alternates: list[dict] = []
@@ -250,6 +278,11 @@ class PFZAgent:
             d, b = self._haversine_bearing(
                 location.lat, location.lon, c["pfz_lat"], c["pfz_lon"]
             )
+            # Best-effort landmark for each alternate
+            try:
+                alt_landmark = _nearest_landmark(float(c["pfz_lat"]), float(c["pfz_lon"]))
+            except Exception:
+                alt_landmark = None
             alternates.append({
                 "center_lat": c["pfz_lat"],
                 "center_lon": c["pfz_lon"],
@@ -260,6 +293,7 @@ class PFZAgent:
                 "direction": c.get("Direction"),
                 "advisory_distance_km": c.get("Distance"),
                 "advisory_depth_m": c.get("Depth"),
+                "nearest_landmark": alt_landmark,
             })
 
         # Candidate official zone lines within sight of the point (context
@@ -298,8 +332,9 @@ class PFZAgent:
             center_lon=round(float(zone_lon), 4),
             distance_from_reference_km=round(distance_km, 1),
             bearing_deg=round(bearing_deg, 1),
-            sst_at_zone_celsius=round(sst, 2),
-            chlorophyll_at_zone_mg_m3=round(chl, 3),
+            sst_at_zone_celsius=round(float(sst), 2) if sst is not None else None,
+            chlorophyll_at_zone_mg_m3=round(float(chl), 3) if chl is not None else None,
+            nearest_landmark=primary_landmark,
             source=DataSource.INCOIS_LIVE,
             confidence=0.9,
             field_sources={
@@ -389,6 +424,11 @@ class PFZAgent:
                 continue
             d, b = self._haversine_bearing(location.lat, location.lon,
                                            cand["lat"], cand["lon"])
+            # Best-effort landmark for each derived alternate
+            try:
+                alt_landmark = _nearest_landmark(round(float(cand["lat"]), 4), round(float(cand["lon"]), 4))
+            except Exception:
+                alt_landmark = None
             alternates.append({
                 "center_lat": round(cand["lat"], 4),
                 "center_lon": round(cand["lon"], 4),
@@ -396,6 +436,7 @@ class PFZAgent:
                 "bearing_deg": round(b, 1),
                 "sst_celsius": round(cand["sst"], 2),
                 "gradient_vs_reference_c": round(abs(cand["sst"] - center_sst), 2),
+                "nearest_landmark": alt_landmark,
             })
 
         dist, bear = self._haversine_bearing(
@@ -405,10 +446,17 @@ class PFZAgent:
             ocean_state.chlorophyll_mg_m3
             if ocean_state is not None else None
         )
-        chl_source = (
-            (ocean_state.field_sources.get("chlorophyll_mg_m3")
-             if ocean_state else None) or DataSource.SIMULATED.value
-        )
+        # Honest source: unavailable when field is None
+        if ocean_state is not None and ocean_state.chlorophyll_mg_m3 is not None:
+            chl_source = ocean_state.field_sources.get("chlorophyll_mg_m3", "unavailable")
+        elif ocean_state is not None:
+            chl = None
+            chl_source = "unavailable"
+        else:
+            chl_source = DataSource.SIMULATED.value
+
+        # Reverse-geocode primary derived zone
+        derived_landmark = _nearest_landmark(round(float(best["lat"]), 4), round(float(best["lon"]), 4))
 
         return PFZRecommendation(
             reference_location=location,
@@ -418,6 +466,7 @@ class PFZAgent:
             bearing_deg=round(bear, 1),
             sst_at_zone_celsius=round(best["sst"], 2),
             chlorophyll_at_zone_mg_m3=chl if chl is not None else None,
+            nearest_landmark=derived_landmark,
             source=DataSource.DERIVED_LIVE,
             confidence=0.65,
             field_sources={
@@ -475,14 +524,48 @@ class PFZAgent:
         ).hexdigest(), 16)
         frac = lambda off, lo, hi: round(lo + ((seed >> off) % 10_000 / 10_000) * (hi - lo), 3)
 
-        sst = ocean_state.sst_celsius if ocean_state is not None else frac(4, 26.5, 29.5)
-        chl = ocean_state.chlorophyll_mg_m3 if ocean_state is not None else frac(12, 0.6, 2.2)
+        # Never fabricate a number — respect None fields
+        if ocean_state is not None and ocean_state.sst_celsius is not None:
+            sst = ocean_state.sst_celsius
+            sst_fs = ocean_state.field_sources.get("sst_celsius") if ocean_state.field_sources else None
+            sst_source_fs = sst_fs if sst_fs not in (None, "") else "unavailable"
+        elif ocean_state is not None:
+            sst = None
+            sst_source_fs = "unavailable"
+        else:
+            sst = frac(4, 26.5, 29.5)
+            sst_source_fs = DataSource.SIMULATED.value
+        if ocean_state is not None and ocean_state.chlorophyll_mg_m3 is not None:
+            chl = ocean_state.chlorophyll_mg_m3
+            chl_fs = ocean_state.field_sources.get("chlorophyll_mg_m3") if ocean_state.field_sources else None
+            chl_source_fs = chl_fs if chl_fs not in (None, "") else "unavailable"
+        elif ocean_state is not None:
+            chl = None
+            chl_source_fs = "unavailable"
+        else:
+            chl = frac(12, 0.6, 2.2)
+            chl_source_fs = DataSource.SIMULATED.value
 
         dist = float(frac(20, 6.0, 38.0))
-        bear = float(frac(28, 0.0, 359.9))
+        # Bias fallback bearing offshore: west coast (lon < 78) -> west (240-300°), east coast -> east (60-120°)
+        # Surat/Mumbai/Kochi are west coast, so keep zone seaward, not inland.
+        raw_bear = float(frac(28, 0.0, 359.9))
+        if location.lon < 78.0:
+            # West coast: force to western quadrant (W/SW/NW) — map 0-360 -> 240-300
+            bear = 240.0 + (raw_bear % 60.0)
+        elif location.lon > 82.0:
+            # East coast: east quadrant (60-120)
+            bear = 60.0 + (raw_bear % 60.0)
+        else:
+            bear = raw_bear
         rad = math.radians(bear)
         dlat = (dist / 111.0) * math.cos(rad)
         dlon = (dist / (111.0 * max(math.cos(math.radians(location.lat)), 0.2))) * math.sin(rad)
+        # Reverse-geocode seeded zone (best-effort)
+        try:
+            seeded_landmark = _nearest_landmark(round(location.lat + dlat, 4), round(location.lon + dlon, 4))
+        except Exception:
+            seeded_landmark = None
 
         return PFZRecommendation(
             reference_location=location,
@@ -490,18 +573,15 @@ class PFZAgent:
             center_lon=round(location.lon + dlon, 4),
             distance_from_reference_km=dist,
             bearing_deg=bear,
-            sst_at_zone_celsius=sst,
-            chlorophyll_at_zone_mg_m3=chl,
+            sst_at_zone_celsius=round(float(sst), 2) if sst is not None else None,
+            chlorophyll_at_zone_mg_m3=round(float(chl), 3) if chl is not None else None,
+            nearest_landmark=seeded_landmark,
             source=DataSource.SIMULATED,
             confidence=0.5,
             field_sources={
                 "zone_position": DataSource.SIMULATED.value,
-                "sst_at_zone_celsius":
-                    (ocean_state.field_sources.get("sst_celsius")
-                     if ocean_state else DataSource.SIMULATED.value),
-                "chlorophyll_at_zone_mg_m3":
-                    (ocean_state.field_sources.get("chlorophyll_mg_m3")
-                     if ocean_state else DataSource.SIMULATED.value),
+                "sst_at_zone_celsius": sst_source_fs,
+                "chlorophyll_at_zone_mg_m3": chl_source_fs,
             },
         )
 
@@ -584,11 +664,13 @@ class PFZAgent:
     # Deterministic note by default — no LLM needed for distance/bearing facts.
     # ------------------------------------------------------------------
     def _generate_reasoning_note(self, pfz: PFZRecommendation) -> str:
+        sst_txt = f"{pfz.sst_at_zone_celsius} °C" if pfz.sst_at_zone_celsius is not None else "N/A"
+        chl_txt = f"{pfz.chlorophyll_at_zone_mg_m3} mg/m³" if pfz.chlorophyll_at_zone_mg_m3 is not None else "N/A"
         deterministic = (
             f"Zone {pfz.distance_from_reference_km} km away at "
             f"{pfz.bearing_deg:.1f}° bearing; "
-            f"SST {pfz.sst_at_zone_celsius} °C, chlorophyll "
-            f"{pfz.chlorophyll_at_zone_mg_m3} mg/m³."
+            f"SST {sst_txt}, chlorophyll "
+            f"{chl_txt}."
         )
         if pfz.source == DataSource.INCOIS_LIVE:
             lc = pfz.landing_center or {}

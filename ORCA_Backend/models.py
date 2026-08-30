@@ -141,6 +141,9 @@ class OceanStateReading:
     # the structured numbers above in its own words. Empty when the LLM
     # layer is unavailable (fallback path).
     reasoning_note: str = ""
+    # MOSDAC provenance: when chlorophyll came from MOSDAC, this holds the
+    # 3‑day latency disclosure ("Registered tier — 3‑day latency").
+    chlorophyll_latency_note: str | None = None
     # Per-field honesty metadata: maps field name -> "live" | "simulated" so
     # responses can state exactly which values are real and which are not,
     # instead of blanket-tagging the whole reading.
@@ -235,15 +238,19 @@ class PFZRecommendation:
     center_lon: float
     distance_from_reference_km: float
     bearing_deg: float  # compass bearing from reference point to zone centre
-    sst_at_zone_celsius: float
+    sst_at_zone_celsius: float | None
     chlorophyll_at_zone_mg_m3: float | None
     source: DataSource
     confidence: float
     reasoning_note: str = ""
     field_sources: dict = field(default_factory=dict)
+    # Human-readable nearest landmark for the primary zone (reverse-geocoded
+    # via OSM Nominatim zoom=14), e.g. "Alibaug, Maharashtra". None when
+    # reverse-geocode unavailable.
+    nearest_landmark: str | None = None
     # Ranked secondary zones from the region scan (P1 #12). Each entry:
     # {"center_lat", "center_lon", "distance_km", "bearing_deg",
-    #  "sst_celsius", "rank"}.
+    #  "sst_celsius", "rank", "nearest_landmark": str|None}.
     alternates: list = field(default_factory=list)
     # Present only when source == INCOIS_LIVE: the nearest landing centre
     # whose official advisory fired, with its issued direction/distance/depth.

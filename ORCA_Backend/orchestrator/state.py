@@ -38,6 +38,16 @@ KNOWN_LOCATIONS = {
     "kochi": Location(name="Kochi Coast", lat=9.9312, lon=76.2673),
     "visakhapatnam": Location(name="Visakhapatnam Coast", lat=17.6868, lon=83.2185),
     "odisha": Location(name="Odisha Coast (Puri)", lat=19.8135, lon=85.8312),
+    "surat": Location(name="Surat Coast", lat=21.00, lon=72.60),
+    "mumbai": Location(name="Mumbai Coast", lat=19.0760, lon=72.8777),
+    "veraval": Location(name="Veraval Coast", lat=20.90, lon=70.36),
+    "porbandar": Location(name="Porbandar Coast", lat=21.64, lon=69.60),
+    "dwarka": Location(name="Dwarka Coast", lat=22.24, lon=68.97),
+    "kandla": Location(name="Kandla Coast", lat=23.03, lon=70.22),
+    "okha": Location(name="Okha Coast", lat=22.47, lon=69.07),
+    "daman": Location(name="Daman Coast", lat=20.42, lon=72.85),
+    "diu": Location(name="Diu Coast", lat=20.71, lon=70.98),
+    "bhavnagar": Location(name="Bhavnagar Coast", lat=21.76, lon=72.15),
 }
 DEFAULT_LOCATION = Location(name="Unknown Coast (default demo point)", lat=15.5, lon=73.8)
 
@@ -192,6 +202,10 @@ def _detect_romanized_language(text: str) -> str | None:
 def resolve_location(place_name: str) -> Location | None:
     """Return Location or None if no location determinable. Never defaults to Panaji."""
     key = " ".join((place_name or "").strip().lower().split())
+    # Strip " coast" suffix that SessionContext stores (e.g. "Ratnagiri Coast" -> "ratnagiri")
+    bare = key[:-6].strip() if key.endswith(" coast") else key
+    if bare in KNOWN_LOCATIONS:
+        return KNOWN_LOCATIONS[bare]
     if key in KNOWN_LOCATIONS:
         return KNOWN_LOCATIONS[key]
     if key in _geocode_cache:

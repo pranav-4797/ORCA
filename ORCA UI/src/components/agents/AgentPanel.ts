@@ -15,6 +15,22 @@ export class AgentPanel {
   private mapsLoading = false;
   private mapsLoadPromise: Promise<void> | null = null;
 
+  // Persistent DOM fix: track initialization and last panel state
+  private _initialized = false;
+  private _lastMapPanelOpen: boolean | null = null;
+  private _mapContainer: HTMLElement | null = null;
+  private _mapSection: HTMLElement | null = null;
+  private _mapBody: HTMLElement | null = null;
+  private _mapHeadRow: HTMLElement | null = null;
+  private _mapToggleBtn: HTMLElement | null = null;
+  private _headerEl: HTMLElement | null = null;
+  private _contentEl: HTMLElement | null = null;
+  private _sarContainer: HTMLElement | null = null;
+  private _activityContainer: HTMLElement | null = null;
+  private _selectorContainer: HTMLElement | null = null;
+  private _personaContainer: HTMLElement | null = null;
+  private _simulationAccordion: HTMLElement | null = null;
+
   constructor() {
     this.element = document.createElement('aside');
     this.element.className = 'agent-panel';
@@ -46,13 +62,8 @@ export class AgentPanel {
     return this.element;
   }
 
-  private render(): void {
-    const isVisible = store.agentPanelOpen;
-    const isMobileDrawer = store.mobileAgentDrawerOpen;
-    const activeAgent = store.getActiveAgent();
-
-    this.element.className = `agent-panel ${isVisible ? '' : 'hidden'} ${isMobileDrawer ? 'drawer-open' : ''}`;
-
+  private _buildSkeleton(): void {
+    // Build once: header chrome + persistent content containers. Map children stay alive.
     this.element.innerHTML = `
       <div class="agent-panel-header">
         <div class="agent-panel-title">
@@ -63,33 +74,18 @@ export class AgentPanel {
           ${ICONS.x}
         </button>
       </div>
-
       <div class="agent-panel-content">
         <!-- Operational picture: live map + hourly series for the last answer -->
-        <div id="map-container">
-          ${!store.vizGeojson ? `
-            <div class="empty-telemetry-panel-card">
-              <div class="empty-telemetry-icon">🛰️</div>
-              <div class="empty-telemetry-title">Operations Map &amp; Telemetry</div>
-              <div class="empty-telemetry-desc">
-                Live INCOIS PFZ lines, wave/wind forecast charts, and boundary geofences will render dynamically here after you ask a question.
-              </div>
-            </div>
-          ` : ''}
-        </div>
-
+        <div id="map-container"></div>
         <!-- SAR Boundary Monitor — Innovation #3 (Authority) -->
         <div id="sar-monitor-container"></div>
-
         <!-- Advanced Simulation & Stress Test Controls (Collapsed by default to eliminate clutter) -->
         <details class="simulation-accordion" style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:12px;">
           <summary style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:var(--text-secondary);cursor:pointer;user-select:none;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;">
             <span>⚙️ Simulation &amp; Stress Tests</span>
             <span style="font-size:10px;opacity:0.7;">Click to Expand</span>
           </summary>
-
           <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px;">
-            <!-- Fleet Convergence Forecast — Innovation #1 -->
             <div class="orca-telemetry-widget" id="fleet-convergence-widget" style="border-left:3px solid var(--primary);margin:0;">
               <div class="widget-section-header">
                 <span class="label-caps" style="display:flex;align-items:center;gap:6px;">${ICONS.sparkles} FLEET CONVERGENCE</span>
@@ -114,8 +110,6 @@ export class AgentPanel {
               </div>
               <div id="fleet-status-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:6px;max-height:60px;overflow-y:auto;"></div>
             </div>
-
-            <!-- Wind Validation — Innovation #4 (Satellite–Model Divergence) -->
             <div class="orca-telemetry-widget" id="wind-validation-widget" style="border-left:3px solid #0ea5e9;margin:0;">
               <div class="widget-section-header">
                 <span class="label-caps" style="display:flex;align-items:center;gap:6px;">🌬️ SATELLITE WIND DIVERGENCE</span>
@@ -141,108 +135,50 @@ export class AgentPanel {
             </div>
           </div>
         </details>
-
-
-        <!-- Active Advisory Persona Info -->
-        <div style="padding:var(--space-3);background:var(--bg-card);border:1px solid var(--border-default);border-radius:var(--radius-md);">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <div style="width:30px;height:30px;border-radius:var(--radius-sm);background:${activeAgent.avatarBg};color:${activeAgent.avatarColor};display:flex;align-items:center;justify-content:center;">
-              ${ICONS[activeAgent.icon] || ICONS.compass}
-            </div>
-            <div>
-              <div style="font-weight:600;font-size:var(--text-sm);color:var(--text-primary);">${activeAgent.name}</div>
-              <div class="data-mono-sm" style="color:var(--text-tertiary);">${activeAgent.role}</div>
-            </div>
-          </div>
-          <p style="font-size:12px;color:var(--text-secondary);line-height:1.45;margin-bottom:8px;">${activeAgent.description}</p>
-          <div style="display:flex;flex-wrap:wrap;gap:4px;">
-            ${activeAgent.capabilities.map(cap => `<span class="cap-badge">${cap}</span>`).join('')}
-          </div>
-        </div>
-
-        <!-- Execution Steps Activity Container -->
+        <div id="persona-container" style="padding:var(--space-3);background:var(--bg-card);border:1px solid var(--border-default);border-radius:var(--radius-md);"></div>
         <div id="activity-container"></div>
-
-        <!-- Advisory Modules List -->
         <div id="selector-container"></div>
       </div>
     `;
+    this._headerEl = this.element.querySelector('.agent-panel-header') as HTMLElement;
+    this._contentEl = this.element.querySelector('.agent-panel-content') as HTMLElement;
+    this._mapContainer = this.element.querySelector('#map-container') as HTMLElement;
+    this._sarContainer = this.element.querySelector('#sar-monitor-container') as HTMLElement;
+    this._activityContainer = this.element.querySelector('#activity-container') as HTMLElement;
+    this._selectorContainer = this.element.querySelector('#selector-container') as HTMLElement;
+    this._personaContainer = this.element.querySelector('#persona-container') as HTMLElement;
+    this._simulationAccordion = this.element.querySelector('.simulation-accordion') as HTMLElement;
 
-    const sarContainer = this.element.querySelector('#sar-monitor-container');
-    if (sarContainer) {
-      if (!this.sarMonitor) {
-        import('../sar/SARBoundaryMonitor').then(({ SARBoundaryMonitor }) => {
-          this.sarMonitor = new SARBoundaryMonitor();
-          const cont = this.element.querySelector('#sar-monitor-container');
-          if (cont && this.sarMonitor) {
-            cont.appendChild(this.sarMonitor.getElement());
-          }
-        }).catch(() => {
-          const fallback = document.createElement('div');
-          fallback.textContent = 'SAR Boundary Monitor unavailable';
-          fallback.style.fontSize = '11px';
-          fallback.style.color = 'var(--text-tertiary)';
-          sarContainer.appendChild(fallback);
-        });
-      } else {
-        sarContainer.appendChild(this.sarMonitor.getElement());
-      }
+    // Create persistent map section once
+    this._mapSection = document.createElement('div');
+    this._mapSection.className = 'orca-map-section';
+    this._mapHeadRow = document.createElement('div');
+    this._mapHeadRow.className = 'map-section-head';
+    this._mapHeadRow.innerHTML = `<span class="label-caps" style="color:var(--primary);display:flex;align-items:center;gap:6px;">${ICONS.compass} OPERATIONAL PICTURE</span>`;
+    this._mapToggleBtn = document.createElement('button');
+    this._mapToggleBtn.className = 'icon-btn map-toggle-btn';
+    this._mapToggleBtn.addEventListener('click', () => {
+      store.toggleMapPanel();
+    });
+    this._mapHeadRow.appendChild(this._mapToggleBtn);
+    this._mapSection.appendChild(this._mapHeadRow);
+
+    this._mapBody = document.createElement('div');
+    this._mapBody.className = 'map-body';
+    // Placeholder will be managed in _syncMapPanel
+    this._mapSection.appendChild(this._mapBody);
+    this._mapContainer.appendChild(this._mapSection);
+
+    // Attach persistent activity/selector once
+    if (this._activityContainer && !this._activityContainer.contains(this.agentActivity.getElement())) {
+      this._activityContainer.appendChild(this.agentActivity.getElement());
+    }
+    if (this._selectorContainer && !this._selectorContainer.contains(this.agentSelector.getElement())) {
+      this._selectorContainer.appendChild(this.agentSelector.getElement());
     }
 
-    const mapContainer = this.element.querySelector('#map-container');
-    if (mapContainer) {
-      const section = document.createElement('div');
-      section.className = 'orca-map-section';
-      if (!store.mapPanelOpen) section.classList.add('collapsed');
-
-      const toggleBtn = document.createElement('button');
-      toggleBtn.className = 'icon-btn map-toggle-btn';
-      toggleBtn.title = store.mapPanelOpen ? 'Collapse map & charts' : 'Expand map & charts';
-      toggleBtn.innerHTML = store.mapPanelOpen ? ICONS.chevronDown : ICONS.chevronRight;
-      toggleBtn.addEventListener('click', () => {
-        store.toggleMapPanel();
-        return;
-      });
-      const headRow = document.createElement('div');
-      headRow.className = 'map-section-head';
-      headRow.innerHTML = `<span class="label-caps" style="color:var(--primary);display:flex;align-items:center;gap:6px;">${ICONS.compass} OPERATIONAL PICTURE</span>`;
-      headRow.appendChild(toggleBtn);
-      section.appendChild(headRow);
-
-      if (store.mapPanelOpen) {
-        const body = document.createElement('div');
-        if (this.oceanMap && this.vizChart) {
-          body.appendChild(this.oceanMap.getElement());
-          body.appendChild(this.vizChart.getElement());
-        } else {
-          const placeholder = document.createElement('div');
-          placeholder.className = 'viz-chart-empty';
-          placeholder.textContent = 'Loading operational picture…';
-          body.appendChild(placeholder);
-          this.ensureMapsLoaded().then(() => {
-            if (store.mapPanelOpen) this.render();
-          });
-        }
-        section.appendChild(body);
-      }
-      mapContainer.appendChild(section);
-    }
-
-    const activityContainer = this.element.querySelector('#activity-container');
-    if (activityContainer) {
-      activityContainer.appendChild(this.agentActivity.getElement());
-    }
-
-    const selectorContainer = this.element.querySelector('#selector-container');
-    if (selectorContainer) {
-      selectorContainer.appendChild(this.agentSelector.getElement());
-    }
-
-    this.attachEvents();
-  }
-
-  private attachEvents(): void {
-    this.element.querySelector('#btn-close-agent-panel')?.addEventListener('click', () => {
+    // Header close button delegation (bound once)
+    this._headerEl?.querySelector('#btn-close-agent-panel')?.addEventListener('click', () => {
       const isMobile = window.innerWidth < 1280;
       if (isMobile) {
         store.toggleMobileAgentDrawer(false);
@@ -251,17 +187,232 @@ export class AgentPanel {
       }
     });
 
-    // Fleet Convergence demo controls
-    const fleetBtns = this.element.querySelectorAll('.fleet-demo-btn');
-    fleetBtns.forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const level = (btn as HTMLElement).getAttribute('data-level') || '';
+    // Init SAR monitor once
+    this._initSarMonitor();
+
+    this._initialized = true;
+  }
+
+  private _initSarMonitor(): void {
+    if (!this._sarContainer) return;
+    if (this.sarMonitor) {
+      if (!this._sarContainer.contains(this.sarMonitor.getElement())) {
+        this._sarContainer.appendChild(this.sarMonitor.getElement());
+      }
+      return;
+    }
+    import('../sar/SARBoundaryMonitor').then(({ SARBoundaryMonitor }) => {
+      this.sarMonitor = new SARBoundaryMonitor();
+      const cont = this.element.querySelector('#sar-monitor-container');
+      if (cont && this.sarMonitor && !cont.contains(this.sarMonitor.getElement())) {
+        cont.appendChild(this.sarMonitor.getElement());
+      }
+    }).catch(() => {
+      if (this._sarContainer && !this._sarContainer.querySelector('.sar-fallback')) {
+        const fallback = document.createElement('div');
+        fallback.className = 'sar-fallback';
+        fallback.textContent = 'SAR Boundary Monitor unavailable';
+        fallback.style.fontSize = '11px';
+        fallback.style.color = 'var(--text-tertiary)';
+        this._sarContainer.appendChild(fallback);
+      }
+    });
+  }
+
+  private _syncMapPanel(): void {
+    if (!this._mapSection || !this._mapBody || !this._mapContainer || !this._mapHeadRow || !this._mapToggleBtn) return;
+
+    const shouldOpen = !!store.mapPanelOpen;
+    const wasOpen = this._lastMapPanelOpen;
+
+    // Update toggle chrome via innerHTML only for the button (header chrome)
+    (this._mapToggleBtn as HTMLElement).title = shouldOpen ? 'Collapse map & charts' : 'Expand map & charts';
+    (this._mapToggleBtn as HTMLElement).innerHTML = shouldOpen ? ICONS.chevronDown : ICONS.chevronRight;
+
+    // Update collapsed class on section (chrome)
+    if (shouldOpen) this._mapSection.classList.remove('collapsed');
+    else this._mapSection.classList.add('collapsed');
+
+    // Persistent children: only move DOM when transition, not on unrelated store updates
+    const needsTransition = wasOpen !== shouldOpen;
+
+    if (needsTransition) {
+      if (shouldOpen) {
+        // Opening: ensure body is in section and map/chart are inside body
+        if (!this._mapSection.contains(this._mapBody)) {
+          this._mapSection.appendChild(this._mapBody);
+        }
+        // Ensure map/chart elements are inside body (check contains before append)
+        if (this.oceanMap && this.vizChart) {
+          const oceanEl = this.oceanMap.getElement();
+          const vizEl = this.vizChart.getElement();
+          if (oceanEl && !this._mapBody.contains(oceanEl)) {
+            // Remove placeholder if present
+            const ph = this._mapBody.querySelector('.viz-chart-empty');
+            if (ph) ph.remove();
+            this._mapBody.appendChild(oceanEl);
+          }
+          if (vizEl && !this._mapBody.contains(vizEl)) {
+            this._mapBody.appendChild(vizEl);
+          }
+          // Refresh after panel is visible (double rAF + timeout in refreshLayout handles transition)
+          try { (this.oceanMap as any)?.refreshLayout?.(); } catch {}
+        } else {
+          // Not yet loaded — show placeholder if not already there
+          if (!this._mapBody.querySelector('.viz-chart-empty')) {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'viz-chart-empty';
+            placeholder.textContent = 'Loading operational picture…';
+            // Clear any existing children that are not the placeholder
+            // Keep body contains logic: only add placeholder if body empty
+            if (this._mapBody.children.length === 0) this._mapBody.appendChild(placeholder);
+          }
+          void this.ensureMapsLoaded().then(() => {
+            if (store.mapPanelOpen) {
+              // Now that maps are loaded, ensure they are mounted without full rerender
+              const oEl = this.oceanMap?.getElement();
+              const vEl = this.vizChart?.getElement();
+              if (oEl && this._mapBody && !this._mapBody.contains(oEl)) {
+                const ph = this._mapBody.querySelector('.viz-chart-empty');
+                if (ph) ph.remove();
+                this._mapBody.appendChild(oEl);
+              }
+              if (vEl && this._mapBody && !this._mapBody.contains(vEl)) {
+                this._mapBody.appendChild(vEl);
+              }
+              try { (this.oceanMap as any)?.refreshLayout?.(); } catch {}
+            }
+          });
+        }
+      } else {
+        // Closing: keep map elements attached but hidden via collapsed class
+        // Do NOT detach to avoid Leaflet size race — just hide via CSS
+        // Optionally we could detach body, but spec says only move when transition
+        // We keep body in DOM hidden; no remove needed
+      }
+      this._lastMapPanelOpen = shouldOpen;
+    } else {
+      // No transition: ensure map elements still correctly placed if this is first render after lazy load
+      if (shouldOpen && this.oceanMap && this.vizChart && this._mapBody) {
+        const oEl = this.oceanMap.getElement();
+        const vEl = this.vizChart.getElement();
+        // Only append if not already children — prevents churn
+        if (oEl && !this._mapBody.contains(oEl)) {
+          const ph = this._mapBody.querySelector('.viz-chart-empty');
+          if (ph) ph.remove();
+          this._mapBody.appendChild(oEl);
+        }
+        if (vEl && !this._mapBody.contains(vEl)) {
+          this._mapBody.appendChild(vEl);
+        }
+        // If vizGeojson just arrived while panel was already open, OceanMap's own onState will fitBounds,
+        // but we ensure size is valid (panel didn't detach)
+        // No refreshLayout needed here unless size changed
+      }
+    }
+
+    // Empty state handling: show placeholder when no viz, without destroying map
+    if (this._mapBody) {
+      const hasViz = !!store.vizGeojson;
+      let emptyCard = this._mapContainer?.querySelector('.empty-telemetry-panel-card') as HTMLElement | null;
+      if (!hasViz) {
+        if (!emptyCard) {
+          emptyCard = document.createElement('div');
+          emptyCard.className = 'empty-telemetry-panel-card';
+          emptyCard.innerHTML = `
+              <div class="empty-telemetry-icon">🛰️</div>
+              <div class="empty-telemetry-title">Operations Map &amp; Telemetry</div>
+              <div class="empty-telemetry-desc">
+                Live INCOIS PFZ lines, wave/wind forecast charts, and boundary geofences will render dynamically here after you ask a question.
+              </div>
+          `;
+          // Insert before mapSection so it shows when empty, but keep mapSection still in DOM hidden via collapsed? Actually keep both.
+          // Spec wants map to open on first response, so empty card should be hidden once viz arrives.
+          this._mapContainer.insertBefore(emptyCard, this._mapSection);
+        }
+        emptyCard.style.display = '';
+        // When empty, mapSection may still be visible but will show no data — keep it
+      } else {
+        if (emptyCard) emptyCard.style.display = 'none';
+      }
+    }
+  }
+
+  private _updatePersona(activeAgent: any): void {
+    if (!this._personaContainer) return;
+    // Rebuild only this container's innerHTML (isolated, not wiping map)
+    this._personaContainer.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <div style="width:30px;height:30px;border-radius:var(--radius-sm);background:${activeAgent.avatarBg};color:${activeAgent.avatarColor};display:flex;align-items:center;justify-content:center;">
+          ${ICONS[activeAgent.icon] || ICONS.compass}
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:var(--text-sm);color:var(--text-primary);">${activeAgent.name}</div>
+          <div class="data-mono-sm" style="color:var(--text-tertiary);">${activeAgent.role}</div>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--text-secondary);line-height:1.45;margin-bottom:8px;">${activeAgent.description}</p>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">
+        ${activeAgent.capabilities.map((cap: string) => `<span class="cap-badge">${cap}</span>`).join('')}
+      </div>
+    `;
+  }
+
+  private render(): void {
+    const isVisible = store.agentPanelOpen;
+    const isMobileDrawer = store.mobileAgentDrawerOpen;
+    const activeAgent = store.getActiveAgent();
+
+    this.element.className = `agent-panel ${isVisible ? '' : 'hidden'} ${isMobileDrawer ? 'drawer-open' : ''}`;
+
+    if (!this._initialized) {
+      this._buildSkeleton();
+    }
+
+    // Update persona (isolated)
+    this._updatePersona(activeAgent);
+
+    // Sync persistent map panel (only moves DOM on transition)
+    this._syncMapPanel();
+
+    // Sync SAR monitor (ensure not re-added each time unnecessarily)
+    this._initSarMonitor();
+
+    // Ensure activity/selector stay mounted (check contains before append)
+    if (this._activityContainer && !this._activityContainer.contains(this.agentActivity.getElement())) {
+      this._activityContainer.appendChild(this.agentActivity.getElement());
+    }
+    if (this._selectorContainer && !this._selectorContainer.contains(this.agentSelector.getElement())) {
+      this._selectorContainer.appendChild(this.agentSelector.getElement());
+    }
+
+    // Attach events for dynamic controls that are rebuilt (fleet/wind)
+    // We keep simulation accordion static after skeleton, but need to wire buttons
+    // Use a lightweight re-wire that doesn't duplicate listeners on map
+    this.attachEvents();
+  }
+
+  private attachEvents(): void {
+    // Close button is bound once in _buildSkeleton, but if we ever rebuild header, re-bind safely
+    // For fleet/wind buttons inside simulation accordion, they are part of skeleton innerHTML that was built once,
+    // but active state changes require re-render of button styles. Instead of rebuilding whole accordion,
+    // we update button styles via query and ensure listeners are added once via delegation.
+
+    // Use single delegated listener for fleet/wind to avoid duplicate per-render bindings
+    // If already bound, skip
+    if ((this as any)._eventsBound) return;
+    (this as any)._eventsBound = true;
+
+    this.element.addEventListener('click', async (e) => {
+      const target = e.target as HTMLElement;
+      // Fleet demo buttons
+      const fleetBtn = target.closest('.fleet-demo-btn') as HTMLElement | null;
+      if (fleetBtn) {
+        const level = fleetBtn.getAttribute('data-level') || '';
         OrcaApiService.setFleetDemoLevel(level || null);
         if (level) {
-          // Try to simulate fleet around last PFZ if available, else just set level for next query
           const sessionId = store.getActiveChat()?.id || store.activeChatId;
           let lat: number | undefined, lon: number | undefined;
-          // Try to get from last viz geojson
           const gj = (store as any).vizGeojson;
           if (gj?.features) {
             const pfz = gj.features.find((f:any)=>f.properties?.kind==='pfz_primary' || f.properties?.kind==='fleet_recommended');
@@ -284,37 +435,78 @@ export class AgentPanel {
           try { await OrcaApiService.clearFleet(true); } catch {}
           showToast('Cleared simulated fleet — back to Normal', 'success');
         }
-        this.render();
-      });
-    });
-    this.element.querySelector('#btn-fleet-clear')?.addEventListener('click', async () => {
-      OrcaApiService.setFleetDemoLevel(null);
-      try { await OrcaApiService.clearFleet(true); showToast('Cleared simulated fleet', 'success'); } catch { showToast('Cleared local demo', 'success'); }
-      this.render();
-    });
-    this.element.querySelector('#btn-fleet-refresh')?.addEventListener('click', () => {
-      this.refreshFleetStatus();
-    });
-    // Wind validation demo controls
-    const windBtns = this.element.querySelectorAll('.wind-demo-btn');
-    windBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const sc = (btn as HTMLElement).getAttribute('data-scenario') || '';
+        // Update button active styles without full rerender
+        this.element.querySelectorAll('.fleet-demo-btn').forEach(b => {
+          const l = (b as HTMLElement).getAttribute('data-level') || '';
+          const isActive = l === (OrcaApiService.getFleetDemoLevel() || '');
+          (b as HTMLElement).style.background = isActive ? 'var(--primary)' : '';
+          (b as HTMLElement).style.color = isActive ? '#fff' : '';
+        });
+        this.refreshFleetStatus();
+        return;
+      }
+      const windBtn = target.closest('.wind-demo-btn') as HTMLElement | null;
+      if (windBtn) {
+        const sc = windBtn.getAttribute('data-scenario') || '';
         OrcaApiService.setWindDemoScenario(sc || null);
         const label = sc ? `Wind demo set to ${sc} — next safety/PFZ query will show validation${sc==='high_divergence'?' ⚠ HIGH':sc==='match'?' (MATCH)':''}` : 'Cleared wind demo — back to Normal (live check only)';
         showToast(label, sc ? 'info' : 'success');
-        this.render();
-      });
+        this.element.querySelectorAll('.wind-demo-btn').forEach(b => {
+          const s = (b as HTMLElement).getAttribute('data-scenario') || '';
+          const isActive = s === (OrcaApiService.getWindDemoScenario() || '');
+          (b as HTMLElement).style.background = isActive ? 'var(--primary)' : '';
+          (b as HTMLElement).style.color = isActive ? '#fff' : '';
+        });
+        this.refreshWindStatus();
+        return;
+      }
+      if (target.closest('#btn-fleet-clear')) {
+        OrcaApiService.setFleetDemoLevel(null);
+        try { await OrcaApiService.clearFleet(true); showToast('Cleared simulated fleet', 'success'); } catch { showToast('Cleared local demo', 'success'); }
+        this.element.querySelectorAll('.fleet-demo-btn').forEach(b => {
+          const l = (b as HTMLElement).getAttribute('data-level') || '';
+          const isActive = l === '';
+          (b as HTMLElement).style.background = isActive ? 'var(--primary)' : '';
+          (b as HTMLElement).style.color = isActive ? '#fff' : '';
+        });
+        this.refreshFleetStatus();
+        return;
+      }
+      if (target.closest('#btn-fleet-refresh')) {
+        this.refreshFleetStatus();
+        return;
+      }
+      if (target.closest('#btn-wind-clear')) {
+        OrcaApiService.setWindDemoScenario(null);
+        showToast('Cleared wind demo', 'success');
+        this.element.querySelectorAll('.wind-demo-btn').forEach(b => {
+          const s = (b as HTMLElement).getAttribute('data-scenario') || '';
+          const isActive = s === '';
+          (b as HTMLElement).style.background = isActive ? 'var(--primary)' : '';
+          (b as HTMLElement).style.color = isActive ? '#fff' : '';
+        });
+        this.refreshWindStatus();
+        return;
+      }
+      if (target.closest('#btn-wind-refresh')) {
+        this.refreshWindStatus();
+        return;
+      }
+      if (target.closest('#btn-close-agent-panel')) {
+        const isMobile = window.innerWidth < 1280;
+        if (isMobile) store.toggleMobileAgentDrawer(false);
+        else store.toggleAgentPanel(false);
+        return;
+      }
     });
-    this.element.querySelector('#btn-wind-clear')?.addEventListener('click', () => {
-      OrcaApiService.setWindDemoScenario(null);
-      showToast('Cleared wind demo', 'success');
-      this.render();
-    });
-    this.element.querySelector('#btn-wind-refresh')?.addEventListener('click', () => this.refreshWindStatus());
-    // Auto-refresh statuses once per render
-    this.refreshFleetStatus();
-    this.refreshWindStatus();
+
+    // Auto-refresh statuses once per render (but not on every store update to avoid flood)
+    // Use a throttled refresh
+    if (!(this as any)._lastStatusRefresh || Date.now() - (this as any)._lastStatusRefresh > 5000) {
+      (this as any)._lastStatusRefresh = Date.now();
+      this.refreshFleetStatus();
+      this.refreshWindStatus();
+    }
   }
 
   private async refreshWindStatus(): Promise<void> {

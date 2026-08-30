@@ -53,10 +53,10 @@ class ResponseAgent:
         language = context.language or "en"
         lang_name = _LANGUAGE_NAMES.get(language, language)
 
-        # Official-PFZ lookups get the documented INCOIS template verbatim
-        # (deterministic, no LLM needed for distance/bearing/coords facts).
+        # PFZ lookups get the documented template verbatim (official or estimated)
+        # Always use template when PFZ is present — ensures Target Coordinates are shown.
         official_pfz = None
-        if pfz is not None and is_pfz_lookup_query(context.raw_query):
+        if pfz is not None:
             official_pfz = format_pfz_answer(
                 pfz, verdict=(synthesis or {}).get("verdict", "CAUTION")
             )
@@ -73,7 +73,7 @@ class ResponseAgent:
                 # quoting the live numbers we just injected. Detect and patch.
                 if ocean_state is not None and ("km/h" not in answer or "°C" not in answer):
                     patch = self._fallback_answer(
-                        context, synthesis, risk, pfz, geofence, route, ocean_state
+                        context, synthesis, risk, pfz, geofence, route, ocean_state, trend
                     )
                     if "km/h" in patch or "°C" in patch:
                         answer = answer.rstrip() + "\n\n" + patch
@@ -99,7 +99,7 @@ class ResponseAgent:
                         answer = re.sub(r"^Verdict:\s*UNSAFE", "### 🔴 UNSAFE", answer)
             except llm_client.LLMUnavailableError:
                 answer = self._fallback_answer(
-                    context, synthesis, risk, pfz, geofence, route, ocean_state
+                    context, synthesis, risk, pfz, geofence, route, ocean_state, trend
                 )
 
         duration_ms = (time.perf_counter() - start) * 1000
@@ -205,16 +205,22 @@ class ResponseAgent:
                 )
                 if pfz.advisory_text:
                     lc_txt += f"; sector note: {pfz.advisory_text[:220]}"
+            landmark_txt = ""
+            pfz_landmark = getattr(pfz, "nearest_landmark", None)
+            if pfz_landmark:
+                landmark_txt = f" near {pfz_landmark} (≈{pfz.distance_from_reference_km} km off {pfz_landmark})"
             extras.append(
                 f"- PFZ zone: {pfz.distance_from_reference_km} km away, bearing "
-                f"{pfz.bearing_deg} deg, centre ({pfz.center_lat}, {pfz.center_lon});"
+                f"{pfz.bearing_deg} deg, centre ({pfz.center_lat}, {pfz.center_lon}){landmark_txt};"
                 f"{lc_txt or ' zone position provenance: ' + pfz.field_sources.get('zone_position', 'simulated')}"
             )
             for i, alt in enumerate(getattr(pfz, "alternates", []) or [], start=2):
+                alt_landmark = alt.get("nearest_landmark")
+                alt_landmark_txt = f" near {alt_landmark}" if alt_landmark else ""
                 extras.append(
                     f"- Alternative zone #{i}: {alt['distance_km']} km away, bearing "
-                    f"{alt['bearing_deg']} deg"
-                    + (f" (SST {alt['sst_celsius']} C)" if 'sst_celsius' in alt else "")
+                    f"{alt['bearing_deg']} deg{alt_landmark_txt}"
+                    + (f" (SST {alt['sst_celsius']} C)" if 'sst_celsius' in alt and alt['sst_celsius'] is not None else "")
                 )
         if geofence is not None and not geofence.clear:
             for h in geofence.hits:
@@ -316,7 +322,7 @@ class ResponseAgent:
         )
 
     # ------------------------------------------------------------------
-    def _fallback_answer(self, context, synthesis, risk, pfz, geofence, route, ocean_state=None) -> str:
+    def _fallback_answer(self, context, synthesis, risk, pfz, geofence, route, ocean_state=None, trend=None) -> str:
         verdict = synthesis.get('verdict', 'CAUTION') if isinstance(synthesis, dict) else getattr(synthesis, 'verdict', 'CAUTION')
         risk_headline = risk.headline if risk else ""
         # Map verdict to readable heading
@@ -377,22 +383,46 @@ class ResponseAgent:
 
         if pfz is not None:
             lc = getattr(pfz, "landing_center", None) or {}
-            if lc:
+            pfz_landmark = getattr(pfz, "nearest_landmark", None)
+            landmark_phrase = f" near {pfz_landmark}" if pfz_landmark else ""
+            # Always include target coordinates — useful even for simulated/derived
+            lat_s = "N" if pfz.center_lat >= 0 else "S"
+            lon_s = "E" if pfz.center_lon >= 0 else "W"
+            coord_line = f"{abs(pfz.center_lat):.4f}° {lat_s}, {abs(pfz.center_lon):.4f}° {lon_s}"
+            heading = "Official INCOIS PFZ" if pfz.source.value == "incois_live" else "Estimated PFZ (official advisory unavailable for this spot today — derived from live SST/ simulated fallback)"
+            if lc and pfz.source.value == "incois_live":
                 parts.append(
-                    f"Official INCOIS PFZ via {lc.get('name')}: zone "
+                    f"{heading} via {lc.get('name')}: zone "
                     f"{lc.get('advisory_distance_km')} km to the {lc.get('direction')}, "
                     f"depth {lc.get('advisory_depth_m')} m; "
                     f"~{pfz.distance_from_reference_km} km from your point "
-                    f"at bearing {pfz.bearing_deg:.0f} deg."
+                    f"at bearing {pfz.bearing_deg:.0f} deg{landmark_phrase} "
+                    f"(Target: {coord_line})."
                 )
             else:
                 parts.append(
-                    f"Nearest {'derived' if pfz.source.value == 'derived_from_live_data' else 'simulated'} "
-                    f"fishing zone ~{pfz.distance_from_reference_km} km at bearing "
-                    f"{pfz.bearing_deg:.0f} deg."
+                    f"{heading}: ~{pfz.distance_from_reference_km} km at bearing "
+                    f"{pfz.bearing_deg:.0f} deg{landmark_phrase} "
+                    f"(Target: {coord_line}). "
+                    f"{'Derived from live SST front.' if pfz.source.value == 'derived_from_live_data' else 'Simulated estimate — no official zone issued near here today.'}"
                 )
-        if geofence is not None and not geofence.clear:
-            parts.append("Restricted boundary nearby: " + "; ".join(h.zone_name for h in geofence.hits))
+        if geofence is not None:
+            if geofence.clear:
+                parts.append("No restricted boundary within alert buffer. You are clear of IMBL/MPAs.")
+            else:
+                parts.append("Restricted boundary nearby: " + "; ".join(h.zone_name for h in geofence.hits))
+
         if route is not None:
             parts.append(f"Suggested route {route.estimated_distance_km} km avoiding flagged zones.")
+
+        if trend is not None:
+            pts = getattr(trend, "points", []) or []
+            corr = getattr(trend, "sst_chl_correlation", None)
+            corr_s = f"{corr:.3f}" if corr is not None else "n/a"
+            note = getattr(trend, "reasoning_note", "") or ""
+            if pts:
+                parts.append(f"### 📈 Trend — {trend.location_name} ({trend.window_months} months)\nSST {trend.sst_trend_per_month:+.4f} °C/mo, chlorophyll {trend.chl_trend_per_month:+.4f} mg/m³/mo, r={corr_s}. {note}\n*Points: {len(pts)} months, sources: {trend.field_sources}*")
+            else:
+                parts.append(f"### 📈 Trend — {trend.location_name} ({trend.window_months} months)\nNo live history available (INCOIS OSF/OceanSat-2 unavailable for this window). SST/chlorophyll trends unavailable. {note}")
+
         return "\n\n".join(parts)

@@ -100,6 +100,31 @@ export class OceanMap {
     return this.element;
   }
 
+  /** Public: called by AgentPanel when the panel re-opens to re-fit without data churn. */
+  public refreshLayout(): void {
+    if (!this.map) return;
+    const doFit = () => {
+      if (!this.map) return;
+      this.map.invalidateSize();
+      const geojson = store.vizGeojson;
+      if (geojson && geojson.features && geojson.features.length > 0) {
+        this.renderFeatures(geojson);
+      } else {
+        try {
+          const b = (this.layer as any)?.getBounds?.();
+          if (b && b.isValid()) this.map.fitBounds(b, { padding: [40, 40], maxZoom: 12, animate: false });
+        } catch {}
+      }
+    };
+    // Double rAF + timeout ensures panel CSS transition (if any) has finished and container has true size
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        doFit();
+        setTimeout(doFit, 120);
+      });
+    });
+  }
+
   private onState(): void {
     this.ensureMap();
     const statusEl = this.element.querySelector('#ocean-map-status');
@@ -133,9 +158,33 @@ export class OceanMap {
     if (statusEl) statusEl.textContent =
       (hereLabel ? hereLabel + ' · ' : '') +
       `${geojson?.session_id?.slice(0, 8) ?? ''}${store.pfzLive ? ' · PFZ ' + (store.pfzLive.valid_upto || 'live') : ''}`;
+    // Ensure container has true size before fitBounds (panel may have just opened)
+    this.map?.invalidateSize();
     this.renderFeatures(geojson);
     this.renderLegend(geojson);
-    this.map?.invalidateSize();
+    // Re-fit after layout settles (handles CSS transition / 0-size container race) — same QUERY_KINDS filter as renderFeatures
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!this.map) return;
+        this.map.invalidateSize();
+        try {
+          const QUERY_KINDS2 = new Set(['query_point','pfz_primary','pfz_alternate','fleet_recommended','fleet_candidate','fleet_change','pfz_landing','route','wind_divergence','boundary_flag']);
+          const q = (geojson?.features ?? []).filter((f: any) => QUERY_KINDS2.has(f?.properties?.kind)).map((f: any) => {
+            const g = f?.geometry;
+            if (!g) return null as any;
+            if (g.type === 'Point') {
+              const [lon, lat] = g.coordinates;
+              return L.latLng(lat, lon);
+            }
+            if (g.type === 'LineString') {
+              return (g.coordinates as [number, number][]).map(([lon, lat]) => L.latLng(lat, lon));
+            }
+            return null as any;
+          }).filter((ll: any) => ll != null).flat();
+          if (q.length > 0) this.map.fitBounds(L.latLngBounds(q), { padding: [40, 40], maxZoom: 12, animate: false });
+        } catch {}
+      });
+    });
   }
 
   private ensureMap(): void {
@@ -172,6 +221,9 @@ export class OceanMap {
     this.bindMapTap();
   }
 
+  // Delegation guard: ensure single listener
+  private _tapDelegationBound = false;
+
   /** Map-tap coordinate selection (Part A2): clicking anywhere on the sea
    * records that exact point as the highest-priority location for the next
    * query. A marker + popup shows the coordinates; clicking "Use this point"
@@ -195,19 +247,21 @@ export class OceanMap {
          </span>
        </div>`;
 
-    const wireButton = () => {
-      // Attach directly to the popup DOM after it is inserted (inline
-      // <script> tags are stripped by Leaflet, so bind here instead).
-      const btn: HTMLButtonElement | null = document.querySelector(
-        '#orca-commit-map-point',
-      );
-      if (!btn) return;
-      btn.onclick = () => {
+    // Event delegation: single listener on persistent widget container, survives
+    // Leaflet popup re-creates and marker drags without re-binding.
+    if (!this._tapDelegationBound) {
+      this._tapDelegationBound = true;
+      this.element.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        const btn = target.closest('#orca-commit-map-point') as HTMLElement | null;
+        if (!btn) return;
         const lat = Number(btn.getAttribute('data-lat'));
         const lon = Number(btn.getAttribute('data-lon'));
-        store.setMapPoint([lat, lon]);
-      };
-    };
+        if (!isNaN(lat) && !isNaN(lon)) {
+          store.setMapPoint([lat, lon]);
+        }
+      });
+    }
 
     this.map.on('click', (e: L.LeafletMouseEvent) => {
       if (e.originalEvent.defaultPrevented) return;
@@ -227,9 +281,8 @@ export class OceanMap {
           el.setContent(popupHtml(p.lat, p.lng));
           el.update();
         }
-        wireButton();
+        // No per-popup wireButton needed — delegation handles it
       });
-      selectionMarker.on('popupopen', wireButton);
       selectionMarker.openPopup();
     });
     // Show a short-lived "committed" note whenever mapPoint updates.
@@ -370,9 +423,13 @@ export class OceanMap {
     this.renderShapes([...boundsFeatures, ...(geojson?.features ?? [])],
       (f: any) => this.isBackgroundKind(f.properties?.kind));
 
-    // Fit the view to the query's own features (not the coast-wide PFZ feed).
+    // Auto-frame: fit the view to the query's own features (primary zone, alternates,
+    // reference/user location) every time new results arrive. Exclude background
+    // PFZ lines, landing centres, SAR and IMBL which are India-wide and would
+    // force an overview instead of zooming to the queried coast.
+    const QUERY_KINDS = new Set(['query_point','pfz_primary','pfz_alternate','fleet_recommended','fleet_candidate','fleet_change','pfz_landing','route','wind_divergence','boundary_flag']);
     try {
-      const queryFeatures = (geojson?.features ?? []).map((f: any) => {
+      const queryFeatures = (geojson?.features ?? []).filter((f: any) => QUERY_KINDS.has(f?.properties?.kind)).map((f: any) => {
         const geom = f?.geometry;
         if (!geom) return null as any;
         if (geom.type === 'Point') {
@@ -387,7 +444,12 @@ export class OceanMap {
         return null as any;
       }).filter((ll: any) => ll != null).flat();
       if (queryFeatures.length > 0) {
-        this.map.fitBounds(L.latLngBounds(queryFeatures).pad(0.35), { animate: false });
+        this.map.fitBounds(L.latLngBounds(queryFeatures), { padding: [40, 40], maxZoom: 12, animate: false });
+      } else if (this.layer && (this.layer as any).getBounds && !(this.layer as any).getBounds().isValid?.() === false) {
+        try {
+          const b = (this.layer as any).getBounds();
+          if (b.isValid()) this.map.fitBounds(b, { padding: [40, 40], maxZoom: 12, animate: false });
+        } catch { /* ignore */ }
       }
     } catch {
       /* no query features -- keep current view */

@@ -122,6 +122,16 @@ KNOWN_LOCATIONS = {
     "kochi": Location(name="Kochi Coast", lat=9.9312, lon=76.2673),
     "visakhapatnam": Location(name="Visakhapatnam Coast", lat=17.6868, lon=83.2185),
     "odisha": Location(name="Odisha Coast (Puri)", lat=19.8135, lon=85.8312),
+    "surat": Location(name="Surat Coast", lat=21.00, lon=72.60),
+    "mumbai": Location(name="Mumbai Coast", lat=19.0760, lon=72.8777),
+    "veraval": Location(name="Veraval Coast", lat=20.90, lon=70.36),
+    "porbandar": Location(name="Porbandar Coast", lat=21.64, lon=69.60),
+    "dwarka": Location(name="Dwarka Coast", lat=22.24, lon=68.97),
+    "kandla": Location(name="Kandla Coast", lat=23.03, lon=70.22),
+    "okha": Location(name="Okha Coast", lat=22.47, lon=69.07),
+    "daman": Location(name="Daman Coast", lat=20.42, lon=72.85),
+    "diu": Location(name="Diu Coast", lat=20.71, lon=70.98),
+    "bhavnagar": Location(name="Bhavnagar Coast", lat=21.76, lon=72.15),
 }
 DEFAULT_LOCATION = Location(name="Unknown Coast (default demo point)", lat=15.5, lon=73.8)
 
@@ -253,6 +263,9 @@ def _detect_romanized_language(text: str) -> str | None:
 def resolve_location(place_name: str) -> Location | None:
     """Free-text place name -> Location or None. Never defaults to Panaji."""
     key = " ".join((place_name or "").strip().lower().split())
+    bare = key[:-6].strip() if key.endswith(" coast") else key
+    if bare in KNOWN_LOCATIONS:
+        return KNOWN_LOCATIONS[bare]
     if key in KNOWN_LOCATIONS:
         return KNOWN_LOCATIONS[key]
     if key in _geocode_cache:
@@ -780,6 +793,11 @@ class Orchestrator:
                 self._record_telemetry(final_state, response, total_ms)
             except:
                 pass
+            # Gap 2 — persist verdict/findings for next follow-up
+            try:
+                self._persist_conversation_findings(initial.get("session_id") or "", response, plan)
+            except:
+                pass
             return response
         # No langgraph fallback — sequential with same gating
         return self._handle_query_auto_sequential(initial)
@@ -802,6 +820,10 @@ class Orchestrator:
                      "complexity": getattr(response, "routing", {}).get("complexity", "fast") if hasattr(response, "routing") else "fast",
                      "mode": "auto", "traces": response.trace, "timings": getattr(response, "timings", {})}
             self._record_telemetry(state, response, total_ms)
+        except:
+            pass
+        try:
+            self._persist_conversation_findings(initial.get("session_id") or "", response, getattr(response, "routing", {}) or {})
         except:
             pass
         return response
@@ -868,6 +890,36 @@ class Orchestrator:
         except Exception:
             pass
 
+    def _persist_conversation_findings(self, session_id: str, response: OrchestratorResponse, plan: dict | None = None) -> None:
+        """Gap 2 — store the last verdict/answer/evidence so follow-ups like
+        'why is that?' or 'what about the wind?' can be answered with context."""
+        try:
+            verdict = ""
+            evidence = ""
+            # Prefer synthesis verdict, fallback to response status
+            synth = getattr(response, "status", None)
+            if synth:
+                v = getattr(synth, "value", str(synth))
+                verdict = v
+            # Evidence: first reasoning line or key evidence
+            reasons = getattr(response, "reasoning", []) or []
+            if reasons:
+                evidence = str(reasons[0])[:400]
+            elif getattr(response, "answer", None):
+                evidence = str(response.answer)[:400]
+            answer_snippet = str(getattr(response, "answer", ""))[:600]
+            # Also include prior intent's evidence if available (e.g. PFZ distance)
+            if plan and plan.get("intent"):
+                evidence = f"[{plan.get('intent')}] {evidence}"
+            session_store.upsert(
+                session_id,
+                last_verdict=verdict,
+                last_answer=answer_snippet,
+                last_evidence=evidence,
+            )
+        except Exception:
+            pass  # never break the response on persistence failure
+
     # ------------------------------------------------------------------
     # Panel mode: full graph incl. the round-table discussion
     # ------------------------------------------------------------------
@@ -895,6 +947,10 @@ class Orchestrator:
                 self._record_telemetry(final_state, response, total_ms)
             except:
                 pass
+            try:
+                self._persist_conversation_findings(initial.get("session_id") or "", response, final_state.get("plan") or {})
+            except:
+                pass
             return response
         response = self._handle_query_sequential(initial)
         response.mode = "panel"
@@ -909,6 +965,10 @@ class Orchestrator:
                      "complexity": getattr(response, "routing", {}).get("complexity", "fast") if hasattr(response, "routing") else "fast",
                      "mode": "panel", "traces": response.trace, "timings": getattr(response, "timings", {})}
             self._record_telemetry(state, response, 0)
+        except:
+            pass
+        try:
+            self._persist_conversation_findings(initial.get("session_id") or "", response, getattr(response, "routing", {}) or {})
         except:
             pass
         return response
@@ -1584,11 +1644,10 @@ class Orchestrator:
         fleet = state.get("fleet_convergence")
         context = state.get("context")
         parts: list[str] = []
-        # Official PFZ lookups: documented INCOIS template (exact format),
+        # PFZ lookups: documented template (official or estimated) — always show Target Coordinates
         # unless fleet convergence actively changed the recommendation.
         if (state.get("plan", {}).get("intent") == "pfz_lookup"
                 and pfz is not None
-                and getattr(getattr(pfz, "source", None), "value", None) == "incois_live"
                 and not (fleet and fleet.get("recommendation_changed"))):
             verdict = ((state.get("synthesis") or {}).get("verdict")
                        or (risk.status.value if risk else "CAUTION"))
@@ -1900,9 +1959,16 @@ class Orchestrator:
         # Live Device GPS resolution (P0): if query asks about current location or names no specific town,
         # and device_gps is available, bind to the user's live position directly and reverse-geocode it.
         loc_name = str(plan.get("location_name") or "").strip().lower()
-        is_my_location_query = any(k in normalized_query.lower() for k in (
+        # Word-boundary-aware detection so "here" doesn't fire inside "where"/"somewhere"
+        import re as _re_fix
+        _my_location_phrases = (
             "where am i", "my location", "my position", "current position",
-            "here", "around me", "where i am", "near me", "nearby"))
+            "here", "around me", "where i am", "near me", "nearby",
+        )
+        _q_lower = normalized_query.lower()
+        is_my_location_query = any(
+            _re_fix.search(r'\b' + _re_fix.escape(k) + r'\b', _q_lower) for k in _my_location_phrases
+        )
 
         _glog = logging.getLogger("orca.orchestrator")
 
@@ -1930,19 +1996,43 @@ class Orchestrator:
         else:
             _glog.info("GPS unavailable — falling back to selected location")
 
+        # Handle "same" from LLM — inherit prior location before any other logic
+        if loc_name in ("same",) and prior is not None and prior.location_name:
+            plan["location_name"] = prior.location_name
+            loc_name = prior.location_name.lower()
+
         if map_point is not None and len(map_point) >= 2:
             pass  # location already bound above (highest priority)
-        elif (loc_name in ("", "unknown", "same", "here", "there", "current", "my location", "where am i") or is_my_location_query) and device_gps:
-            try:
-                import data_connectors.geocode as geocode
-                resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
-                location = Location(name=f"Current Position ({resolved_name})", lat=device_gps[0], lon=device_gps[1])
-                plan["location_name"] = location.name
-            except Exception:
-                location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
-                plan["location_name"] = location.name
         else:
-            location = resolve_location(plan["location_name"])
+            # Structural safeguard: if a named place was extracted and resolves to a real
+            # location, it always wins over the my-location heuristic. Only when
+            # location_name is empty/unknown do we allow the heuristic to force GPS.
+            _loc_is_empty = loc_name in ("", "unknown", "same", "here", "there", "current", "my location", "where am i")
+            _resolved_named = None
+            if not _loc_is_empty:
+                try:
+                    _resolved_named = resolve_location(plan.get("location_name"))
+                except Exception:
+                    _resolved_named = None
+                if _resolved_named is not None and is_my_location_query and device_gps:
+                    _glog.info(
+                        "Named location '%s' resolved to %.4f,%.4f — ignoring my-location heuristic (is_my_location_query=True) for query '%s'",
+                        plan.get("location_name"), _resolved_named.lat, _resolved_named.lon, normalized_query,
+                    )
+            if _resolved_named is not None:
+                location = _resolved_named
+                plan["location_name"] = location.name
+            elif (_loc_is_empty or is_my_location_query) and device_gps:
+                try:
+                    import data_connectors.geocode as geocode
+                    resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
+                    location = Location(name=f"Current Position ({resolved_name})", lat=device_gps[0], lon=device_gps[1])
+                    plan["location_name"] = location.name
+                except Exception:
+                    location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
+                    plan["location_name"] = location.name
+            else:
+                location = resolve_location(plan["location_name"])
             if location is None:
                 if device_gps:
                     try:
@@ -1974,9 +2064,14 @@ class Orchestrator:
         )
 
         # Persist the turn for the next follow-up.
+        # Always store the resolved location's name (not the raw plan's "same"/"unknown")
+        # so the next turn's prior.location_name is actually useful.
+        resolved_name = location.name if location and location.name not in ("ASK_LOCATION",) else ""
+        if resolved_name in ("", "unknown", "same") and prior is not None and prior.location_name:
+            resolved_name = prior.location_name
         session_store.upsert(
             state["session_id"],
-            location_name=plan["location_name"] if plan["location_name"] != "unknown" else "",
+            location_name=resolved_name,
             lat=location.lat, lon=location.lon,
             time_window=plan["time_window"],
             target_hour=plan.get("target_hour"),
@@ -2451,6 +2546,11 @@ class Orchestrator:
             self._record_fleet_activity(state, response)
         except:
             pass
+        # Gap 2 — persist verdict/findings for next follow-up
+        try:
+            self._persist_conversation_findings(state.get("session_id") or initial.get("session_id") or "", response, state.get("plan") or {})
+        except:
+            pass
         return response
 
     # ------------------------------------------------------------------
@@ -2586,6 +2686,10 @@ class Orchestrator:
             self._record_telemetry(st, response, 0)
         except:
             pass
+        try:
+            self._persist_conversation_findings(state.get("session_id") or "", response, plan)
+        except:
+            pass
         return response
 
     # ------------------------------------------------------------------
@@ -2608,11 +2712,34 @@ class Orchestrator:
             except Exception:
                 fast_decision = None
 
+        # Gap 1 — lightweight pronoun follow-up heuristic for the fast path:
+        # If the query is short and pronoun-heavy ("why though?", "is it safe now?",
+        # "what about the wind?") and we have prior context, force the LLM path
+        # where memory_line can resolve "that"/"it"/"why" — don't let fast-router
+        # guess with zero context.
+        if_prior_followup = False
+        if prior is not None and (prior.last_query or prior.location_name):
+            _q_low = normalized_query.lower().strip()
+            # Short + contains a follow-up pronoun / anaphor
+            _pronouns = ("why", "that", "it", "this", "is it", "is that", "what about", "how about", "and the", "still")
+            if len(_q_low.split()) <= 8 and any(p in _q_low for p in _pronouns):
+                if_prior_followup = True
+
+        # If it's a follow-up and fast-router is not high-confidence, use LLM
+        if if_prior_followup and fast_decision is not None and fast_decision.confidence < 0.92:
+            fast_decision = None  # force fallback to LLM where memory_line lives
+
         if fast_decision is not None and not auto_router.should_use_llm_fallback(fast_decision, normalized_query):  # type: ignore
             # Confident fast routing — no LLM needed (0-1 LLM calls saved)
+            _raw_loc = self._extract_place_name(normalized_query)
+            # Handle "same" immediately — inherit prior location before plan is built
+            if _raw_loc in ("same", "unknown", "") and prior is not None and prior.location_name:
+                # For follow-ups like "what about the wind?" with no place name,
+                # inherit the prior location; for explicit "same" also inherit.
+                _raw_loc = prior.location_name
             plan = {
                 "intent": fast_decision.intent,
-                "location_name": self._extract_place_name(normalized_query),
+                "location_name": _raw_loc,
                 "time_window": self._extract_time_window(normalized_query),
                 "target_hour": self._extract_target_hour(normalized_query),
                 "months_back": 6 if fast_decision.intent == Intent.TREND_ANALYSIS else None,
@@ -2625,22 +2752,47 @@ class Orchestrator:
                 "is_compound": getattr(fast_decision, "is_compound", False),
                 "compound_intents": getattr(fast_decision, "compound_intents", None),
             }
-            # Memory override for "same place" — copy prior location
+            # Memory override for "same place" — copy prior location (redundant with above, but keep for safety)
             if prior is not None and prior.location_name and plan["location_name"] in ("unknown", "", "same"):
                 plan["location_name"] = prior.location_name
                 plan["why"] += " (location inherited from conversation memory)"
+            # Gap 2 — even on fast path, inherit prior intent when the follow-up
+            # is pronoun-heavy and the fast router guessed "unknown" with low signal.
+            # This keeps "why is that?" anchored to the previous intent.
+            if if_prior_followup and plan["intent"] == "unknown" and prior is not None and prior.last_intent and prior.last_intent != "unknown":
+                plan["intent"] = prior.last_intent
+                # Also inherit agents from the prior intent's default set
+                from orchestrator.state import INTENT_DEFAULT_AGENTS as _IDA
+                plan["agents_needed"] = _IDA.get(prior.last_intent, plan["agents_needed"])
+                plan["why"] += f" (intent inherited from prior '{prior.last_intent}' for follow-up)"
             return plan, "fast-rules"
 
         # 2. Fallback: LLM planner (only when fast router uncertain or unavailable)
         if llm_client.is_available():
             try:
                 memory_line = ""
-                if prior is not None and prior.location_name:
+                if prior is not None and (prior.location_name or prior.last_query):
+                    # Gap 1 + 2: include last query/intent and last verdict/evidence so
+                    # follow-ups like "why is that?", "what about the wind?", "is it
+                    # still the case?" can be resolved without repeating location/time.
+                    q_part = f"'{prior.last_query}'" if prior.last_query else "—"
+                    intent_part = f" (intent: {prior.last_intent})" if prior.last_intent else ""
+                    loc_part = f"'{prior.location_name}'" if prior.location_name else "unknown location"
+                    time_part = f"'{prior.time_window}'" if prior.time_window else "'today'"
                     memory_line = (
-                        f"\nCONVERSATION MEMORY: the previous turn was about "
-                        f"'{prior.location_name}' at '{prior.time_window}'. If "
-                        "the user says 'same place'/'there', copy that location "
-                        "name verbatim into location_name."
+                        f"\nCONVERSATION MEMORY: previous turn was {q_part}{intent_part} about "
+                        f"{loc_part} at {time_part}."
+                    )
+                    if prior.last_verdict:
+                        memory_line += f" Verdict was '{prior.last_verdict}'."
+                    if prior.last_evidence:
+                        # Keep it short — first evidence line is enough for "why?"
+                        ev = prior.last_evidence[:220]
+                        memory_line += f" Key evidence: '{ev}'."
+                    memory_line += (
+                        " If this turn is a follow-up referring to 'that', 'it', 'why', "
+                        "or asking about one specific field from the same location/time "
+                        "without repeating it, resolve accordingly."
                     )
                 # For fast routing fallback, use low budget (fast timeout, few tokens, no retry)
                 # For ambiguous queries we still want the LLM, but we don't want to wait for a retry.
@@ -2687,6 +2839,10 @@ class Orchestrator:
                     plan["complexity"] = "deep"
                 elif plan["intent"] in (Intent.ZONE_SCAN, Intent.ROUTE_PLAN) and len(plan.get("agents_needed") or []) >= 4:
                     plan["complexity"] = "complex"
+                # Handle "same" from LLM — inherit prior location
+                if plan.get("location_name") in ("same", "unknown", "") and prior is not None and prior.location_name:
+                    plan["location_name"] = prior.location_name
+                    plan["why"] = plan.get("why", "") + " (location inherited from conversation memory)"
                 return plan, "llm-planner"
             except llm_client.LLMUnavailableError:
                 pass  # fall through to rule-based planning
@@ -2700,9 +2856,12 @@ class Orchestrator:
         fallback_agents = INTENT_DEFAULT_AGENTS.get(fallback_intent) or []
         if not fallback_agents and fast_decision is not None:
             fallback_agents = list(fast_decision.agents or [])
+        _raw_loc2 = self._extract_place_name(normalized_query)
+        if _raw_loc2 in ("same", "unknown", "") and prior is not None and prior.location_name:
+            _raw_loc2 = prior.location_name
         plan = {
             "intent": fallback_intent,
-            "location_name": self._extract_place_name(normalized_query),
+            "location_name": _raw_loc2,
             "time_window": self._extract_time_window(normalized_query),
             "target_hour": self._extract_target_hour(normalized_query),
             "months_back": 6 if "trend" in normalized_query.lower() or

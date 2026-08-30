@@ -154,12 +154,19 @@ export class SARBoundaryMonitor {
         })) ),
       ],
     };
-    // Inject via store
-    (store as any).vizGeojson = single;
-    (store as any).vizSessionId = single.session_id;
-    // Trigger notify — access private notify via bracket
-    try { (store as any).notify?.(); } catch {}
-    // Fallback: direct map pan if OceanMap instance exists — find map canvas and dispatch
+    // Use store's synthetic viz which sets mapPanelOpen=true and notifies — ensures
+    // the map panel auto-expands on first click (benefits from AgentPanel persistent fix).
+    try {
+      store.setSyntheticViz(single, single.session_id);
+      // Ensure the outer AgentPanel is visible on desktop/mobile so the map is actually seen
+      if (!store.agentPanelOpen) store.toggleAgentPanel(true);
+    } catch {
+      // Fallback direct inject if store method unavailable
+      (store as any).vizGeojson = single;
+      (store as any).vizSessionId = single.session_id;
+      (store as any).mapPanelOpen = true;
+      try { (store as any).notify?.(); } catch {}
+    }
     showToast(`Centered map on ${d.detection_id || 'vessel'} — ${(d.distance_to_boundary_km ?? 0).toFixed(1)} km from IMBL`, 'info');
     // Scroll map into view on mobile
     const mapEl = document.querySelector('.ocean-map-widget');

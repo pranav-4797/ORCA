@@ -40,6 +40,10 @@ class SessionContext:
     destination: Optional[dict] = None          # {"lat","lon","name"}
     last_intent: str = ""
     last_query: str = ""
+    # Conversation findings — so "why is that?" / "what about the wind?" can be answered
+    last_verdict: str = ""                      # e.g. "CAUTION — borderline"
+    last_answer: str = ""                       # truncated final answer (first ~500 chars)
+    last_evidence: str = ""                     # key evidence line for the verdict
     updated_at: float = field(default_factory=time.time)
 
 

@@ -106,34 +106,95 @@ def geocode(query: str) -> tuple[float, float, str] | None:
 REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 
 
-def reverse_geocode(lat: float, lon: float) -> str:
-    """Reverse geocode (lat, lon) into a clean coastal location name."""
+def reverse_geocode(lat: float, lon: float) -> str | None:
+    """Reverse-geocode (lat, lon) to a nearest-landmark name.
+
+    Uses OSM Nominatim reverse endpoint at zoom=14 (suburb/town level,
+    appropriate for offshore/coastal points):
+        https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=jsonv2&zoom=14
+
+    Keyless, cached, honest: returns None when no landmark can be resolved
+    (payload missing/empty), raises GeocodeUnavailableError on network/service
+    failure, never guesses a placeholder name.
+    """
     cache_key = f"rev:{round(lat, 3)},{round(lon, 3)}"
     val, hit = _cache_get(cache_key)
-    if hit and isinstance(val, str):
-        return val
+    if hit:
+        # Cached value may be str or None (honest miss)
+        if isinstance(val, str) or val is None:
+            return val  # type: ignore
+        # Legacy cached tuple from forward geocode? Don't reuse
+        if isinstance(val, tuple):
+            # Not a reverse entry, treat as miss
+            pass
 
     params = {
-        "lat": lat,
-        "lon": lon,
+        "lat": str(lat),
+        "lon": str(lon),
         "format": "jsonv2",
+        "zoom": "14",
     }
     url = f"{REVERSE_URL}?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers=_HEADERS)
     try:
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-            display = payload.get("display_name", "")
-            if display:
-                parts = [p.strip() for p in display.split(",")]
-                name = parts[0]
-                if len(parts) > 1 and not any(c.isdigit() for c in parts[1]):
-                    name += f", {parts[1]}"
-                _cache_set(cache_key, name)
-                return name
+    except Exception as exc:
+        raise GeocodeUnavailableError(
+            f"Nominatim reverse unreachable: {getattr(exc, 'reason', exc)}"
+        ) from exc
+
+    # Nominatim returns {"display_name": "..."} or {"error": "..."} on miss
+    display = payload.get("display_name") if isinstance(payload, dict) else None
+    if not display or not isinstance(display, str):
+        # Also check error field — honest miss
+        _cache_set(cache_key, None)
+        return None
+
+    # At zoom=14, display_name is already suburb/town-level; clean to first 2 parts
+    # e.g. "Alibag, Raigad, Maharashtra, India" -> "Alibag, Raigad"
+    try:
+        parts = [p.strip() for p in display.split(",")]
+        # Keep most local parts, filter out postcode-like numeric parts
+        # Keep up to 3 meaningful parts, but prefer 2 for brevity
+        clean_parts: list[str] = []
+        for p in parts:
+            if not p:
+                continue
+            # Skip pure postcode / numeric district codes
+            if p.isdigit() or (len(p) >= 6 and p.replace(" ", "").isdigit()):
+                continue
+            clean_parts.append(p)
+            if len(clean_parts) >= 3:
+                break
+        # Use first 2 for coastal readability (e.g. "Alibaug, Maharashtra")
+        if len(clean_parts) >= 2:
+            # If first part is very generic (e.g. "Beach"), keep 2
+            name = f"{clean_parts[0]}, {clean_parts[1]}"
+            # If we have 3 and second is district, include state for context when offshore
+            if len(clean_parts) >= 3 and clean_parts[1].lower() not in display.lower().split(",")[0].lower():
+                # Keep as 2-part for now; 3-part can be verbose for offshore
+                pass
+        elif clean_parts:
+            name = clean_parts[0]
+        else:
+            name = display.split(",")[0].strip()
+        if not name:
+            _cache_set(cache_key, None)
+            return None
+        # Honest generic check: offshore points often reverse to just "India" / "Arabian Sea"
+        # which is not a useful landmark — treat as miss so callers can fallback to
+        # the advisory's landing centre (nearest port) instead of "off India".
+        _generic = {"india", "arabian sea", "indian ocean", "bay of bengal", "laccadive sea", "sea"}
+        if name.strip().lower() in _generic:
+            _cache_set(cache_key, None)
+            return None
+        _cache_set(cache_key, name)
+        return name
     except Exception:
-        pass
-    return f"Position ({lat:.3f}°N, {lon:.3f}°E)"
+        # Parse failure -> honest miss
+        _cache_set(cache_key, None)
+        return None
 
 
 if __name__ == "__main__":

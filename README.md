@@ -58,11 +58,11 @@ LangGraph StateGraph with an add-only trace channel; if LangGraph or the LLM is 
 |---|---|---|
 | Language | Detect 11 Indian/coastal languages, normalize query | LLM + script heuristic fallback |
 | Planning | Intent, place, time window, hour, needed specialists | LLM forced tool-call + rule fallback |
-| Ocean-State | SST, waves, wind/gusts, tides, chlorophyll | **Live** Open-Meteo marine+weather (parallel), **live** UHSLC harmonic tide fit (cached), NOAA ERDDAP chlorophyll when reachable else seeded & tagged |
+| Ocean-State | SST, waves, wind/gusts, tides, chlorophyll | **Live** INCOIS THREDDS SST/waves/wind/currents/swell + **live** UHSLC harmonic tide fit (cached) + chlorophyll **MOSDAC OCM (ISRO) primary → INCOIS ERDDAP secondary → `unavailable`** (never simulated) |
 | Hazard | Threshold verdicts, exceedance windows, cyclone checks | Deterministic thresholds + **live** keyless IMD CAP feed |
 | PFZ | Nearest fishing zone from the daily official advisory; distance/bearing to the nearest point on the digitized PFZ lines | **Live** INCOIS/SAMUDRA official PFZ (keyless); SST-ring derived + seeded fallbacks honestly tagged |
 | Geospatial | IMBL/MPA geofencing, weather-aware safe routes | Real point-in-polygon math on treaty-digitized GeoJSON |
-| Trend | Months-long SST/chlorophyll trends + correlation | Live Open-Meteo archive |
+| Trend | Months-long SST/chlorophyll trends + correlation | Live INCOIS OSF monthly SST + INCOIS OceanSat-2 daily chlorophyll archive |
 | **Discussion** | Moderated round-table transcript between specialists (structured `speaker/addressing/stance/point` turns + consensus) | LLM-moderated, numbers-only constraint; deterministic fallback |
 | Synthesis | Reconcile findings, flag cross-agent conflicts, confidence | LLM over structured results + transcript |
 | Response | Final answer in the user's language, explains how disagreements were settled | LLM; template fallback |
@@ -133,7 +133,7 @@ Every response also carries `confidence_score` (numeric 0–1 combining data pro
 - Panel / direct-agent query routing with per-answer badges
 - **Voice queries end-to-end**: mic capture → Groq Whisper STT → same pipeline → browser TTS reply in the detected language (`/query/voice`)
 - **Map & charts UI**: Leaflet operational map + hourly wave/gust series charts fed by `/viz/*`
-- Live Open-Meteo, UHSLC tides, IMD CAP alerts, OSM geocoding; honest seeded fallbacks with per-field provenance
+- Live INCOIS THREDDS, UHSLC tides, IMD CAP alerts, MOSDAC OCM chlorophyll, OSM geocoding; honest per-field provenance (no simulated chlorophyll)
 - Multilingual answers (11 languages), multi-turn memory
 - Proactive monitoring with SSE push (SMS sending code present, not live-fired)
 - Docker: `docker compose up --build` runs backend + UI

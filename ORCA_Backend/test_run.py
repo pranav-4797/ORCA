@@ -119,5 +119,36 @@ def main():
         print(f"Telemetry unavailable: {e}")
 
 
+def _smoke_chlorophyll():
+    """MOSDAC primary → INCOIS secondary → unavailable — never a crash or fab."""
+    from models import Location
+    from agents.ocean_state_agent import OceanStateAgent
+
+    loc = Location(name="Ratnagiri Coast", lat=17.0, lon=73.3)
+    agent = OceanStateAgent()
+    reading, trace = agent.run(loc, "today")
+    val = reading.chlorophyll_mg_m3
+    src = (reading.field_sources or {}).get("chlorophyll_mg_m3", "missing")
+    # Must be either a real number in 0-50 or None with unavailable provenance
+    if val is not None:
+        assert 0.0 <= float(val) <= 50.0, f"chlorophyll {val} out of range 0-50"
+        assert src == "live", f"chlorophyll {val} must be tagged live, got {src}"
+        print(f"[smoke] chlorophyll Ratnagiri 17.0,73.3 = {val} mg/m³ [{src}] ✓")
+    else:
+        assert src == "unavailable", f"chlorophyll None must be tagged unavailable, got {src}"
+        print(f"[smoke] chlorophyll Ratnagiri 17.0,73.3 = unavailable [{src}] ✓ (honest, no fab)")
+    # Never simulated
+    assert src != "simulated", "chlorophyll must never be simulated"
+    # Latency note should be present when MOSDAC succeeded (if key configured)
+    if src == "live" and getattr(reading, "chlorophyll_latency_note", None):
+        print(f"[smoke] latency note: {reading.chlorophyll_latency_note}")
+
+
 if __name__ == "__main__":
+    # Run chlorophyll smoke first — fail fast if honest-data contract is broken
+    try:
+        _smoke_chlorophyll()
+    except Exception as e:
+        print(f"[smoke] chlorophyll smoke FAILED: {e}")
+        raise
     main()

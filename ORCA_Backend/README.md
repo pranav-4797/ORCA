@@ -12,7 +12,7 @@ Queries run in `panel` mode (specialists debate before reconciling) or
 |---|---|
 | Language/Intent Agent | **Real** — LLM language detection (11 Indian/coastal languages), script-heuristic fallback |
 | Orchestrator (LangGraph) | **Real** — planning, conditional specialist selection, parallel dispatch, trace |
-| Ocean-State Agent | **Fully real** — LIVE Open-Meteo SST/waves/wind + harmonic tide prediction fitted on real UHSLC gauge observations; chlorophyll LIVE via NOAA ERDDAP when reachable, honest seeded fallback otherwise (per-field provenance always shown) |
+| Ocean-State Agent | **Fully real** — LIVE INCOIS THREDDS SST/waves/wind/currents/swell + harmonic tide on real UHSLC gauge obs; chlorophyll **MOSDAC OCM (ISRO Oceansat‑3) primary** (Registered tier, 3‑day latency) → INCOIS ERDDAP OceanSat‑2 secondary (free, archive 2011‑02‑02) → `unavailable`; per-field provenance always shown |
 | Hazard Agent | **Fully real** — threshold logic + LIVE keyless IMD CAP alert feed (cyclone/marine warnings, polygon hit-test); gated `api.imd.gov.in` kept as secondary fallback |
 | PFZ Agent | **Official live advisory** — nearest landing centre's INCOIS/SAMUDRA PFZ (zone geometry, direction/distance/depth) from the keyless `gemini.incois.gov.in` feeds, cached 10 min; falls back to derived live-SST thermal front, then seeded. Always tagged, never hidden |
 | Geospatial Reasoning Agent | **Real math** on Tier-2 static data — point-in-polygon/distance vs treaty-digitized IMBL + MPA GeoJSON (`data/marine_boundaries.geojson`), safe-route detours; GEBCO bathymetry TODO |
@@ -122,9 +122,7 @@ sequence via direct calls instead of crashing.
 - Location extraction resolves ANY Indian coastal place name via live geocoding
   (OSM Nominatim); the small built-in table (`KNOWN_LOCATIONS`) is only an offline
   cache now.
-- Chlorophyll falls back to a deterministic seeded value when the NOAA ERDDAP
-  satellite host is unreachable (network-blocked on the dev machine — see
-  `data_connectors/chlorophyll.py`); provenance tags always show which path ran.
+- Chlorophyll is never simulated — `field_sources["chlorophyll_mg_m3"]` is `"live"` only on a genuine MOSDAC (primary, Registered tier, 3‑day latency) or INCOIS ERDDAP (secondary) success, otherwise `"unavailable"` (same honesty pattern as SST/wind/current/swell).
 - Tide prediction needs a UHSLC gauge within 400 km (Cochin/Vizag/Minicoy/Port
   Blair today); outside that range it degrades to a tagged seeded value.
 

@@ -220,7 +220,9 @@ export class MessageItem {
       status === 'critical' ? 'Hazardous conditions — do not venture out.' :
       'Operational assessment.'
     );
-    let cleanContent = rawContent.replace(/(?:>\s*\[!IMPORTANT\]\s*\n(?:>\s*[^\n]+\n*)+)/i, '').trim() || rawContent;
+    let cleanContent = rawContent.replace(/(?:>\s*\[!IMPORTANT\]\s*\n(?:>\s*[^\n]+\n*)+)/gi, '').trim() || rawContent;
+    // Dedupe repeated identical verdict blocks that can appear when backend concatenates synthesis + response
+    cleanContent = cleanContent.replace(/(No restricted boundary within alert buffer\.)(\s*\1)+/gi, '$1').trim();
     return {
       status,
       title,
@@ -454,7 +456,7 @@ export class MessageItem {
       <div class="fleet-candidate-row" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border:1px solid ${c.is_recommended ? 'var(--primary)' : 'var(--border-default)'};border-radius:6px;background:${c.is_recommended ? 'rgba(34,197,94,0.08)' : 'var(--bg-card)'};margin-bottom:4px;">
         <div style="display:flex;flex-direction:column;">
           <span style="font-weight:700;font-size:12px;">${c.zone_id} ${c.is_recommended ? '✓ Recommended' : ''}</span>
-          <span style="font-size:11px;color:var(--text-tertiary);">${c.distance_km}km ${c.bearing_deg}° • SST ${c.sst_celsius}°C</span>
+          <span style="font-size:11px;color:var(--text-tertiary);">${c.distance_km}km ${c.bearing_deg}° • SST ${c.sst_celsius != null ? c.sst_celsius + '°C' : 'N/A'}</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <div style="text-align:center;">

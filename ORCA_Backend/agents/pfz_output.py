@@ -59,16 +59,17 @@ def verdict_brief(verdict: str | None) -> str:
 
 
 def format_pfz_answer(pfz, verdict: str | None = "CAUTION") -> str | None:
-    """Official INCOIS PFZ answer in the documented format.
+    """PFZ answer in the documented format — official when INCOIS_LIVE, estimated otherwise.
 
-    Returns None when the finding is a derived/simulated fallback so callers
-    keep their honest wording.
+    Returns a formatted answer for any PFZ (official, derived, simulated) with honest
+    source tagging, so the user always sees Target Coordinates. Only wordsmithing
+    lives here — all numbers come directly from the PFZRecommendation.
     """
     if pfz is None:
         return None
     source = getattr(pfz, "source", None)
-    if getattr(source, "value", source) != "incois_live":
-        return None
+    src_val = getattr(source, "value", source) if source else "unknown"
+    is_official = src_val == "incois_live"
 
     dist_km = float(getattr(pfz, "distance_from_reference_km", 0.0))
     bearing = float(getattr(pfz, "bearing_deg", 0.0))
@@ -88,20 +89,62 @@ def format_pfz_answer(pfz, verdict: str | None = "CAUTION") -> str | None:
     if lon < 0:
         lon_s = "W"
 
+    # Nearest landmark (reverse-geocoded, zoom=14) — friendlier than raw lat/lon alone
+    # If reverse is too generic (e.g. "India" for 35km offshore), fallback to the
+    # advisory's landing centre (nearest port) — far more useful to a fisher.
+    landmark = getattr(pfz, "nearest_landmark", None)
+    _generic_landmarks = {"india", "arabian sea", "indian ocean", "bay of bengal", "laccadive sea", "sea"}
+    is_generic = isinstance(landmark, str) and landmark.strip().lower() in _generic_landmarks
+    if is_generic:
+        landmark = None
+    if not landmark:
+        # Fallback: nearest INCOIS landing centre for this PFZ (the port the advisory is issued for)
+        lc_fb = lc or {}
+        fb_name = (lc_fb.get("name") or "").strip()
+        fb_state = (lc_fb.get("state") or "").strip()
+        if fb_name and fb_name.lower() not in ("unknown", "null"):
+            if fb_state:
+                landmark = f"{fb_name}, {fb_state}"
+            else:
+                landmark = fb_name
+        else:
+            # Last resort: reference location (e.g. "Kochi Coast") — still better than "India"
+            ref_name = getattr(getattr(pfz, "reference_location", None), "name", None)
+            if ref_name and ref_name.lower() not in ("unknown coast (default demo point)", "unknown"):
+                # Shorten "Kochi Coast" -> "Kochi"
+                short = ref_name.replace(" Coast", "").strip()
+                landmark = short
+            else:
+                landmark = None
+    landmark_line = ""
+    landmark_summary = ""
+    if landmark:
+        # Format as "≈15.2 km off Alibaug, Maharashtra" — distance already known
+        landmark_line = f"* 📍 Nearest landmark: ≈{dist_km:.1f} km off {landmark}\n"
+        landmark_summary = f"* 📍 Nearest landmark: ≈{dist_km:.1f} km off {landmark}\n"
+        landmark_sentence = f" near {landmark}"
+    else:
+        landmark_sentence = ""
+
+    if is_official:
+        source_line = f"* 📡 Source: {OFFICIAL_SOURCE}\n\nThis recommendation is based on the latest official PFZ data available from INCOIS."
+        intro = f"The nearest official INCOIS Potential Fishing Zone (PFZ) is approximately {dist_km:.1f} km from your current location, on a {bearing:.0f}° ({bearing_word(bearing)}) bearing{landmark_sentence}."
+    else:
+        src_txt = "Derived from live SST front" if src_val == "derived_from_live_data" else "Simulated estimate"
+        source_line = f"* 📡 Source: {src_txt} — no official INCOIS advisory issued within 150 km of your location today (honest fallback).\n\nThis is an estimated zone based on live sea-surface data, not an official advisiory. Use with caution and check local conditions."
+        intro = f"The nearest estimated Potential Fishing Zone (PFZ) is approximately {dist_km:.1f} km from your current location, on a {bearing:.0f}° ({bearing_word(bearing)}) bearing{landmark_sentence}."
     return (
         "🛡️ IMPORTANT\n\n"
         f"🔶 VERDICT: {verdict_txt} — {verdict_brief(verdict_txt)}\n\n"
-        f"The nearest official INCOIS Potential Fishing Zone (PFZ) is approximately "
-        f"{dist_km:.1f} km from your current location, on a "
-        f"{bearing:.0f}° ({bearing_word(bearing)}) bearing.\n\n"
+        f"{intro}\n\n"
         "🎯 Target Coordinates\n\n"
+        f"{landmark_line}"
         f"* Latitude: {abs(lat):.4f}° {lat_s}\n"
         f"* Longitude: {abs(lon):.4f}° {lon_s}\n\n"
         "📋 Quick Summary\n\n"
+        f"{landmark_summary}"
         f"* 📍 Distance from you: {dist_km:.1f} km\n"
         f"* 🧭 Direction: {bearing_word(bearing)} ({bearing:.0f}°)\n"
         f"* 🌊 Water depth: {depth_txt}\n"
-        f"* 📡 Source: {OFFICIAL_SOURCE}\n\n"
-        "This recommendation is based on the latest official PFZ data available "
-        "from INCOIS."
+        f"{source_line}"
     )

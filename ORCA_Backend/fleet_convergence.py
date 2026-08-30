@@ -64,8 +64,8 @@ class CandidateZone:
     center_lon: float
     distance_km: float
     bearing_deg: float
-    sst_celsius: float
-    chlorophyll_mg_m3: float = 0.0
+    sst_celsius: float | None = None
+    chlorophyll_mg_m3: float | None = None
     source: str = "derived_from_live_data"
     base_suitability: float = 80.0
     fleet_count: int = 0

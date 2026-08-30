@@ -286,9 +286,15 @@ class PlanningMixin:
             Location(**prior.destination) if (prior and prior.destination) else None
         )
         loc_name = str(plan.get("location_name") or "").strip().lower()
-        is_my_location_query = any(k in normalized_query.lower() for k in (
+        # Word-boundary-aware detection so "here" doesn't fire inside "where"/"somewhere"
+        _my_location_phrases = (
             "where am i", "my location", "my position", "current position",
-            "here", "around me", "where i am", "near me", "nearby"))
+            "here", "around me", "where i am", "near me", "nearby",
+        )
+        _q_lower = normalized_query.lower()
+        is_my_location_query = any(
+            re.search(r'\b' + re.escape(k) + r'\b', _q_lower) for k in _my_location_phrases
+        )
 
         import logging as _logging
         _glog = _logging.getLogger("orca.orchestrator")
@@ -301,7 +307,38 @@ class PlanningMixin:
         else:
             _glog.info("GPS unavailable — falling back to selected location")
 
-        if (loc_name in ("", "unknown", "same", "here", "there", "current", "my location", "where am i") or is_my_location_query) and device_gps:
+        # Structural safeguard: if a named place was extracted and resolves to a real
+        # location, it always wins over the my-location heuristic. Only when
+        # location_name is empty/unknown do we allow the heuristic to force GPS.
+        _loc_is_empty = loc_name in ("", "unknown", "same", "here", "there", "current", "my location", "where am i")
+        _resolved_named = None
+        if not _loc_is_empty:
+            try:
+                _resolved_named = resolve_location(plan.get("location_name"))
+            except Exception:
+                _resolved_named = None
+            if _resolved_named is not None and is_my_location_query and device_gps:
+                _glog.info(
+                    "Named location '%s' resolved to %.4f,%.4f — ignoring my-location heuristic (is_my_location_query=True) for query '%s'",
+                    plan.get("location_name"), _resolved_named.lat, _resolved_named.lon, normalized_query,
+                )
+
+        if _resolved_named is not None:
+            location = _resolved_named
+            # Keep plan's location_name as the resolved display name for consistency
+            plan["location_name"] = location.name
+        elif (_loc_is_empty or is_my_location_query) and device_gps:
+            # No named place, or explicit my-location query with no resolvable named place -> use GPS
+            if is_my_location_query and not _loc_is_empty:
+                _glog.info(
+                    "My-location heuristic overriding unresolved named location '%s' -> GPS %.4f,%.4f for query '%s'",
+                    plan.get("location_name"), device_gps[0], device_gps[1], normalized_query,
+                )
+            elif _loc_is_empty and is_my_location_query:
+                _glog.info(
+                    "My-location query with no named place — using GPS %.4f,%.4f for '%s'",
+                    device_gps[0], device_gps[1], normalized_query,
+                )
             try:
                 import data_connectors.geocode as geocode
                 resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
@@ -311,20 +348,18 @@ class PlanningMixin:
                 location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
                 plan["location_name"] = location.name
         else:
-            location = resolve_location(plan["location_name"])
-            if location is None:
-                # If chat location failed but GPS is available, use GPS as fallback (per priority)
-                if device_gps:
-                    try:
-                        import data_connectors.geocode as geocode
-                        resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
-                        location = Location(name=f"Current Position ({resolved_name})", lat=device_gps[0], lon=device_gps[1])
-                        plan["location_name"] = location.name
-                        _glog.info("Geocode failed for '%s' — falling back to GPS %.4f,%.4f", plan.get("location_name"), device_gps[0], device_gps[1])
-                    except Exception:
-                        location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
-                        plan["location_name"] = location.name
-                else:
+            # No heuristic GPS — named place failed to resolve (or empty with no GPS)
+            if device_gps:
+                try:
+                    import data_connectors.geocode as geocode
+                    resolved_name = geocode.reverse_geocode(device_gps[0], device_gps[1])
+                    location = Location(name=f"Current Position ({resolved_name})", lat=device_gps[0], lon=device_gps[1])
+                    plan["location_name"] = location.name
+                    _glog.info("Geocode failed for '%s' — falling back to GPS %.4f,%.4f", plan.get("location_name"), device_gps[0], device_gps[1])
+                except Exception:
+                    location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
+                    plan["location_name"] = location.name
+            else:
                     ask_msg = "I couldn't determine your location. Please enable GPS or tell me a coastal location such as Ratnagiri, Veraval, Kochi, or coordinates."
                     _glog.warning("Location unresolved — asking user for location")
                     plan["needs_location"] = True
