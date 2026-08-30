@@ -35,6 +35,9 @@ export class RoleSelectionPage {
     const canCancel = !!store.userCategory;
 
     this.element.innerHTML = `
+      <!-- Background Nautical Overlay -->
+      <div class="login-nautical-bg"></div>
+
       <!-- Role Page Header -->
       <header class="role-top-bar">
         <div class="role-top-brand">
