@@ -246,6 +246,41 @@ def detect_relative_location(query: str) -> Optional[str]:
     return None
 
 
+# Cache of the known-coastal-place vocabulary, loaded lazily from the
+# orchestrator gazetteer so the router and the resolver never drift apart.
+_KNOWN_PLACE_KEYS: Optional[tuple] = None
+
+
+def _known_place_keys() -> tuple:
+    global _KNOWN_PLACE_KEYS
+    if _KNOWN_PLACE_KEYS is None:
+        try:
+            from .state import KNOWN_LOCATIONS
+            _KNOWN_PLACE_KEYS = tuple(sorted(KNOWN_LOCATIONS.keys(), key=len, reverse=True))
+        except Exception:
+            _KNOWN_PLACE_KEYS = ()
+    return _KNOWN_PLACE_KEYS
+
+
+def extract_named_place(query: str) -> Optional[str]:
+    """Deterministically pull a KNOWN Indian coastal place out of the query.
+
+    Handles bare mentions ("Mumbai"), and "near/off/around <place>" plus the
+    Hinglish "<place> ke paas" / "<place> ke aas paas". This is the safeguard
+    (spec Parts D/I): when the user names a coastal town, we NEVER silently
+    let a 'near me'/device-GPS heuristic drag the recommendation to another
+    state. Word-boundary matched, longest key first. Returns the canonical
+    gazetteer key (e.g. "mumbai") or None.
+    """
+    q = (query or "").lower()
+    if not q:
+        return None
+    for key in _known_place_keys():
+        if re.search(r"\b" + re.escape(key) + r"\b", q):
+            return key
+    return None
+
+
 def extract_time_window(query: str) -> str:
     q = (query or "").lower()
     # Hindi/Hinglish "kal" is tomorrow in a forward-looking marine question.
@@ -680,13 +715,28 @@ def route_intent(query: str, conversation_history=None) -> IntentDecision:
     # Regex parameters are always available regardless of routing path.
     coords = extract_coordinates(query)
     rel = detect_relative_location(query)
+    named_place = extract_named_place(query)
 
     def _finish(decision: IntentDecision) -> IntentDecision:
         # Coordinates are a parameter and must NOT change the intent (Part 8):
         # an ocean_state query that carries a lat/lon stays ocean_state.
         decision.coordinates = coords
-        if rel and not decision.relative_location:
-            decision.relative_location = rel
+        # Named-place safeguard (Parts D/I): if the user actually named a known
+        # coastal town and the router didn't capture it (LLM miss or rules
+        # fallback), bind it deterministically. A named place also OUTRANKS a
+        # 'near me' signal — "Mumbai ke paas" means near Mumbai, not near the
+        # device — so we drop relative_location to stop a GPS/other-state jump.
+        _ln = str(decision.location_name or "").strip().lower()
+        if named_place and (not _ln or _ln in ("unknown", "none", "near_me")):
+            decision.location_name = named_place
+        _ln = str(decision.location_name or "").strip().lower()
+        if named_place and _ln == named_place:
+            decision.relative_location = None
+            rel_local = None
+        else:
+            rel_local = rel
+        if rel_local and not decision.relative_location:
+            decision.relative_location = rel_local
         if decision.time_window not in KNOWN_TIME_WINDOWS:
             decision.time_window = extract_time_window(query)
         if not decision.vessel_class:

@@ -1097,7 +1097,7 @@ class Orchestrator:
             # Timeout env-configurable: fast fail to simulated fallback rather than hanging 30s
             ocean_reading = None
             ocean_trace = None
-            _OCEAN_FUTURE_TIMEOUT = float(os.getenv("ORCA_OCEAN_FUTURE_TIMEOUT_S", "22").strip() or 22)
+            _OCEAN_FUTURE_TIMEOUT = float(os.getenv("ORCA_OCEAN_FUTURE_TIMEOUT_S", "30").strip() or 30)
             if "ocean" in futures:
                 try:
                     ocean_reading, ocean_trace = futures["ocean"].result(timeout=_OCEAN_FUTURE_TIMEOUT)  # type: ignore
@@ -1651,7 +1651,17 @@ class Orchestrator:
                 and not (fleet and fleet.get("recommendation_changed"))):
             verdict = ((state.get("synthesis") or {}).get("verdict")
                        or (risk.status.value if risk else "CAUTION"))
-            formatted = format_pfz_answer(pfz, verdict=verdict)
+            # Query-specific AI narrative REPLACES the templated intro sentence
+            # (spec Parts B/C) -- same helper used on the LLM response path, so
+            # PFZ answers read conversationally without repeating "The nearest
+            # official INCOIS PFZ is ...". Cards/coordinates/scores untouched.
+            narrative = None
+            try:
+                from agents.response_agent import _pfz_narrative
+                narrative = _pfz_narrative(context, pfz, state.get("language", "en"))
+            except Exception:
+                narrative = None
+            formatted = format_pfz_answer(pfz, verdict=verdict, narrative=narrative)
             if formatted:
                 return formatted[:1500]
         # Verdict line is authoritative and already rendered as HUD; answer complements it concisely.

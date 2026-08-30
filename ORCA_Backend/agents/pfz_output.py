@@ -58,12 +58,17 @@ def verdict_brief(verdict: str | None) -> str:
     )
 
 
-def format_pfz_answer(pfz, verdict: str | None = "CAUTION") -> str | None:
+def format_pfz_answer(pfz, verdict: str | None = "CAUTION", narrative: str | None = None) -> str | None:
     """PFZ answer in the documented format — official when INCOIS_LIVE, estimated otherwise.
 
     Returns a formatted answer for any PFZ (official, derived, simulated) with honest
     source tagging, so the user always sees Target Coordinates. Only wordsmithing
     lives here — all numbers come directly from the PFZRecommendation.
+
+    ``narrative`` — optional LLM-generated, query-specific opening paragraph. When
+    provided it REPLACES the deterministic ``intro`` sentence so the top of the
+    answer reads conversationally (spec Parts B/C). The structured cards, target
+    coordinates, quick-summary and source line are always preserved unchanged.
     """
     if pfz is None:
         return None
@@ -133,6 +138,9 @@ def format_pfz_answer(pfz, verdict: str | None = "CAUTION") -> str | None:
         src_txt = "Derived from live SST front" if src_val == "derived_from_live_data" else "Simulated estimate"
         source_line = f"* 📡 Source: {src_txt} — no official INCOIS advisory issued within 150 km of your location today (honest fallback).\n\nThis is an estimated zone based on live sea-surface data, not an official advisiory. Use with caution and check local conditions."
         intro = f"The nearest estimated Potential Fishing Zone (PFZ) is approximately {dist_km:.1f} km from your current location, on a {bearing:.0f}° ({bearing_word(bearing)}) bearing{landmark_sentence}."
+    # LLM-generated conversational narrative REPLACES the templated intro when available.
+    if narrative and narrative.strip():
+        intro = narrative.strip()
     return (
         "🛡️ IMPORTANT\n\n"
         f"🔶 VERDICT: {verdict_txt} — {verdict_brief(verdict_txt)}\n\n"

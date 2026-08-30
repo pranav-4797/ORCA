@@ -232,17 +232,50 @@ class PFZAgent:
         # (pfzLines) as the target: distance/bearing/target-coordinates all
         # come from a haversine against the real zone lines. Fall back to the
         # advisory's zone position when no line is nearby.
+        #
+        # BUG FIX (region-jump guard): _nearest_point_on_lines() scans the
+        # ENTIRE nationwide pfz_lines feature set with no distance cap and no
+        # state/region filter -- unlike the landing-centre selection above,
+        # which is already bounded by _MAX_CENTRE_DIST_KM. Without this check,
+        # a stray/corrupt line entry anywhere in India could silently replace
+        # a correct, nearby Mumbai/Maharashtra advisory position with a point
+        # hundreds of km away (e.g. Andhra Pradesh) while still reporting a
+        # small, misleading distance -- because that distance never went
+        # through the cap. Apply the same cap here before accepting it.
         nearest = self._nearest_point_on_lines(
             location.lat, location.lon,
             (live.get("pfz_lines") or {}).get("features") or [],
         )
-        if nearest is not None:
+        import logging as _logging
+        _pfzlog = _logging.getLogger("orca.pfz")
+        if nearest is not None and nearest["distance_km"] <= _MAX_CENTRE_DIST_KM:
             zone_lat, zone_lon = nearest["lat"], nearest["lon"]
             distance_km, bearing_deg = nearest["distance_km"], nearest["bearing_deg"]
+            _pfzlog.info(
+                "Resolved location: %s | Advisory region: %s | Selected PFZ: line geometry "
+                "%.1f km %s of reference",
+                location.name, primary.get("STATENAME", "?"), distance_km, _bearing_word(bearing_deg),
+            )
         else:
-            # nearest advisory zone position (still official, from pfzMobile)
+            if nearest is not None:
+                _pfzlog.warning(
+                    "Discarding line-geometry PFZ point %.1f km from %s (exceeds %.0f km cap; "
+                    "nearest issued centre %s is only %.1f km away) -- keeping advisory zone "
+                    "position from that centre instead.",
+                    nearest["distance_km"], location.name, _MAX_CENTRE_DIST_KM,
+                    primary.get("LANDINGNAM"), primary.get("distance_km", 0),
+                )
+            # nearest advisory zone position (still official, from pfzMobile) --
+            # already implicitly bounded because `primary` passed the
+            # _MAX_CENTRE_DIST_KM check above.
             distance_km, bearing_deg = self._haversine_bearing(
                 location.lat, location.lon, zone_lat, zone_lon
+            )
+            _pfzlog.info(
+                "Resolved location: %s | Advisory region: %s | Selected PFZ: advisory position "
+                "via %s, %.1f km %s of reference",
+                location.name, primary.get("STATENAME", "?"), primary.get("LANDINGNAM"),
+                distance_km, _bearing_word(bearing_deg),
             )
 
         # sst/chl are not carried in the PFZ feed; reuse the ocean-state

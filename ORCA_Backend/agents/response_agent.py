@@ -126,7 +126,7 @@ def generate_context_summary(
     )
     import os
     to = timeout if timeout is not None else float(os.getenv("ORCA_SUMMARY_TIMEOUT_S", "5").strip() or 5)
-    max_tok = int(os.getenv("ORCA_SUMMARY_MAX_TOKENS", "180").strip() or 180)
+    max_tok = int(os.getenv("ORCA_SUMMARY_MAX_TOKENS", "800").strip() or 800)
     try:
         text = llm_client.complete(
             _SUMMARY_SYSTEM_PROMPT, user_prompt,
@@ -139,6 +139,36 @@ def generate_context_summary(
         _log.warning("generate_context_summary failed (%s); caller keeps fallback", exc)
         return None
 
+
+
+def _pfz_narrative(context: "QueryContext", pfz: "PFZRecommendation", language: str) -> str | None:
+    """Query-specific AI opening line for PFZ answers (spec Parts B/C).
+
+    The structured template (cards, coordinates, scores, source chip) from
+    format_pfz_answer() is untouched -- this only generates the narrative
+    sentence that sits above it, from the SAME fields already on the
+    PFZRecommendation. Returns None on any failure so the template alone
+    still stands as a complete answer.
+    """
+    try:
+        lc = getattr(pfz, "landing_center", None) or {}
+        pfz_d = {
+            "distance_km": getattr(pfz, "distance_from_reference_km", None),
+            "bearing_deg": getattr(pfz, "bearing_deg", None),
+            "sst_at_zone_celsius": getattr(pfz, "sst_at_zone_celsius", None),
+            "landing_centre": lc.get("name") if lc else None,
+            "nearest_landmark": getattr(pfz, "nearest_landmark", None),
+        }
+        pfz_d = {k: v for k, v in pfz_d.items() if v is not None}
+        return generate_context_summary(
+            user_query=getattr(context, "raw_query", "") or "",
+            intent="pfz_lookup",
+            pfz=pfz_d,
+            language=language,
+        )
+    except Exception as exc:  # never break a working template answer
+        _log.warning("PFZ narrative generation failed (%s); template stands alone", exc)
+        return None
 
 
 class ResponseAgent:
@@ -164,8 +194,15 @@ class ResponseAgent:
         # Always use template when PFZ is present — ensures Target Coordinates are shown.
         official_pfz = None
         if pfz is not None:
+            # Query-specific AI narrative REPLACES the templated intro sentence
+            # (spec Parts B/C) so the top reads conversationally without repeating
+            # "The nearest official INCOIS PFZ is ...". Cards, coordinates, scores
+            # and the source chip are untouched. None on LLM failure -> template
+            # keeps its deterministic intro and still stands alone.
+            narrative = _pfz_narrative(context, pfz, language)
             official_pfz = format_pfz_answer(
-                pfz, verdict=(synthesis or {}).get("verdict", "CAUTION")
+                pfz, verdict=(synthesis or {}).get("verdict", "CAUTION"),
+                narrative=narrative,
             )
 
         if official_pfz is not None:
