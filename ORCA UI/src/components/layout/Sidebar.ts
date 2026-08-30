@@ -85,21 +85,17 @@ export class Sidebar {
         </div>
       </div>
 
-      <!-- Language Selector -->
-      <div class="sidebar-lang-section">
-        <div class="sidebar-lang-label">
-          <span>🌐 Language</span>
-        </div>
-        <div class="sidebar-lang-switchers">
-          <button class="sidebar-lang-btn ${store.activeLanguage === 'en' ? 'active' : ''}" data-sidebar-lang="en" title="English">EN</button>
-          <button class="sidebar-lang-btn ${store.activeLanguage === 'hi' ? 'active' : ''}" data-sidebar-lang="hi" title="हिंदी">हिं</button>
-          <button class="sidebar-lang-btn ${store.activeLanguage === 'mr' ? 'active' : ''}" data-sidebar-lang="mr" title="मराठी">मरा</button>
-        </div>
+      <!-- Settings Button -->
+      <div class="sidebar-settings-section">
+        <button class="sidebar-settings-btn" id="btn-sidebar-open-settings" title="Workspace Settings &amp; Navigation">
+          <span class="settings-btn-icon">${ICONS.settings}</span>
+          <span class="settings-btn-label">Settings</span>
+        </button>
       </div>
 
       <!-- Clean Footer -->
       <div class="sidebar-footer">
-        <button class="user-profile-btn" id="btn-sidebar-settings" title="Role: ${store.userCategory?.roleName || 'Verified Officer'} • Click to change profile">
+        <button class="user-profile-btn" id="btn-sidebar-profile" title="Role: ${store.userCategory?.roleName || 'Verified Officer'} • Click to change profile">
           ${user?.photoURL ? `
             <img src="${user.photoURL}" alt="Officer" class="sidebar-user-avatar-img" />
           ` : `
@@ -109,7 +105,6 @@ export class Sidebar {
             <div class="user-name">${officerName}</div>
             <div class="user-plan">${store.userCategory ? `${store.userCategory.badgeEmoji} ${store.userCategory.roleName}` : user ? 'Verified Officer' : 'Authentication Required'}</div>
           </div>
-          <span class="footer-settings-icon" title="Change Role &amp; Settings">${ICONS.settings}</span>
         </button>
       </div>
     `;
@@ -204,27 +199,14 @@ export class Sidebar {
       });
     });
 
-    // Sidebar Language switcher buttons
-    this.element.querySelectorAll('.sidebar-lang-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const selectedLang = btn.getAttribute('data-sidebar-lang') as 'en' | 'mr' | 'hi';
-        if (selectedLang && selectedLang !== store.activeLanguage) {
-          store.setLanguage(selectedLang);
-          if (selectedLang === 'mr') {
-            showToast('मराठी भाषा निवडली', 'info');
-          } else if (selectedLang === 'hi') {
-            showToast('हिंदी भाषा चयनित', 'info');
-          } else {
-            showToast('English selected', 'info');
-          }
-        }
-      });
+    // Settings button
+    this.element.querySelector('#btn-sidebar-open-settings')?.addEventListener('click', () => {
+      store.toggleSettingsModal(true);
     });
 
-    // Settings footer button
-    this.element.querySelector('#btn-sidebar-settings')?.addEventListener('click', () => {
-      store.toggleSettingsModal(true);
+    // Profile footer button
+    this.element.querySelector('#btn-sidebar-profile')?.addEventListener('click', () => {
+      store.openRoleSelection(true);
     });
   }
 }

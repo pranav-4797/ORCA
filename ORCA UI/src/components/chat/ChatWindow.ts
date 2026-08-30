@@ -3,10 +3,10 @@ import { MessageList } from './MessageList';
 import { Composer } from './Composer';
 import { showToast } from '../ui/Toast';
 import { I18N } from '../../utils/i18n';
+import { ICONS } from '../../utils/icons';
 
 export class ChatWindow {
   private element: HTMLElement;
-  private headerBar: HTMLElement;
   private scrollContainer: HTMLElement;
   private suggestionBar: HTMLElement;
   private messageList: MessageList;
@@ -16,9 +16,6 @@ export class ChatWindow {
   constructor() {
     this.element = document.createElement('main');
     this.element.className = 'chat-console-pane';
-
-    this.headerBar = document.createElement('div');
-    this.headerBar.className = 'chat-console-top-bar';
 
     this.scrollContainer = document.createElement('div');
     this.scrollContainer.className = 'chat-scroll-container';
@@ -30,26 +27,18 @@ export class ChatWindow {
     this.suggestionBar.className = 'chat-console-suggestion-bar';
 
     this.scrollContainer.appendChild(this.messageList.getElement());
-    this.element.appendChild(this.headerBar);
     this.element.appendChild(this.scrollContainer);
     this.element.appendChild(this.suggestionBar);
     this.element.appendChild(this.composer.getElement());
 
-    this.renderHeaderAndSuggestions();
+    this.renderSuggestions();
     this.setupScrollListener();
     store.subscribe(() => this.handleStateUpdate());
   }
 
-  private renderHeaderAndSuggestions(): void {
+  private renderSuggestions(): void {
     const lang = store.activeLanguage || 'en';
     const t = I18N[lang] || I18N.en;
-
-    this.headerBar.innerHTML = `
-      <div class="chat-top-title-col">
-        <span class="chat-top-title">${t.askTitle}</span>
-        <span class="chat-top-sub">${t.askSub}</span>
-      </div>
-    `;
 
     this.suggestionBar.innerHTML = `
       <button class="chat-sugg-chip" data-q="${t.sugg1Q}">${t.sugg1}</button>
@@ -68,7 +57,7 @@ export class ChatWindow {
   }
 
   private handleStateUpdate(): void {
-    this.renderHeaderAndSuggestions();
+    this.renderSuggestions();
     if (store.isStreaming) {
       this.messageList.updateLastMessage();
       if (this.shouldAutoScroll) {

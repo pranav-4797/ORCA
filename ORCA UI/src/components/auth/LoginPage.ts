@@ -35,10 +35,6 @@ export class LoginPage {
               <span class="brand-sub-title">Marine Intelligence</span>
             </div>
           </div>
-          <div class="login-system-pill">
-            <span class="live-pulse-dot"></span>
-            <span>ISRO PS-26176 / INCOIS LIVE</span>
-          </div>
         </div>
 
         <div class="login-top-actions">

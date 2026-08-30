@@ -55,6 +55,11 @@ export class AppShell {
     this.consoleLayout = document.createElement('div');
     this.consoleLayout.className = 'app-layout';
 
+    // Translucent Nautical Bathymetry Background Overlay
+    const dashboardBg = document.createElement('div');
+    dashboardBg.className = 'dashboard-nautical-bg';
+    this.consoleLayout.appendChild(dashboardBg);
+
     this.sidebar = new Sidebar();
     this.header = new Header();
     this.chatWindow = new ChatWindow();
@@ -77,8 +82,6 @@ export class AppShell {
     this.locationBanner.className = 'orca-location-banner';
     this.locationBanner.style.display = 'none';
     centerWorkspace.appendChild(this.locationBanner);
-
-    centerWorkspace.appendChild(this.header.getElement());
 
     // Dual-Pane Console Stage
     const dualPaneStage = document.createElement('div');
