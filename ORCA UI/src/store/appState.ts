@@ -44,6 +44,8 @@ class AppStore {
 
   // Authentication State
   public currentUser: User | null = null;
+  public authInitialized: boolean = false;
+  public isSelectingRole: boolean = false;
 
   // Data State
   public chats: Chat[] = [];
@@ -174,6 +176,7 @@ class AppStore {
     // Listen for Firebase Auth state changes & sync Firestore
     subscribeToAuth(async (user) => {
       this.currentUser = user;
+      this.authInitialized = true;
       if (user) {
         void saveUserProfile(user);
         
@@ -182,23 +185,26 @@ class AppStore {
           const cachedRole = localStorage.getItem(`orca_role_${user.uid}`);
           if (cachedRole) {
             this.userCategory = JSON.parse(cachedRole);
+            this.isSelectingRole = false;
             this.categoryModalOpen = false;
           }
 
           const categoryProfile = await getUserCategoryProfileFromFirestore(user.uid);
           if (categoryProfile) {
             this.userCategory = categoryProfile;
+            this.isSelectingRole = false;
             this.categoryModalOpen = false;
             localStorage.setItem(`orca_role_${user.uid}`, JSON.stringify(categoryProfile));
           } else if (!this.userCategory) {
-            // New user without role selected -> show category selection modal
+            // New user without role selected -> show role selection page
             this.userCategory = null;
+            this.isSelectingRole = true;
             this.categoryModalOpen = true;
           }
         } catch (catErr) {
           console.warn('[Firestore] Category check error:', catErr);
-          if (this.userCategory) {
-            this.categoryModalOpen = false;
+          if (!this.userCategory) {
+            this.isSelectingRole = true;
           }
         }
 
@@ -213,7 +219,7 @@ class AppStore {
               this.activeChatId = this.chats[0].id;
             }
             this.notify();
-            showToast(`Loaded ${this.chats.length} chat sessions from Firestore`, 'success');
+            showToast(`Loaded ${this.chats.length} mission sessions from cloud`, 'success');
           } else {
             // First time login: create clean session in cloud
             const initialChat: Chat = {
@@ -238,6 +244,7 @@ class AppStore {
       } else {
         // Not logged in -> reset state
         this.userCategory = null;
+        this.isSelectingRole = false;
         this.categoryModalOpen = false;
         this.loadFromStorage();
       }
@@ -249,6 +256,10 @@ class AppStore {
     try {
       const user = await loginWithGooglePopup();
       this.currentUser = user;
+      this.authInitialized = true;
+      if (!this.userCategory) {
+        this.isSelectingRole = true;
+      }
       this.notify();
       showToast(`Welcome aboard, Officer ${user.displayName || user.email}!`, 'success');
     } catch (err: any) {
@@ -259,8 +270,15 @@ class AppStore {
     }
   }
 
+  public openRoleSelection(open: boolean = true): void {
+    this.isSelectingRole = open;
+    this.categoryModalOpen = open;
+    this.notify();
+  }
+
   public toggleCategoryModal(open?: boolean): void {
-    this.categoryModalOpen = open !== undefined ? open : !this.categoryModalOpen;
+    this.isSelectingRole = open !== undefined ? open : !this.isSelectingRole;
+    this.categoryModalOpen = this.isSelectingRole;
     this.notify();
   }
 
@@ -275,13 +293,14 @@ class AppStore {
     };
 
     this.userCategory = profile;
+    this.isSelectingRole = false;
     this.categoryModalOpen = false;
 
     if (this.currentUser) {
       localStorage.setItem(`orca_role_${this.currentUser.uid}`, JSON.stringify(profile));
       try {
         await saveUserCategoryProfileToFirestore(this.currentUser.uid, profile);
-        showToast(`Role set to ${config.icon} ${config.name}`, 'success');
+        showToast(`Operational Profile set to ${config.icon} ${config.name}`, 'success');
       } catch (err) {
         console.warn('Failed to save category profile to Firestore:', err);
         showToast(`Role active for session (${config.name})`, 'info');
@@ -311,6 +330,7 @@ class AppStore {
       await logoutUser();
       this.currentUser = null;
       this.userCategory = null;
+      this.isSelectingRole = false;
       this.categoryModalOpen = false;
       this.chats = [...INITIAL_CHATS];
       this.messages = { ...INITIAL_MESSAGES };
@@ -318,7 +338,7 @@ class AppStore {
       localStorage.removeItem('ai_workspace_chats');
       localStorage.removeItem('ai_workspace_messages');
       this.notify();
-      showToast('Signed out. Switched to guest mode.', 'info');
+      showToast('Signed out from ORCA Command.', 'info');
     } catch (err: any) {
       console.error('Sign Out Error:', err);
       showToast('Error during sign out.', 'error');

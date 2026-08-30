@@ -6,12 +6,17 @@ import { AgentPanel } from '../agents/AgentPanel';
 import { OperationalPicture } from '../map/OperationalPicture';
 import { SearchModal } from '../search/SearchModal';
 import { SettingsModal } from '../settings/SettingsModal';
-import { AuthModal } from '../auth/AuthModal';
-import { CategoryModal } from '../auth/CategoryModal';
+import { LoginPage } from '../auth/LoginPage';
+import { RoleSelectionPage } from '../auth/RoleSelectionPage';
 import { ToastManager } from '../ui/Toast';
 
 export class AppShell {
   private element: HTMLElement;
+  private loginPage: LoginPage;
+  private roleSelectionPage: RoleSelectionPage;
+  private consoleLayout: HTMLElement;
+  private loadingScreen: HTMLElement;
+
   private sidebar: Sidebar;
   private header: Header;
   private chatWindow: ChatWindow;
@@ -19,15 +24,37 @@ export class AppShell {
   private agentPanel: AgentPanel;
   private searchModal: SearchModal;
   private settingsModal: SettingsModal;
-  private authModal: AuthModal;
-  private categoryModal: CategoryModal;
   private mobileBackdrop: HTMLElement;
   private locationBanner: HTMLElement;
 
-  constructor() {    this.element = document.createElement('div');
-    this.element.className = 'app-layout';
+  constructor() {
+    this.element = document.createElement('div');
+    this.element.className = 'app-shell-root';
 
-    // Initialize core components
+    // 1. Dedicated Full-Page Login
+    this.loginPage = new LoginPage();
+
+    // 2. Dedicated Full-Page Role Selection
+    this.roleSelectionPage = new RoleSelectionPage();
+
+    // 3. Loading / Splash Screen
+    this.loadingScreen = document.createElement('div');
+    this.loadingScreen.className = 'orca-loading-screen';
+    this.loadingScreen.innerHTML = `
+      <div class="loading-radar-emblem">
+        <div class="loading-radar-sweep"></div>
+        <span class="loading-anchor">⚓</span>
+      </div>
+      <div class="loading-text-meta">
+        <span class="loading-brand">ORCA COMMAND</span>
+        <span class="loading-sub">Connecting Marine Bridge Telemetry...</span>
+      </div>
+    `;
+
+    // 4. Dual-Pane Maritime Command Console Layout
+    this.consoleLayout = document.createElement('div');
+    this.consoleLayout.className = 'app-layout';
+
     this.sidebar = new Sidebar();
     this.header = new Header();
     this.chatWindow = new ChatWindow();
@@ -35,21 +62,17 @@ export class AppShell {
     this.agentPanel = new AgentPanel();
     this.searchModal = new SearchModal();
     this.settingsModal = new SettingsModal();
-    this.authModal = new AuthModal();
-    this.categoryModal = new CategoryModal();
 
-    // Mobile Backdrop
     this.mobileBackdrop = document.createElement('div');
     this.mobileBackdrop.className = 'drawer-backdrop';
     this.mobileBackdrop.id = 'mobile-backdrop';
 
-    // Assemble DOM
-    this.element.appendChild(this.sidebar.getElement());
+    this.consoleLayout.appendChild(this.sidebar.getElement());
 
     const centerWorkspace = document.createElement('div');
     centerWorkspace.className = 'main-workspace';
 
-    // Location banner (GPS permission denied / fallback notice)
+    // Location banner
     this.locationBanner = document.createElement('div');
     this.locationBanner.className = 'orca-location-banner';
     this.locationBanner.style.display = 'none';
@@ -57,7 +80,7 @@ export class AppShell {
 
     centerWorkspace.appendChild(this.header.getElement());
 
-    // Dual-Pane Maritime Console Stage (Left: Chat, Right: Operations Map & HUD)
+    // Dual-Pane Console Stage
     const dualPaneStage = document.createElement('div');
     dualPaneStage.className = 'console-dual-pane-stage';
     dualPaneStage.appendChild(this.chatWindow.getElement());
@@ -65,20 +88,26 @@ export class AppShell {
 
     centerWorkspace.appendChild(dualPaneStage);
 
-    this.element.appendChild(centerWorkspace);
-    this.element.appendChild(this.agentPanel.getElement());
-    this.element.appendChild(this.mobileBackdrop);
-    this.element.appendChild(this.searchModal.getElement());
-    this.element.appendChild(this.settingsModal.getElement());
-    this.element.appendChild(this.authModal.getElement());
-    this.element.appendChild(this.categoryModal.getElement());
+    this.consoleLayout.appendChild(centerWorkspace);
+    this.consoleLayout.appendChild(this.agentPanel.getElement());
+    this.consoleLayout.appendChild(this.mobileBackdrop);
+    this.consoleLayout.appendChild(this.searchModal.getElement());
+    this.consoleLayout.appendChild(this.settingsModal.getElement());
 
+    // Assemble Top-Level Shell
+    this.element.appendChild(this.loadingScreen);
+    this.element.appendChild(this.loginPage.getElement());
+    this.element.appendChild(this.roleSelectionPage.getElement());
+    this.element.appendChild(this.consoleLayout);
 
     // Initialize toast manager
     ToastManager.getInstance();
 
     this.attachGlobalEvents();
+    this.updateView();
+
     store.subscribe(() => {
+      this.updateView();
       this.updateDrawerBackdrop();
       this.updateLocationBanner();
     });
@@ -86,6 +115,46 @@ export class AppShell {
 
   public getElement(): HTMLElement {
     return this.element;
+  }
+
+  private updateView(): void {
+    // 1. Initial auth verification check
+    if (!store.authInitialized) {
+      this.loadingScreen.style.display = 'flex';
+      this.loginPage.getElement().style.display = 'none';
+      this.roleSelectionPage.getElement().style.display = 'none';
+      this.consoleLayout.style.display = 'none';
+      return;
+    }
+    this.loadingScreen.style.display = 'none';
+
+    // 2. Unauthenticated -> Dedicated Full-Page Login
+    if (!store.currentUser) {
+      this.loginPage.getElement().style.display = 'flex';
+      this.roleSelectionPage.getElement().style.display = 'none';
+      this.consoleLayout.style.display = 'none';
+      return;
+    }
+
+    // 3. Logged in, but no role selected OR requested to switch role -> Dedicated Full-Page Role Selection
+    if (!store.userCategory || store.isSelectingRole) {
+      this.loginPage.getElement().style.display = 'none';
+      this.roleSelectionPage.getElement().style.display = 'flex';
+      this.consoleLayout.style.display = 'none';
+      return;
+    }
+
+    // 4. Authenticated with active operational role -> Main Dual-Pane Command Console
+    const wasHidden = this.consoleLayout.style.display === 'none';
+    this.loginPage.getElement().style.display = 'none';
+    this.roleSelectionPage.getElement().style.display = 'none';
+    this.consoleLayout.style.display = 'flex';
+
+    if (wasHidden) {
+      setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+      }, 50);
+    }
   }
 
   private updateLocationBanner(): void {

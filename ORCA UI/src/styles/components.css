@@ -3235,8 +3235,985 @@
   background: var(--bg-surface-hover);
 }
 
+/* =========================================================================
+   ORCA INITIAL AUTH / SPLASH RADAR SCREEN
+   ========================================================================= */
+.orca-loading-screen {
+  min-height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  z-index: 200;
+  position: relative;
+}
 
+.loading-radar-emblem {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(14, 124, 134, 0.35) 0%, rgba(14, 124, 134, 0.05) 70%, transparent 100%);
+  border: 2px dashed var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 0 24px rgba(14, 124, 134, 0.45);
+}
 
+.loading-radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 70%, rgba(0, 229, 255, 0.5) 100%);
+  animation: rotate-radar 3s linear infinite;
+}
 
+.loading-anchor {
+  font-size: 30px;
+  z-index: 2;
+  color: var(--primary);
+}
 
+.loading-text-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
 
+.loading-brand {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--text-primary);
+}
+
+.loading-sub {
+  font-size: 12px;
+  color: var(--primary);
+  letter-spacing: 0.04em;
+}
+
+/* =========================================================================
+   DEDICATED FULL-PAGE MANDATORY LOGIN (ECDIS MARITIME BRIDGE)
+   ========================================================================= */
+.orca-login-page {
+  min-height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at 50% 20%, rgba(14, 124, 134, 0.18) 0%, rgba(7, 19, 31, 0.98) 65%), var(--bg-app);
+  color: var(--text-primary);
+  position: relative;
+  z-index: 100;
+  overflow-y: auto;
+}
+
+.login-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 28px;
+  background: rgba(10, 25, 41, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.login-top-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.login-brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-anchor-icon {
+  font-size: 24px;
+  color: var(--primary);
+  filter: drop-shadow(0 0 8px var(--primary));
+}
+
+.brand-text-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-main-title {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.brand-sub-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.login-system-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(14, 124, 134, 0.15);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.live-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10B981;
+  box-shadow: 0 0 8px #10B981;
+  animation: pulse 2s infinite;
+}
+
+.login-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.login-lang-picker {
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  padding: 2px;
+}
+
+.login-lang-btn {
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.login-lang-btn.active {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.login-theme-toggle {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.login-main-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+.login-content-grid {
+  max-width: 1180px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 40px;
+  align-items: center;
+}
+
+.login-hero-info {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-hero-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: rgba(14, 124, 134, 0.15);
+  border: 1px solid var(--primary);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 0.08em;
+  width: fit-content;
+}
+
+.login-hero-heading {
+  font-family: var(--font-sans);
+  font-size: clamp(26px, 3.2vw, 38px);
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.login-hero-lead {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 580px;
+}
+
+.login-pillars-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.login-pillar-card {
+  display: flex;
+  gap: 12px;
+  background: rgba(15, 32, 53, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  transition: all var(--transition-normal);
+}
+
+.login-pillar-card:hover {
+  border-color: var(--primary);
+  background: rgba(15, 32, 53, 0.85);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.pillar-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.pillar-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pillar-body strong {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.pillar-body span {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+/* Authentication Box */
+.login-card-container {
+  display: flex;
+  justify-content: center;
+}
+
+.login-auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: rgba(13, 29, 49, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1.5px solid var(--border-strong);
+  border-top: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  padding: 32px 28px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.auth-card-top {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+
+.auth-radar-emblem {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(14, 124, 134, 0.3) 0%, rgba(14, 124, 134, 0.05) 70%, transparent 100%);
+  border: 2px dashed var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 0 20px rgba(14, 124, 134, 0.35);
+  margin-bottom: 4px;
+}
+
+.auth-radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 75%, rgba(0, 229, 255, 0.4) 100%);
+  animation: rotate-radar 6s linear infinite;
+}
+
+.auth-emblem-core {
+  font-size: 26px;
+  z-index: 2;
+}
+
+.auth-card-title {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.auth-card-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.auth-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-google-sign-in {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 13px 20px;
+  background: #ffffff;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  transition: all var(--transition-fast);
+}
+
+.btn-google-sign-in:hover:not(:disabled) {
+  background: #f8fafc;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 229, 255, 0.25);
+  border-color: var(--primary);
+}
+
+.btn-google-sign-in:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.auth-security-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(8, 20, 36, 0.6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  padding: 12px 14px;
+}
+
+.sec-note-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.sec-check {
+  color: #10B981;
+  font-weight: 800;
+}
+
+.sec-note-item strong {
+  color: var(--text-primary);
+}
+
+.login-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: rgba(7, 19, 31, 0.95);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* =========================================================================
+   DEDICATED FULL-PAGE ROLE SELECTION (OPERATIONAL PROFILE)
+   ========================================================================= */
+.orca-role-page {
+  min-height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at 50% 10%, rgba(14, 124, 134, 0.15) 0%, rgba(7, 19, 31, 0.98) 65%), var(--bg-app);
+  color: var(--text-primary);
+  position: relative;
+  z-index: 100;
+  overflow-y: auto;
+}
+
+.role-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: rgba(10, 25, 41, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.role-top-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.role-brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.role-step-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: rgba(14, 124, 134, 0.15);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 0.06em;
+}
+
+.role-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.role-officer-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  padding: 4px 10px;
+}
+
+.officer-pill-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--primary);
+}
+
+.officer-pill-avatar-fallback {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.officer-pill-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.officer-pill-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.officer-pill-email {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.btn-role-signout {
+  border: none;
+  background: rgba(239, 68, 68, 0.15);
+  color: #EF4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-xs);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-left: 4px;
+}
+
+.btn-role-signout:hover {
+  background: #EF4444;
+  color: #ffffff;
+}
+
+.role-main-stage {
+  flex: 1;
+  padding: 32px 24px;
+  display: flex;
+  justify-content: center;
+}
+
+.role-container {
+  max-width: 1080px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.role-hero-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.role-pre-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: rgba(14, 124, 134, 0.15);
+  border: 1px solid var(--primary);
+  border-radius: 16px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 0.08em;
+}
+
+.pulse-dot-cyan {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 8px var(--primary);
+  animation: pulse 1.8s infinite;
+}
+
+.role-page-heading {
+  font-family: var(--font-sans);
+  font-size: clamp(24px, 2.6vw, 32px);
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.role-page-subtitle {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 680px;
+}
+
+.role-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.role-card-item {
+  position: relative;
+  background: rgba(13, 29, 49, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1.5px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 110px;
+  user-select: none;
+}
+
+.role-card-item:hover {
+  border-color: var(--primary);
+  background: rgba(13, 29, 49, 0.95);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.role-card-item.selected {
+  border-color: var(--primary);
+  background: linear-gradient(135deg, rgba(14, 124, 134, 0.25), rgba(7, 19, 31, 0.85));
+  box-shadow: 0 0 20px rgba(14, 124, 134, 0.4);
+}
+
+.role-card-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.role-card-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.role-card-indicator {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  position: relative;
+  transition: all var(--transition-fast);
+}
+
+.role-card-item.selected .role-card-indicator {
+  border-color: var(--primary);
+  background: var(--primary);
+  box-shadow: 0 0 8px var(--primary);
+}
+
+.role-card-item.selected .role-card-indicator::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.role-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.role-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.role-card-tagline {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.35;
+}
+
+.role-card-vessel-badge {
+  align-self: flex-start;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-badge);
+  border: 1px solid var(--border-subtle);
+  color: var(--primary);
+}
+
+/* Detail Inspection Panel */
+.role-detail-panel {
+  background: rgba(13, 29, 49, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1.5px solid var(--border-strong);
+  border-top: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.detail-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.detail-icon-wrap {
+  font-size: 36px;
+  line-height: 1;
+  background: rgba(14, 124, 134, 0.15);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+
+.detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-role-title {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.detail-vessel-badge {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+  background: rgba(14, 124, 134, 0.2);
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.detail-tagline {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.detail-body-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 20px;
+  background: rgba(8, 20, 36, 0.5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+
+.detail-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+
+.detail-description {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.detail-focus-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.focus-tag-chip {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 3px 9px;
+  border-radius: 12px;
+  color: #10B981;
+}
+
+.specs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spec-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.spec-label {
+  color: var(--text-tertiary);
+}
+
+.spec-val {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.spec-val.highlight {
+  color: var(--primary);
+}
+
+.role-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.btn-cancel-role {
+  padding: 12px 18px;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-cancel-role:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.btn-confirm-role-launch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  background: var(--primary);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 4px 16px rgba(14, 124, 134, 0.4);
+}
+
+.btn-confirm-role-launch:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: 0 6px 24px rgba(0, 229, 255, 0.45);
+  transform: translateY(-2px);
+}
+
+.btn-confirm-role-launch:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.btn-arrow {
+  font-size: 16px;
+  transition: transform var(--transition-fast);
+}
+
+.btn-confirm-role-launch:hover .btn-arrow {
+  transform: translateX(4px);
+}
+
+.role-footer-bar {
+  text-align: center;
+  padding: 14px 24px;
+  background: rgba(7, 19, 31, 0.95);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* Radar loader spinner */
+.login-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Media queries for responsive layouts */
+@media (max-width: 1024px) {
+  .login-content-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .role-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .detail-body-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .login-pillars-grid {
+    grid-template-columns: 1fr;
+  }
+  .role-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  .login-top-bar, .role-top-bar {
+    padding: 12px 16px;
+  }
+  .login-main-stage, .role-main-stage {
+    padding: 20px 14px;
+  }
+  .role-action-bar {
+    flex-direction: column;
+    width: 100%;
+  }
+  .btn-confirm-role-launch, .btn-cancel-role {
+    width: 100%;
+    justify-content: center;
+  }
+}
