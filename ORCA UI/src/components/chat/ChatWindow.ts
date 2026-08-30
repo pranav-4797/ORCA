@@ -8,7 +8,6 @@ import { ICONS } from '../../utils/icons';
 export class ChatWindow {
   private element: HTMLElement;
   private scrollContainer: HTMLElement;
-  private suggestionBar: HTMLElement;
   private messageList: MessageList;
   private composer: Composer;
   private shouldAutoScroll = true;
@@ -23,41 +22,15 @@ export class ChatWindow {
     this.messageList = new MessageList();
     this.composer = new Composer();
 
-    this.suggestionBar = document.createElement('div');
-    this.suggestionBar.className = 'chat-console-suggestion-bar';
-
     this.scrollContainer.appendChild(this.messageList.getElement());
     this.element.appendChild(this.scrollContainer);
-    this.element.appendChild(this.suggestionBar);
     this.element.appendChild(this.composer.getElement());
 
-    this.renderSuggestions();
     this.setupScrollListener();
     store.subscribe(() => this.handleStateUpdate());
   }
 
-  private renderSuggestions(): void {
-    const lang = store.activeLanguage || 'en';
-    const t = I18N[lang] || I18N.en;
-
-    this.suggestionBar.innerHTML = `
-      <button class="chat-sugg-chip" data-q="${t.sugg1Q}">${t.sugg1}</button>
-      <button class="chat-sugg-chip" data-q="${t.sugg2Q}">${t.sugg2}</button>
-      <button class="chat-sugg-chip" data-q="${t.sugg3Q}">${t.sugg3}</button>
-      <button class="chat-sugg-chip" data-q="${t.sugg4Q}">${t.sugg4}</button>
-    `;
-
-    // Suggestion chips
-    this.suggestionBar.querySelectorAll('.chat-sugg-chip').forEach(chip => {
-      chip.addEventListener('click', () => {
-        const q = chip.getAttribute('data-q');
-        if (q) store.sendMessage(q);
-      });
-    });
-  }
-
   private handleStateUpdate(): void {
-    this.renderSuggestions();
     if (store.isStreaming) {
       this.messageList.updateLastMessage();
       if (this.shouldAutoScroll) {

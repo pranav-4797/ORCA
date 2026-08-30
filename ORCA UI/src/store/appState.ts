@@ -155,14 +155,14 @@ class AppStore {
 
   // Settings
   public settings: AppSettings = {
-    theme: 'dark',
+    theme: 'light',
     sidebarCollapsed: true,
     agentPanelOpen: false,
     soundEnabled: true,
     sendOnEnter: true,
     streamSpeed: 'normal',
     defaultModel: 'Gemini 1.5 Pro',
-    codeTheme: 'dark',
+    codeTheme: 'light',
     fontSize: 'medium'
   };
 
@@ -661,22 +661,17 @@ class AppStore {
     }
   }
 
-  // Theme Handling
-  public setTheme(theme: ThemeMode): void {
-    this.settings.theme = theme;
-    this.applyTheme(theme);
+  // Theme Handling (Always White / Light Mode)
+  public setTheme(_theme: ThemeMode = 'light'): void {
+    this.settings.theme = 'light';
+    this.applyTheme('light');
     this.notify();
   }
 
-  public applyTheme(theme: ThemeMode): void {
-    let activeTheme = theme;
-    if (theme === 'system') {
-      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      activeTheme = prefersDark ? 'dark' : 'light';
-    }
-    document.documentElement.setAttribute('data-theme', activeTheme);
-    document.documentElement.classList.toggle('dark', activeTheme === 'dark');
-    document.documentElement.classList.toggle('light', activeTheme === 'light');
+  public applyTheme(_theme?: ThemeMode): void {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.documentElement.classList.remove('dark');
+    document.documentElement.classList.add('light');
   }
 
   // Navigation & Chat Management

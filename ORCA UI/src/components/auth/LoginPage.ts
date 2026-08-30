@@ -44,11 +44,6 @@ export class LoginPage {
             <button class="login-lang-btn ${lang === 'mr' ? 'active' : ''}" data-lang="mr">मराठी</button>
             <button class="login-lang-btn ${lang === 'hi' ? 'active' : ''}" data-lang="hi">हिन्दी</button>
           </div>
-
-          <!-- Theme Toggle -->
-          <button class="icon-btn login-theme-toggle" id="btn-login-theme-toggle" title="Toggle Theme">
-            ${isDark ? ICONS.sun : ICONS.moon}
-          </button>
         </div>
       </header>
 
@@ -150,13 +145,6 @@ export class LoginPage {
           showToast(`Language switched to ${lang.toUpperCase()}`, 'info');
         }
       });
-    });
-
-    // Theme toggle
-    this.element.querySelector('#btn-login-theme-toggle')?.addEventListener('click', () => {
-      const current = store.settings.theme;
-      const nextTheme = current === 'dark' ? 'light' : 'dark';
-      store.setTheme(nextTheme);
     });
 
     // Google Login Action

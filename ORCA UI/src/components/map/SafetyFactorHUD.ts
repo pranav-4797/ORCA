@@ -63,7 +63,7 @@ export class SafetyFactorHUD {
     const zoneWeight = '+6.4';
 
     this.element.innerHTML = `
-      <!-- Top 6-Metric Live Telemetry Ribbon (Single Language) -->
+      <!-- Top 6-Metric Live Telemetry Ribbon -->
       <div class="telemetry-metrics-ribbon">
         <div class="ribbon-cell">
           <span class="ribbon-label">${t.waves}</span>
@@ -88,81 +88,6 @@ export class SafetyFactorHUD {
         <div class="ribbon-cell">
           <span class="ribbon-label">${t.temp}</span>
           <span class="ribbon-val">${sst.toFixed(1)}°C</span>
-        </div>
-      </div>
-
-      <!-- Bottom Risk Score & Factor Breakdown Panel -->
-      <div class="safety-score-panel">
-        <div class="score-header-row">
-          <!-- Radial Gauge -->
-          <div class="score-gauge-wrap">
-            <div class="radial-gauge-circle" style="border-color:${scoreColor};">
-              <span class="score-num" style="color:${scoreColor};">${riskScore}</span>
-              <span class="score-denom">/ 100</span>
-            </div>
-          </div>
-
-          <!-- Verdict Meta -->
-          <div class="verdict-meta-wrap">
-            <div class="verdict-headline" style="color:${scoreColor};">
-              ${verdictText}
-            </div>
-            <div class="verdict-badges-row">
-              <span class="verdict-status-badge" style="background:${scoreColor}22; color:${scoreColor}; border:1px solid ${scoreColor};">
-                ${statusLabel}
-              </span>
-              <span class="verdict-source-badge">INCOIS • IMD</span>
-              <span class="verdict-mode-badge">${store.backendOnline ? 'LIVE' : 'DEMO'}</span>
-            </div>
-            <div class="verdict-timing-tip">
-              ${isDanger ? '⚠️' : '✅'} ${tipText}
-            </div>
-          </div>
-        </div>
-
-        <!-- Factor Contributions Breakdown (Single Language) -->
-        <div class="factor-breakdown-section">
-          <div class="factor-section-title">${t.factorTitle}</div>
-
-          <div class="factor-bar-row">
-            <div class="factor-info">
-              <span class="factor-name">${t.officialWarnings}</span>
-              <span class="factor-val-badge">${warnWeight}</span>
-            </div>
-            <div class="factor-progress-track">
-              <div class="factor-progress-fill" style="width:${isDanger ? '85%' : '20%'}; background:${scoreColor};"></div>
-            </div>
-          </div>
-
-          <div class="factor-bar-row">
-            <div class="factor-info">
-              <span class="factor-name">${t.waveHeight}</span>
-              <span class="factor-val-badge">${waveWeight}</span>
-            </div>
-            <div class="factor-progress-track">
-              <div class="factor-progress-fill" style="width:${Math.min(100, swh * 40)}%; background:#0ea5e9;"></div>
-            </div>
-          </div>
-
-          <div class="factor-bar-row">
-            <div class="factor-info">
-              <span class="factor-name">${t.windSpeed}</span>
-              <span class="factor-val-badge">${windWeight}</span>
-            </div>
-            <div class="factor-progress-track">
-              <div class="factor-progress-fill" style="width:${Math.min(100, windSpeed * 2.5)}%; background:#f59e0b;"></div>
-            </div>
-          </div>
-
-          <div class="factor-bar-row">
-            <div class="factor-info">
-              <span class="factor-name">${t.restrictedZones}</span>
-              <span class="factor-val-badge">${zoneWeight}</span>
-            </div>
-            <div class="factor-progress-track">
-              <div class="factor-progress-fill" style="width:30%; background:#8b5cf6;"></div>
-            </div>
-          </div>
         </div>
       </div>
     `;

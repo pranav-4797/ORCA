@@ -104,22 +104,6 @@ export class SettingsModal {
             </div>
           </div>
 
-          <!-- Theme Preference -->
-          <div>
-            <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-primary);">Appearance</label>
-            <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;">
-              <button class="theme-btn ${settings.theme === 'dark' ? 'active' : ''}" data-theme-val="dark" style="padding:8px;border:1px solid ${settings.theme === 'dark' ? 'var(--primary)' : 'var(--border-default)'};border-radius:var(--radius-xs);background:${settings.theme === 'dark' ? 'rgba(14,124,134,0.15)' : 'var(--bg-card)'};color:var(--text-primary);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;cursor:pointer;">
-                ${ICONS.moon} Dark
-              </button>
-              <button class="theme-btn ${settings.theme === 'light' ? 'active' : ''}" data-theme-val="light" style="padding:8px;border:1px solid ${settings.theme === 'light' ? 'var(--primary)' : 'var(--border-default)'};border-radius:var(--radius-xs);background:${settings.theme === 'light' ? 'rgba(14,124,134,0.15)' : 'var(--bg-card)'};color:var(--text-primary);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;cursor:pointer;">
-                ${ICONS.sun} Light
-              </button>
-              <button class="theme-btn ${settings.theme === 'system' ? 'active' : ''}" data-theme-val="system" style="padding:8px;border:1px solid ${settings.theme === 'system' ? 'var(--primary)' : 'var(--border-default)'};border-radius:var(--radius-xs);background:${settings.theme === 'system' ? 'rgba(14,124,134,0.15)' : 'var(--bg-card)'};color:var(--text-primary);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;cursor:pointer;">
-                ${ICONS.cpu} System
-              </button>
-            </div>
-          </div>
-
           <!-- Behavior Toggles -->
           <div style="display:flex;flex-direction:column;gap:10px;">
             <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
@@ -202,19 +186,6 @@ export class SettingsModal {
     this.element.querySelector('#btn-settings-change-role')?.addEventListener('click', () => {
       store.toggleSettingsModal(false);
       store.openRoleSelection(true);
-    });
-
-    // Theme selector buttons
-    const themeBtns = this.element.querySelectorAll('.theme-btn');
-    themeBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const val = btn.getAttribute('data-theme-val') as import('../../types/chat').ThemeMode;
-        if (val) {
-          store.setTheme(val);
-          this.render();
-          showToast(`Theme changed to ${val}`, 'info');
-        }
-      });
     });
 
     // Send on Enter toggle

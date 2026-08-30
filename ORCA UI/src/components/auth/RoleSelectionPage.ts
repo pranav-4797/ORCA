@@ -71,11 +71,6 @@ export class RoleSelectionPage {
               </button>
             </div>
           ` : ''}
-
-          <!-- Theme Toggle -->
-          <button class="icon-btn" id="btn-role-theme-toggle" title="Toggle Theme">
-            ${isDark ? ICONS.sun : ICONS.moon}
-          </button>
         </div>
       </header>
 
@@ -210,13 +205,6 @@ export class RoleSelectionPage {
           this.render();
         }
       });
-    });
-
-    // Theme toggle
-    this.element.querySelector('#btn-role-theme-toggle')?.addEventListener('click', () => {
-      const current = store.settings.theme;
-      const nextTheme = current === 'dark' ? 'light' : 'dark';
-      store.setTheme(nextTheme);
     });
 
     // Sign out

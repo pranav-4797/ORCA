@@ -469,9 +469,8 @@
   flex-direction: column;
   align-items: flex-start;
   text-align: left;
-  background: rgba(13, 29, 49, 0.72);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--border-default);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(0, 0, 0, 0.15);
   border-radius: var(--radius-sm);
   padding: 14px 16px;
   cursor: pointer;
@@ -481,20 +480,20 @@
 }
 
 [data-theme="light"] .hero-action-card {
-  background: rgba(255, 255, 255, 0.75);
-  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 0, 0, 0.15);
 }
 
 .hero-action-card:hover {
-  background: rgba(13, 29, 49, 0.9);
+  background: rgba(255, 255, 255, 0.95);
   border-color: var(--primary);
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
 }
 
 [data-theme="light"] .hero-action-card:hover {
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
 }
 
 .hero-action-card:active {
@@ -2419,8 +2418,7 @@
 
 .hero-role-badge-card {
   width: 100%;
-  background: rgba(13, 29, 49, 0.75);
-  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.72);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: 10px 16px;
@@ -2435,12 +2433,12 @@
 }
 
 [data-theme="light"] .hero-role-badge-card {
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .hero-role-badge-card:hover {
   border-color: var(--primary);
-  background: rgba(13, 29, 49, 0.9);
+  background: rgba(255, 255, 255, 0.95);
   box-shadow: var(--shadow-md);
 }
 
@@ -2895,29 +2893,29 @@
   flex-direction: column;
   height: 100%;
   border-left: 1px solid var(--border-default);
-  background: rgba(8, 20, 36, 0.72);
-  backdrop-filter: blur(14px);
+  background: rgba(248, 250, 252, 0.35);
   overflow-y: auto;
   padding: 12px;
   gap: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 [data-theme="light"] .operational-picture-console {
-  background: rgba(248, 250, 252, 0.75);
+  background: rgba(248, 250, 252, 0.35);
 }
 
 /* Nautical Chart Frame */
 .nautical-chart-frame {
   border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: rgba(10, 24, 42, 0.75);
-  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.85);
   overflow: hidden;
   position: relative;
 }
 
 [data-theme="light"] .nautical-chart-frame {
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.85);
 }
 
 .nautical-chart-header, .nautical-chart-footer {
@@ -3215,15 +3213,15 @@
   height: 100%;
   flex: 1;
   min-height: 0;
-  background: rgba(6, 17, 31, 0.72);
-  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.35);
   border-right: 1px solid var(--border-default);
   overflow: hidden;
   position: relative;
+  z-index: 1;
 }
 
 [data-theme="light"] .chat-console-pane {
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .chat-console-top-bar {
@@ -3409,14 +3407,16 @@
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  opacity: 0.16;
+  opacity: 0.65;
+  filter: none;
   pointer-events: none;
   z-index: 0;
 }
 
 [data-theme="light"] .login-nautical-bg,
 [data-theme="light"] .dashboard-nautical-bg {
-  opacity: 0.22;
+  opacity: 0.75;
+  filter: none;
 }
 
 .login-top-bar {
