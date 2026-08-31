@@ -1661,7 +1661,8 @@ class Orchestrator:
                 narrative = _pfz_narrative(context, pfz, state.get("language", "en"))
             except Exception:
                 narrative = None
-            formatted = format_pfz_answer(pfz, verdict=verdict, narrative=narrative)
+            formatted = format_pfz_answer(pfz, verdict=verdict, narrative=narrative,
+                                          language=state.get("language", "en"))
             if formatted:
                 return formatted[:1500]
         # Verdict line is authoritative and already rendered as HUD; answer complements it concisely.

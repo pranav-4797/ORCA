@@ -29,6 +29,107 @@ _VERDICT_BRIEF = {
     "CRITICAL": "Severe conditions; do not venture out.",
 }
 
+# Localized labels for the compact PFZ block. Coordinates / numbers stay
+# universal; only the fixed scaffolding words are translated so the WHOLE
+# answer reads in the user's language. Falls back to English for any missing
+# language or key. Proper nouns (INCOIS, SAMUDRA) are kept as-is.
+_PFZ_LABELS = {
+    "en": {
+        "verdict": "VERDICT", "distance": "Distance", "depth": "Depth",
+        "source_official": "Official INCOIS (SAMUDRA) live advisory",
+        "source_estimated": "Estimated from live sea-surface data — no official INCOIS advisory nearby today",
+        "brief": {"SAFE": "favourable for fishing.", "CAUTION": "borderline, proceed carefully.",
+                  "UNSAFE": "unsafe, avoid venturing out.", "EXTREME": "severe, do not venture out.",
+                  "CRITICAL": "severe, do not venture out."},
+    },
+    "hi": {
+        "verdict": "फैसला", "distance": "दूरी", "depth": "गहराई",
+        "source_official": "आधिकारिक INCOIS (SAMUDRA) लाइव सलाह",
+        "source_estimated": "लाइव समुद्री सतह डेटा से अनुमानित — आज पास कोई आधिकारिक INCOIS सलाह नहीं",
+        "brief": {"SAFE": "मछली पकड़ने के लिए अनुकूल।", "CAUTION": "सीमावर्ती, सावधानी से आगे बढ़ें।",
+                  "UNSAFE": "असुरक्षित, समुद्र में न जाएं।", "EXTREME": "गंभीर, समुद्र में न जाएं।",
+                  "CRITICAL": "गंभीर, समुद्र में न जाएं।"},
+    },
+    "mr": {
+        "verdict": "निर्णय", "distance": "अंतर", "depth": "खोली",
+        "source_official": "अधिकृत INCOIS (SAMUDRA) थेट सल्ला",
+        "source_estimated": "थेट समुद्री पृष्ठभाग डेटावरून अंदाजित — आज जवळ अधिकृत INCOIS सल्ला नाही",
+        "brief": {"SAFE": "मासेमारीसाठी अनुकूल.", "CAUTION": "सीमारेषेवर, काळजीपूर्वक जा.",
+                  "UNSAFE": "असुरक्षित, समुद्रात जाऊ नका.", "EXTREME": "गंभीर, समुद्रात जाऊ नका.",
+                  "CRITICAL": "गंभीर, समुद्रात जाऊ नका."},
+    },
+    "ta": {
+        "verdict": "தீர்ப்பு", "distance": "தூரம்", "depth": "ஆழம்",
+        "source_official": "அதிகாரப்பூர்வ INCOIS (SAMUDRA) நேரடி ஆலோசனை",
+        "source_estimated": "நேரடி கடல் மேற்பரப்பு தரவிலிருந்து மதிப்பிடப்பட்டது — இன்று அருகில் அதிகாரப்பூர்வ INCOIS ஆலோசனை இல்லை",
+        "brief": {"SAFE": "மீன்பிடிக்க ஏற்றது.", "CAUTION": "எல்லைநிலை, கவனமாகச் செல்லவும்.",
+                  "UNSAFE": "பாதுகாப்பற்றது, கடலுக்குச் செல்ல வேண்டாம்.", "EXTREME": "கடுமையானது, கடலுக்குச் செல்ல வேண்டாம்.",
+                  "CRITICAL": "கடுமையானது, கடலுக்குச் செல்ல வேண்டாம்."},
+    },
+    "te": {
+        "verdict": "తీర్పు", "distance": "దూరం", "depth": "లోతు",
+        "source_official": "అధికారిక INCOIS (SAMUDRA) ప్రత్యక్ష సలహా",
+        "source_estimated": "ప్రత్యక్ష సముద్ర ఉపరితల డేటా నుండి అంచనా — నేడు సమీపంలో అధికారిక INCOIS సలహా లేదు",
+        "brief": {"SAFE": "చేపలు పట్టడానికి అనుకూలం.", "CAUTION": "సరిహద్దు, జాగ్రత్తగా వెళ్లండి.",
+                  "UNSAFE": "అసురక్షితం, సముద్రంలోకి వెళ్లవద్దు.", "EXTREME": "తీవ్రం, సముద్రంలోకి వెళ్లవద్దు.",
+                  "CRITICAL": "తీవ్రం, సముద్రంలోకి వెళ్లవద్దు."},
+    },
+    "ml": {
+        "verdict": "വിധി", "distance": "ദൂരം", "depth": "ആഴം",
+        "source_official": "ഔദ്യോഗിക INCOIS (SAMUDRA) തത്സമയ ഉപദേശം",
+        "source_estimated": "തത്സമയ കടൽ ഉപരിതല ഡാറ്റയിൽ നിന്ന് കണക്കാക്കിയത് — ഇന്ന് സമീപത്ത് ഔദ്യോഗിക INCOIS ഉപദേശമില്ല",
+        "brief": {"SAFE": "മീൻപിടിത്തത്തിന് അനുകൂലം.", "CAUTION": "അതിർത്തി, ശ്രദ്ധയോടെ പോകുക.",
+                  "UNSAFE": "സുരക്ഷിതമല്ല, കടലിൽ പോകരുത്.", "EXTREME": "ഗുരുതരം, കടലിൽ പോകരുത്.",
+                  "CRITICAL": "ഗുരുതരം, കടലിൽ പോകരുത്."},
+    },
+    "kn": {
+        "verdict": "ತೀರ್ಪು", "distance": "ದೂರ", "depth": "ಆಳ",
+        "source_official": "ಅಧಿಕೃತ INCOIS (SAMUDRA) ನೇರ ಸಲಹೆ",
+        "source_estimated": "ನೇರ ಸಮುದ್ರ ಮೇಲ್ಮೈ ದತ್ತಾಂಶದಿಂದ ಅಂದಾಜು — ಇಂದು ಹತ್ತಿರ ಅಧಿಕೃತ INCOIS ಸಲಹೆ ಇಲ್ಲ",
+        "brief": {"SAFE": "ಮೀನುಗಾರಿಕೆಗೆ ಅನುಕೂಲ.", "CAUTION": "ಗಡಿರೇಖೆ, ಎಚ್ಚರಿಕೆಯಿಂದ ಸಾಗಿ.",
+                  "UNSAFE": "ಅಸುರಕ್ಷಿತ, ಸಮುದ್ರಕ್ಕೆ ಹೋಗಬೇಡಿ.", "EXTREME": "ತೀವ್ರ, ಸಮುದ್ರಕ್ಕೆ ಹೋಗಬೇಡಿ.",
+                  "CRITICAL": "ತೀವ್ರ, ಸಮುದ್ರಕ್ಕೆ ಹೋಗಬೇಡಿ."},
+    },
+    "gu": {
+        "verdict": "ચુકાદો", "distance": "અંતર", "depth": "ઊંડાઈ",
+        "source_official": "અધિકૃત INCOIS (SAMUDRA) લાઇવ સલાહ",
+        "source_estimated": "લાઇવ દરિયાઈ સપાટી ડેટા પરથી અંદાજિત — આજે નજીક કોઈ અધિકૃત INCOIS સલાહ નથી",
+        "brief": {"SAFE": "માછીમારી માટે અનુકૂળ.", "CAUTION": "સીમારેખા, સાવધાનીથી આગળ વધો.",
+                  "UNSAFE": "અસુરક્ષિત, દરિયામાં ન જાઓ.", "EXTREME": "ગંભીર, દરિયામાં ન જાઓ.",
+                  "CRITICAL": "ગંભીર, દરિયામાં ન જાઓ."},
+    },
+    "bn": {
+        "verdict": "রায়", "distance": "দূরত্ব", "depth": "গভীরতা",
+        "source_official": "সরকারি INCOIS (SAMUDRA) সরাসরি পরামর্শ",
+        "source_estimated": "সরাসরি সমুদ্র পৃষ্ঠের ডেটা থেকে অনুমান — আজ কাছে কোনো সরকারি INCOIS পরামর্শ নেই",
+        "brief": {"SAFE": "মাছ ধরার জন্য অনুকূল।", "CAUTION": "সীমারেখা, সাবধানে এগিয়ে যান।",
+                  "UNSAFE": "অনিরাপদ, সমুদ্রে যাবেন না।", "EXTREME": "গুরুতর, সমুদ্রে যাবেন না।",
+                  "CRITICAL": "গুরুতর, সমুদ্রে যাবেন না।"},
+    },
+}
+
+
+def _pfz_labels(language: str | None):
+    return _PFZ_LABELS.get((language or "en").lower(), _PFZ_LABELS["en"])
+
+
+# Localized verdict status word (SAFE/CAUTION/UNSAFE) — falls back to the
+# English token so an untranslated language still renders correctly.
+_VERDICT_WORD = {
+    "hi": {"SAFE": "सुरक्षित", "CAUTION": "सावधानी", "UNSAFE": "असुरक्षित", "EXTREME": "अत्यधिक खतरा", "CRITICAL": "गंभीर"},
+    "mr": {"SAFE": "सुरक्षित", "CAUTION": "सावधगिरी", "UNSAFE": "असुरक्षित", "EXTREME": "अति धोका", "CRITICAL": "गंभीर"},
+    "ta": {"SAFE": "பாதுகாப்பானது", "CAUTION": "எச்சரிக்கை", "UNSAFE": "பாதுகாப்பற்றது", "EXTREME": "மிகுந்த ஆபத்து", "CRITICAL": "நெருக்கடி"},
+    "te": {"SAFE": "సురక్షితం", "CAUTION": "జాగ్రత్త", "UNSAFE": "అసురక్షితం", "EXTREME": "అత్యంత ప్రమాదం", "CRITICAL": "క్లిష్టం"},
+    "ml": {"SAFE": "സുരക്ഷിതം", "CAUTION": "ജാഗ്രത", "UNSAFE": "സുരക്ഷിതമല്ല", "EXTREME": "അതീവ അപകടം", "CRITICAL": "ഗുരുതരം"},
+    "kn": {"SAFE": "ಸುರಕ್ಷಿತ", "CAUTION": "ಎಚ್ಚರಿಕೆ", "UNSAFE": "ಅಸುರಕ್ಷಿತ", "EXTREME": "ತೀವ್ರ ಅಪಾಯ", "CRITICAL": "ಗಂಭೀರ"},
+    "gu": {"SAFE": "સલામત", "CAUTION": "સાવધાની", "UNSAFE": "અસલામત", "EXTREME": "અતિ જોખમ", "CRITICAL": "ગંભીર"},
+    "bn": {"SAFE": "নিরাপদ", "CAUTION": "সতর্কতা", "UNSAFE": "অনিরাপদ", "EXTREME": "অত্যধিক বিপদ", "CRITICAL": "গুরুতর"},
+}
+
+
+def _verdict_word(verdict: str, language: str | None) -> str:
+    return _VERDICT_WORD.get((language or "en").lower(), {}).get(verdict, verdict)
+
 # Keywords mirroring orchestrator/planning.py PFZ_LOOKUP routing so the
 # exact-template answer is only used when the user actually asked where
 # the fish are (never hijacks a safety-check answer).
@@ -58,20 +159,23 @@ def verdict_brief(verdict: str | None) -> str:
     )
 
 
-def format_pfz_answer(pfz, verdict: str | None = "CAUTION", narrative: str | None = None) -> str | None:
-    """PFZ answer in the documented format — official when INCOIS_LIVE, estimated otherwise.
+def format_pfz_answer(pfz, verdict: str | None = "CAUTION", narrative: str | None = None,
+                      language: str | None = "en") -> str | None:
+    """Compact, fully-localized PFZ answer.
 
-    Returns a formatted answer for any PFZ (official, derived, simulated) with honest
-    source tagging, so the user always sees Target Coordinates. Only wordsmithing
-    lives here — all numbers come directly from the PFZRecommendation.
+    Shows only the essentials the user asked for: the AI summary, the verdict,
+    the exact target coordinates, water depth and the honest source tag. The
+    verbose duplicated landmark line and the multi-section Target/Quick-Summary
+    scaffolding are dropped (spec: "only show imp info and the summary").
 
-    ``narrative`` — optional LLM-generated, query-specific opening paragraph. When
-    provided it REPLACES the deterministic ``intro`` sentence so the top of the
-    answer reads conversationally (spec Parts B/C). The structured cards, target
-    coordinates, quick-summary and source line are always preserved unchanged.
+    ``narrative`` — LLM-generated, query-specific summary (already in the user's
+    language). ``language`` localizes the fixed scaffolding words so the WHOLE
+    answer reads in that language, not just the narrative. All numbers/coords
+    come straight from the PFZRecommendation.
     """
     if pfz is None:
         return None
+    L = _pfz_labels(language)
     source = getattr(pfz, "source", None)
     src_val = getattr(source, "value", source) if source else "unknown"
     is_official = src_val == "incois_live"
@@ -85,74 +189,21 @@ def format_pfz_answer(pfz, verdict: str | None = "CAUTION", narrative: str | Non
     try:
         depth_txt = f"{float(depth):g} m"
     except (TypeError, ValueError):
-        depth_txt = f"{depth} m" if depth is not None else "not reported in feed"
+        depth_txt = f"{depth} m" if depth is not None else "—"
 
     verdict_txt = str(verdict or "CAUTION").upper()
-    lat_s, lon_s = ("N", "E") if (lat, lon) else ("N", "E")
-    if lat < 0:
-        lat_s = "S"
-    if lon < 0:
-        lon_s = "W"
+    brief = L["brief"].get(verdict_txt, L["brief"]["CAUTION"])
+    lat_s = "S" if lat < 0 else "N"
+    lon_s = "W" if lon < 0 else "E"
+    coord = f"{abs(lat):.4f}° {lat_s}, {abs(lon):.4f}° {lon_s}"
+    src = L["source_official"] if is_official else L["source_estimated"]
 
-    # Nearest landmark (reverse-geocoded, zoom=14) — friendlier than raw lat/lon alone
-    # If reverse is too generic (e.g. "India" for 35km offshore), fallback to the
-    # advisory's landing centre (nearest port) — far more useful to a fisher.
-    landmark = getattr(pfz, "nearest_landmark", None)
-    _generic_landmarks = {"india", "arabian sea", "indian ocean", "bay of bengal", "laccadive sea", "sea"}
-    is_generic = isinstance(landmark, str) and landmark.strip().lower() in _generic_landmarks
-    if is_generic:
-        landmark = None
-    if not landmark:
-        # Fallback: nearest INCOIS landing centre for this PFZ (the port the advisory is issued for)
-        lc_fb = lc or {}
-        fb_name = (lc_fb.get("name") or "").strip()
-        fb_state = (lc_fb.get("state") or "").strip()
-        if fb_name and fb_name.lower() not in ("unknown", "null"):
-            if fb_state:
-                landmark = f"{fb_name}, {fb_state}"
-            else:
-                landmark = fb_name
-        else:
-            # Last resort: reference location (e.g. "Kochi Coast") — still better than "India"
-            ref_name = getattr(getattr(pfz, "reference_location", None), "name", None)
-            if ref_name and ref_name.lower() not in ("unknown coast (default demo point)", "unknown"):
-                # Shorten "Kochi Coast" -> "Kochi"
-                short = ref_name.replace(" Coast", "").strip()
-                landmark = short
-            else:
-                landmark = None
-    landmark_line = ""
-    landmark_summary = ""
-    if landmark:
-        # Format as "≈15.2 km off Alibaug, Maharashtra" — distance already known
-        landmark_line = f"* 📍 Nearest landmark: ≈{dist_km:.1f} km off {landmark}\n"
-        landmark_summary = f"* 📍 Nearest landmark: ≈{dist_km:.1f} km off {landmark}\n"
-        landmark_sentence = f" near {landmark}"
-    else:
-        landmark_sentence = ""
-
-    if is_official:
-        source_line = f"* 📡 Source: {OFFICIAL_SOURCE}\n\nThis recommendation is based on the latest official PFZ data available from INCOIS."
-        intro = f"The nearest official INCOIS Potential Fishing Zone (PFZ) is approximately {dist_km:.1f} km from your current location, on a {bearing:.0f}° ({bearing_word(bearing)}) bearing{landmark_sentence}."
-    else:
-        src_txt = "Derived from live SST front" if src_val == "derived_from_live_data" else "Simulated estimate"
-        source_line = f"* 📡 Source: {src_txt} — no official INCOIS advisory issued within 150 km of your location today (honest fallback).\n\nThis is an estimated zone based on live sea-surface data, not an official advisiory. Use with caution and check local conditions."
-        intro = f"The nearest estimated Potential Fishing Zone (PFZ) is approximately {dist_km:.1f} km from your current location, on a {bearing:.0f}° ({bearing_word(bearing)}) bearing{landmark_sentence}."
-    # LLM-generated conversational narrative REPLACES the templated intro when available.
+    parts = []
     if narrative and narrative.strip():
-        intro = narrative.strip()
-    return (
-        "🛡️ IMPORTANT\n\n"
-        f"🔶 VERDICT: {verdict_txt} — {verdict_brief(verdict_txt)}\n\n"
-        f"{intro}\n\n"
-        "🎯 Target Coordinates\n\n"
-        f"{landmark_line}"
-        f"* Latitude: {abs(lat):.4f}° {lat_s}\n"
-        f"* Longitude: {abs(lon):.4f}° {lon_s}\n\n"
-        "📋 Quick Summary\n\n"
-        f"{landmark_summary}"
-        f"* 📍 Distance from you: {dist_km:.1f} km\n"
-        f"* 🧭 Direction: {bearing_word(bearing)} ({bearing:.0f}°)\n"
-        f"* 🌊 Water depth: {depth_txt}\n"
-        f"{source_line}"
+        parts.append(narrative.strip())
+    parts.append(f"🔶 {L['verdict']}: {_verdict_word(verdict_txt, language)} — {brief}")
+    parts.append(
+        f"🎯 {coord}  ·  {L['distance']}: {dist_km:.1f} km ({bearing:.0f}°)  ·  {L['depth']}: {depth_txt}"
     )
+    parts.append(f"📡 {src}")
+    return "\n\n".join(parts)

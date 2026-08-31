@@ -202,7 +202,7 @@ class ResponseAgent:
             narrative = _pfz_narrative(context, pfz, language)
             official_pfz = format_pfz_answer(
                 pfz, verdict=(synthesis or {}).get("verdict", "CAUTION"),
-                narrative=narrative,
+                narrative=narrative, language=language,
             )
 
         if official_pfz is not None:
