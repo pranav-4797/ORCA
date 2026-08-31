@@ -29,5 +29,10 @@ Thumbs.db
 # ---- Local notes (never commit) ----
 NOTES.md
 
+# ---- Local backups (never commit) ----
+_pre_incois_backup/
+**/_pre_incois_backup/
+*.zip
+
 # ---- CI / Workflows (skip if lacking workflow scope) ----
 .github/

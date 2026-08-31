@@ -36,6 +36,23 @@ _LANGUAGE_NAMES = {
     "gu": "Gujarati", "or": "Odia", "pa": "Punjabi",
 }
 
+# Localized word for "Source" so the provenance footer reads in the user's
+# language on deterministic (LLM-down) paths. Product/proper nouns (INCOIS,
+# OceanSat-2, Gemini PFZ) stay as-is.
+_SOURCE_WORD = {
+    "en": "Source", "hi": "स्रोत", "mr": "स्रोत", "ta": "ஆதாரம்",
+    "te": "మూలం", "bn": "উৎস", "ml": "ഉറവിടം", "kn": "ಮೂಲ",
+    "gu": "સ્રોત", "or": "ଉତ୍ସ", "pa": "ਸਰੋਤ",
+}
+
+_SOURCE_PROVENANCE = "Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ"
+
+
+def _source_line(language: str | None = "en") -> str:
+    """Italic provenance footer with the word 'Source' localized."""
+    word = _SOURCE_WORD.get((language or "en").lower(), _SOURCE_WORD["en"])
+    return f"*{word}: {_SOURCE_PROVENANCE}*"
+
 # --------------------------------------------------------------------------
 # Context-aware summary generator (spec Parts 12-16)
 # --------------------------------------------------------------------------
@@ -436,6 +453,12 @@ class ResponseAgent:
             "Rules:\n"
             "1. Write in "
             f"{lang_name}. Natural, fluent {lang_name} -- never translate word-by-word.\n"
+            f"1b. LOCALIZE THE ENTIRE ANSWER into {lang_name}: the verdict word, "
+            "every section heading, every table label/parameter name, the summary "
+            f"AND the source footer must all be in {lang_name}. Do NOT leave English "
+            "scaffolding around localized prose. Keep ONLY proper nouns and product "
+            "names as-is (INCOIS, OceanSat-2, Gemini, SAMUDRA), numbers, units "
+            "(km, m, °C, km/h) and coordinates.\n"
             "2. Weave the reasoning into the prose naturally. Do NOT mention agent "
             "names, 'notes', 'findings', or that agents exist.\n"
             "3. Use ONLY the numbers and place names given below. NEVER introduce "
@@ -444,18 +467,22 @@ class ResponseAgent:
             "not in the current data instead of guessing.\n"
             "4. If you cite a simulated/estimated value, say so explicitly.\n"
             "5. FORMAT for readability (MANDATORY — do not output a single paragraph):\n"
-            "   - Start with a ONE-LINE verdict bold, e.g. **🟠 CAUTION — Borderline conditions**.\n"
-            "   - Then a section '### 🌊 Marine Conditions — <location> (<time>)' with 📍 coordinates if provided.\n"
-            "   - Under that, a markdown TABLE with Parameter | Value rows, e.g.:\n"
+            "   - Start with a ONE-LINE verdict bold, e.g. **🟠 CAUTION — Borderline conditions** "
+            f"(write the verdict word and its brief in {lang_name}).\n"
+            f"   - Then a section heading (translated into {lang_name}) like '### 🌊 Marine Conditions — <location> (<time>)' with 📍 coordinates if provided.\n"
+            "   - Under that, a markdown TABLE with Parameter | Value rows "
+            f"(translate the column headers and parameter names into {lang_name}), e.g.:\n"
             "     | Parameter | Value |\n"
             "     |---|---|\n"
             "     | 🌡️ SST | **28.5°C** |\n"
             "     | 💨 Wind | **31 km/h** |\n"
             "   - CRITICAL: Only include rows for parameters the user asked about. "
             "If they asked 'sst'/'temp'/'temperature' show ONLY SST. If 'wind' show ONLY wind. If they asked generically (ocean/marine/weather/conditions/sea) show all available rows.\n"
-            "   - After the table, a 1-2 sentence plain-language summary in very simple, easy-to-understand English (or the user's language). "
+            "   - After the table, a 1-2 sentence plain-language summary in very simple, easy-to-understand "
+            f"{lang_name}. "
             "MUST quote the live numbers you were given (e.g. 'SST is 28.6°C', 'wind is 19 km/h', 'PFZ 0.1 km away') and briefly say what it means for a fisher (e.g. is it safe/borderline, should they monitor, handle with caution). No jargon.\n"
-            "   - End with '*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*' italic line.\n"
+            f"   - End with an italic source footer with the word 'Source' translated into {lang_name}, "
+            "keeping the proper nouns, e.g. '*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*'.\n"
             "   - Total length: 80-150 words. Never cram everything into one line.\n"
             "6. For analytical/trend questions, answer the 'why' in one sentence using only the "
             "trend statistics provided."
@@ -483,6 +510,7 @@ class ResponseAgent:
     # ------------------------------------------------------------------
     def _fallback_answer(self, context, synthesis, risk, pfz, geofence, route, ocean_state=None, trend=None) -> str:
         verdict = synthesis.get('verdict', 'CAUTION') if isinstance(synthesis, dict) else getattr(synthesis, 'verdict', 'CAUTION')
+        language = getattr(context, "language", None) or "en"
         risk_headline = risk.headline if risk else ""
         # Map verdict to readable heading
         verdict_icon = {"SAFE": "🟢 SAFE", "CAUTION": "🟠 CAUTION", "UNSAFE": "🔴 UNSAFE"}.get(verdict, verdict)
@@ -581,7 +609,7 @@ class ResponseAgent:
                         _rec = f"{_vals_txt}Borderline conditions — proceed carefully, keep monitoring for rapid changes, and stay within safe limits for your vessel class."
                 if _rec:
                     parts.append(_rec)
-                parts.append("*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*")
+                parts.append(_source_line(language))
             else:
                 parts.append(f"_{loc_name or 'Selected Location'} ({tw}): Live INCOIS value unavailable._")
 

@@ -117,23 +117,10 @@ except ImportError:  # pragma: no cover - defensive, keeps the demo alive
 # real coordinates; the resolver below now geocodes ANY free-text place name
 # via OpenStreetMap Nominatim (data_connectors/geocode.py) and treats this
 # dict as an offline cache/fallback only -- not a whitelist.
-KNOWN_LOCATIONS = {
-    "ratnagiri": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
-    "kochi": Location(name="Kochi Coast", lat=9.9312, lon=76.2673),
-    "visakhapatnam": Location(name="Visakhapatnam Coast", lat=17.6868, lon=83.2185),
-    "odisha": Location(name="Odisha Coast (Puri)", lat=19.8135, lon=85.8312),
-    "surat": Location(name="Surat Coast", lat=21.00, lon=72.60),
-    "mumbai": Location(name="Mumbai Coast", lat=19.0760, lon=72.8777),
-    "veraval": Location(name="Veraval Coast", lat=20.90, lon=70.36),
-    "porbandar": Location(name="Porbandar Coast", lat=21.64, lon=69.60),
-    "dwarka": Location(name="Dwarka Coast", lat=22.24, lon=68.97),
-    "kandla": Location(name="Kandla Coast", lat=23.03, lon=70.22),
-    "okha": Location(name="Okha Coast", lat=22.47, lon=69.07),
-    "daman": Location(name="Daman Coast", lat=20.42, lon=72.85),
-    "diu": Location(name="Diu Coast", lat=20.71, lon=70.98),
-    "bhavnagar": Location(name="Bhavnagar Coast", lat=21.76, lon=72.15),
-}
-DEFAULT_LOCATION = Location(name="Unknown Coast (default demo point)", lat=15.5, lon=73.8)
+#
+# Single source of truth: the gazetteer lives in orchestrator/state.py and is
+# imported here so the two copies can never drift.
+from .state import KNOWN_LOCATIONS, DEFAULT_LOCATION
 
 _geocode_cache: dict[str, Location] = {}
 
@@ -506,6 +493,11 @@ class Orchestrator:
         self.synthesis_agent = SynthesisAgent()
         self.response_agent = ResponseAgent()
         self.app = self._build_graph() if LANGGRAPH_AVAILABLE else None
+        # Short-lived in-process response cache: identical repeated queries within
+        # RESPONSE_CACHE_TTL_S return the prior OrchestratorResponse instead of
+        # re-running the whole LLM pipeline. Keyed on the request signature (NOT
+        # session_id, so a refresh/retry of the same question is instant).
+        self._response_cache: dict[tuple, tuple[float, "OrchestratorResponse"]] = {}
 
     # ------------------------------------------------------------------
     # Graph assembly
@@ -573,6 +565,16 @@ class Orchestrator:
         else:
             defaults = INTENT_DEFAULT_AGENTS.get(plan["intent"], [])
             chosen = requested & set(defaults) or set(defaults)
+        # Hazard runs implicitly for safety-oriented intents (mirrors the
+        # needs_hazard logic in _node_dispatch) even if the planner named only
+        # OceanStateAgent, so it must be REPORTED as a selected specialist too —
+        # otherwise the reported agent list understates what actually executed.
+        _intent_val = plan.get("intent")
+        if ("HazardAgent" in chosen) or (
+            "OceanStateAgent" in chosen
+            and _intent_val in ("safety_check", "hazard_alerts", "zone_scan", "route_plan")
+        ):
+            chosen.add("HazardAgent")
         # Dependency repair: hazard needs an ocean reading.
         if "HazardAgent" in chosen:
             chosen.add("OceanStateAgent")
@@ -588,6 +590,8 @@ class Orchestrator:
             return nodes
         if "OceanStateAgent" in chosen:
             nodes.append("ocean_state")
+        if "HazardAgent" in chosen:
+            nodes.append("hazard")
         if "PFZAgent" in chosen:
             nodes.append("pfz")
         if "GeospatialAgent" in chosen:
@@ -725,6 +729,30 @@ class Orchestrator:
         if mode_norm not in ("auto", "panel", "agent"):
             mode_norm = "auto"
         session_id = session_id or str(uuid.uuid4())
+        # Short-lived response cache: an identical repeated request (same query,
+        # mode, location, vessel, depth) within RESPONSE_CACHE_TTL_S is served
+        # from memory so a refresh/retry is instant instead of re-running the LLM
+        # pipeline. session_id is deliberately excluded from the key.
+        def _dest_sig(d):
+            return (round(d.lat, 4), round(d.lon, 4)) if d is not None else None
+        cache_key = (
+            (raw_query or "").strip().lower(),
+            mode_norm,
+            device_gps,
+            map_point,
+            _dest_sig(destination),
+            (vessel_class or "small_fishing_boat"),
+            target_agent,
+            (query_depth or QUERY_DEPTH),
+            fleet_demo_level,
+            wind_demo_scenario,
+        )
+        try:
+            hit = self._response_cache.get(cache_key)
+            if hit is not None and (time.perf_counter() - hit[0]) < RESPONSE_CACHE_TTL_S:
+                return hit[1]
+        except Exception:
+            pass
         # Demo cache check — Task 9, feature-flagged, default off
         try:
             import demo_cache
@@ -751,11 +779,18 @@ class Orchestrator:
             "traces": [],
         }
         if mode_norm == "agent" and target_agent in SPECIALIST_REGISTRY:
-            return self._handle_single_agent(initial, target_agent)
-        if mode_norm == "panel":
-            return self._handle_query_panel(initial)
-        # auto is default
-        return self._handle_query_auto(initial)
+            resp = self._handle_single_agent(initial, target_agent)
+        elif mode_norm == "panel":
+            resp = self._handle_query_panel(initial)
+        else:
+            # auto is default
+            resp = self._handle_query_auto(initial)
+        # Populate the short-lived response cache for instant identical retries.
+        try:
+            self._response_cache[cache_key] = (time.perf_counter(), resp)
+        except Exception:
+            pass
+        return resp
 
     # ------------------------------------------------------------------
     # Auto mode — fast intelligent orchestration, discussion only when needed
@@ -1769,7 +1804,11 @@ class Orchestrator:
                 if _DEBUG and debug_lines:
                     dbg = "\n".join(f"- {_k}: {debug_lines[_k]}" for _k in ("SST", "Wind", "Current", "Swell", "Chlorophyll") if _k in debug_lines)
                     parts.append(f"**Debug INCOIS**\n{dbg}")
-                parts.append("*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*")
+                try:
+                    from agents.response_agent import _source_line as _src_line
+                    parts.append(_src_line(state.get("language", "en")))
+                except Exception:
+                    parts.append("*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*")
             else:
                 # No live ocean fields — honest unavailability, never fabricated numbers
                 unavailable_reason = getattr(ocean, "unavailable_reason", None) or ""
