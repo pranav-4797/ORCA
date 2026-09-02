@@ -1,0 +1,33 @@
+name: orca_mobile
+description: "ORCA Mobile — Marine EcOsystem Reasoning with Collaborative Agents"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  http: ^1.2.2
+  shared_preferences: ^2.3.4
+  geolocator: ^13.0.1
+  permission_handler: ^11.3.1
+  speech_to_text: ^7.0.1
+  uuid: ^4.5.1
+  flutter_markdown: ^0.7.7
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  fl_chart: ^0.71.0
+  flutter_tts: ^4.2.0
+  file_picker: ^10.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
