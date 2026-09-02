@@ -1,215 +1,65 @@
-# ORCA — Agentic AI Marine Intelligence Platform
+# ORCA fixes — this session
 
-**Smart India Hackathon 2026 · Problem Statement 26176**
-Agentic AI for Indian coastal waters: ask in any language, get a safety verdict backed by live ocean data, official alerts, and a transparent multi-agent debate.
+Four files changed. Drop each one into the matching path in your repo
+(overwriting the existing file), or apply `CHANGES.diff` with `git apply`
+from your repo root.
 
----
+| File in this folder      | Goes to                                                  |
+|---------------------------|-----------------------------------------------------------|
+| `pfz_agent.py`             | `ORCA_Backend/agents/pfz_agent.py`                        |
+| `response_agent.py`        | `ORCA_Backend/agents/response_agent.py`                   |
+| `orchestrator__init__.py`  | `ORCA_Backend/orchestrator/__init__.py`                   |
+| `OceanMap.ts`               | `ORCA UI/src/components/map/OceanMap.ts`                 |
 
-## What it does
+## 1. PFZ map lines not showing (`OceanMap.ts`)
 
-A fisherman or maritime user asks a question like *"Is it safe to go fishing near Ratnagiri tomorrow morning?"* — in English, Marathi, Hindi, Tamil, and 7 more languages — and ORCA:
+The "skip re-render" shortcut only compared the *data* (geojson + PFZ
+token), never whether a render had actually happened. If the map's canvas
+wasn't mounted yet the first time PFZ data loaded, the map silently stayed
+empty forever after — even once it became visible — because the shortcut
+thought "nothing changed" and skipped drawing. Fixed by also requiring
+`this.map` to exist and already have layers before taking the shortcut.
 
-1. Detects the language and parses intent/location/time.
-2. Dispatches only the relevant specialist agents **in parallel**.
-3. Specialists fetch live ocean/weather/alert data and report findings.
-4. A **round-table discussion** runs: agents challenge, clarify, concede, and converge on a shared reading of each other's findings.
-5. A synthesis agent reconciles everything into one verdict (SAFE / CAUTION / UNSAFE) with confidence and flagged conflicts.
-6. The answer is composed in the user's language — grounded strictly in the fetched numbers, with every field's provenance (live vs derived vs simulated) disclosed.
+## 2. SST/weather queries always "simulated" (`orchestrator/__init__.py`)
 
-You can also address **one specialist directly** (no debate) via the UI pill or `mode=agent`.
+`ORCA_OCEAN_FUTURE_TIMEOUT_S` (the orchestrator's hard cutoff for the whole
+ocean-state fetch) defaulted to **22s**, but the INCOIS connector's own
+worst-case retry chain (3 dates × 2 time formats × 8s timeout, per field)
+can take up to **48s**. Any time INCOIS was slow rather than fully down,
+the orchestrator gave up first and served the simulated fallback. Bumped
+the default to **30s**. Turn on `ORCA_DEBUG_INCOIS=true` to see exactly
+which field is slow/failing if you want to tune further.
 
----
+## 3. Mumbai → Andhra Pradesh PFZ bug (`pfz_agent.py`)
 
-## Architecture
+The existing `_MAX_CENTRE_DIST_KM = 150` safety cap only validated the
+*landing centre's* distance. The coordinates actually shown to the user
+come from a separate step, `_nearest_point_on_lines()`, which scans
+**every PFZ line segment in the entire nationwide INCOIS dataset** with no
+distance cap and no state filter — bypassing the 150 km check entirely.
+That's how a query near Mumbai could surface a point near Andhra Pradesh
+while still reporting a small, misleading distance. Fixed by applying the
+same cap to that result; if it fails, the code falls back to the
+already-capped landing-centre advisory position instead. Added logging
+(resolved location / advisory region / selected PFZ) so any future
+occurrence is diagnosable from the logs.
 
-```
-                 START
-                   |
-             language_intent                    (PS #1)
-                   |
-                planning                         (PS #2)
-        [which specialists does THIS query need?]
-                   |
-               specialists  -- PARALLEL threads:
-                   |            ocean_state -> hazard   (PS #4/#5)
-                   |            pfz                      (PS #3)
-                   |            geospatial               (PS #6)
-                   |            trend
-                   |
-                discussion  -- round-table: agents read each
-                   |            other's findings and debate
-                   |            (challenge/clarify/concede/agree)
-                   |
-                synthesis    -- single reconciled pass     (PS #7)
-                   |
-                response                                 (PS #9)
-                   |
-                  END
+## 4. PFZ answers were template-only, never AI-narrated (`response_agent.py` + `orchestrator/__init__.py`)
 
-  proactive_monitor (PS #10): background loop pushing safety alerts
-  over SSE/SMS to registered users — no query required.
-```
+`generate_context_summary()` already supported PFZ data, but two separate
+code paths — the fast/deterministic orchestrator path and
+`ResponseAgent.run()` — returned the structured PFZ template immediately,
+before ever reaching the summary call. Added a shared `_pfz_narrative()`
+helper and wired it into both paths, so PFZ answers now get a
+query-specific AI opening line prepended above the **unchanged** structured
+template (cards, coordinates, scores, source chip all stay exactly as they
+were).
 
-LangGraph StateGraph with an add-only trace channel; if LangGraph or the LLM is unavailable every step degrades gracefully to deterministic behaviour — the demo never hard-crashes.
+## Verified
 
-## The agents
-
-| Agent | Role | Data reality |
-|---|---|---|
-| Language | Detect 11 Indian/coastal languages, normalize query | LLM + script heuristic fallback |
-| Planning | Intent, place, time window, hour, needed specialists | LLM forced tool-call + rule fallback |
-| Ocean-State | SST, waves, wind/gusts, tides, chlorophyll | **Live** INCOIS THREDDS SST/waves/wind/currents/swell + **live** UHSLC harmonic tide fit (cached) + chlorophyll **MOSDAC OCM (ISRO) primary → INCOIS ERDDAP secondary → `unavailable`** (never simulated) |
-| Hazard | Threshold verdicts, exceedance windows, cyclone checks | Deterministic thresholds + **live** keyless IMD CAP feed |
-| PFZ | Nearest fishing zone from the daily official advisory; distance/bearing to the nearest point on the digitized PFZ lines | **Live** INCOIS/SAMUDRA official PFZ (keyless); SST-ring derived + seeded fallbacks honestly tagged |
-| Geospatial | IMBL/MPA geofencing, weather-aware safe routes | Real point-in-polygon math on treaty-digitized GeoJSON |
-| Trend | Months-long SST/chlorophyll trends + correlation | Live INCOIS OSF monthly SST + INCOIS OceanSat-2 daily chlorophyll archive |
-| **Discussion** | Moderated round-table transcript between specialists (structured `speaker/addressing/stance/point` turns + consensus) | LLM-moderated, numbers-only constraint; deterministic fallback |
-| Synthesis | Reconcile findings, flag cross-agent conflicts, confidence | LLM over structured results + transcript |
-| Response | Final answer in the user's language, explains how disagreements were settled | LLM; template fallback |
-| Proactive Monitor | Background position monitoring → pushed alerts | Reuses ocean/hazard/geospatial agents |
-
-## Query modes
-
-| Mode | Behaviour |
-|---|---|
-| `panel` *(default)* | Full pipeline — specialists run, hold the round-table, reconcile one verdict |
-| `agent` | One named specialist answers directly (no discussion). Registry served at `GET /agents`; dependencies (e.g. hazard needs an ocean reading) are resolved silently |
-
-Every response carries `mode`, `answered_by`, the full agent trace, the discussion transcript, and per-field provenance.
-
-## Chat UI (Vite + TypeScript)
-
-- Streaming chat with verdict callouts and markdown
-- **Voice in / voice out** — hold the mic, speak your question (any language); Whisper STT transcribes it ("Heard you say…"), the full pipeline answers, and the browser speaks the reply back in the detected language
-- **Agent activity panel** streaming the real execution trace live, including each round-table turn (⚡ challenge / ℹ️ clarify / ✅ agree / 🤝 concede) and the consensus
-- **Operational picture**: Leaflet sea map (query point, PFZ zones + ring, safe route, IMBL/MPA flags, IMD warning polygons) plus 48-hour wave/gust charts with unsafe thresholds and exceedance windows shaded, tide extremes as chips — auto-refreshed per answer from `/viz/*`
-- **Query-routing pill**: pick the full panel or any single specialist (color-coded, dropdown lists the live backend registry)
-- Per-message badge showing exactly which path answered
-- Proactive safety alerts pushed over SSE; optional demo GPS
-- Multi-turn session memory ("same place, tomorrow evening")
-
-## API surface (FastAPI, port 8000)
-
-```
-POST /query                     {query, session_id?, device_gps?, destination?, mode?, agent?, vessel_class?}
-POST /query/voice               multipart audio -> Whisper STT -> same graph -> answer JSON (+transcribed_text)
-GET  /agents                    addressable specialist registry for mode="agent"
-GET  /health                    (+ storage backend info)
-POST /users/register            proactive alert registration
-GET  /alerts/{user_id}          poll alerts
-GET  /alerts/stream/{user_id}   Server-Sent Events stream
-GET  /viz/{session_id}          GeoJSON FeatureCollection (point, PFZ, route, boundaries, CAP polygons)
-GET  /viz/{session_id}/series   hourly wave/gust series + exceedance windows + tide extremes
-DELETE /sessions/{session_id}
-```
-
-Every response also carries `confidence_score` (numeric 0–1 combining data provenance, verdict confidence and cross-agent agreement) and `evidence_tiers` (each source labelled Tier 1 user-device / Tier 2 live feed / Tier 3 derived-simulated).
-
-## Configuration & hardening
-
-| Env var | Effect |
-|---|---|
-| `GROQ_API_KEY` | LLM + Whisper STT (free key; everything degrades without it) |
-| `CORS_ORIGINS` | Comma-separated allow-list; default `*` for local dev |
-| `ORCA_API_KEY` | When set, all routes except `/health` require `X-API-Key` |
-| `REDIS_URL` | `redis://...` moves session memory + response cache to Redis (default: in-process TTL store) |
-| `Vessel thresholds` | `vessel_class` per request: `small_fishing_boat` (default), `mechanized_trawler`, `coastal_cargo`; fine-tune via `ORCA_THRESHOLD_OVERRIDES` JSON |
-
-**Data privacy note:** ORCA processes device GPS / destination coordinates only to answer the current safety query and short-lived session context (1 h TTL). Positions are not persisted beyond the TTL cache, sold, or shared; proactive monitoring stores only the position a user explicitly registers.
-
-## Performance engineering
-
-- Whole-readings cached 15 min (trace honestly marks `CACHED`)
-- Tide harmonic models fitted once, cached 6 h (fit window 120 days of gauge data)
-- Marine/weather/chlorophyll/tide fetched concurrently; marine dry-cell retries under a 30 s budget
-- Cold query ≈ 12–25 s (dominated by LLM calls); warm repeat ≈ 10 s
-
----
-
-## Status: implemented vs planned
-
-### Implemented
-- Full multi-agent graph incl. round-table discussion + consensus (this repo's core differentiator)
-- Panel / direct-agent query routing with per-answer badges
-- **Voice queries end-to-end**: mic capture → Groq Whisper STT → same pipeline → browser TTS reply in the detected language (`/query/voice`)
-- **Map & charts UI**: Leaflet operational map + hourly wave/gust series charts fed by `/viz/*`
-- Live INCOIS THREDDS, UHSLC tides, IMD CAP alerts, MOSDAC OCM chlorophyll, OSM geocoding; honest per-field provenance (no simulated chlorophyll)
-- Multilingual answers (11 languages), multi-turn memory
-- Proactive monitoring with SSE push (SMS sending code present, not live-fired)
-- Docker: `docker compose up --build` runs backend + UI
-- **Hardening**: pluggable Redis/in-memory storage, optional API key, configurable CORS, per-vessel-class thresholds, numeric confidence + Tier 1/2/3 evidence labels, ASCII fast-path + response caching for latency
-
-### In planning (next up)
-1. Batch/downgrade further LLM calls in the sequential chain (discussion+synthesis fusion candidate)
-
-### Blocked externally (code ready, waiting on credentials/access)
-- Bhuvan WMS live activation (ISRO account) — optional now that the official INCOIS PFZ advisory is live
-- `api.imd.gov.in` key (secondary fallback only; keyless CAP feed already active)
-- Cyclone cone-of-uncertainty overlays once the IMD key exists (connector coded)
-- Twilio SMS live-fire test (TRAI DLT registration path)
-
----
-
-## Run it
-
-```bash
-# --- One command (Docker) -------------------------------------------
-docker compose up --build
-#   UI      -> http://localhost:3000
-#   Backend -> http://localhost:8000
-
-# --- Manual -----------------------------------------------------------
-# Backend
-cd ORCA_Backend
-pip install -r requirements.txt
-python -m uvicorn main:app --port 8000        # or: uvicorn main:app --reload
-
-# Frontend (auto-spawns the backend if :8000 is free)
-cd "ORCA UI"
-npm install
-npm run dev                                    # http://localhost:3000
-```
-
-Configure `ORCA_Backend/.env` (see `.env.example`) with a free Groq key for the LLM layers; everything degrades gracefully without one.
-
-Quick CLI smoke test:
-
-```bash
-cd ORCA_Backend && python test_run.py
-curl -X POST http://localhost:8000/query \
-     -H "Content-Type: application/json" \
-     -d '{"query": "Is it safe to go fishing near Ratnagiri tomorrow morning?"}'
-```
-
-Direct-agent example:
-
-```bash
-curl -X POST http://localhost:8000/query \
-     -H "Content-Type: application/json" \
-     -d '{"query": "Any cyclone warnings near Visakhapatnam?", "mode": "agent", "agent": "hazard"}'
-```
-
-## Repository layout
-
-```
-ORCA-SIH/
-├── README.md                  ← you are here
-├── ORCA_Backend/
-│   ├── main.py                FastAPI entrypoint (+ /agents registry, viz, alerts)
-│   ├── orchestrator.py        LangGraph pipeline, panel/direct routing, planning
-│   ├── models.py              shared schemas (OrchestratorResponse contract)
-│   ├── llm_client.py          single LLM gateway (Groq/OpenAI-compatible)
-│   ├── sessions.py, alerts.py session memory + proactive alert bus
-│   ├── agents/                language, ocean_state, hazard, pfz, geospatial,
-│   │                          trend, discussion, synthesis, response,
-│   │                          proactive_monitor
-│   ├── data_connectors/       open-meteo helpers, tide (UHSLC harmonic fit),
-│   │                          chlorophyll, imd_cap, geocode, bathymetry,
-│   │                          isro_sources (stubbed, NOT ACTIVATED)
-│   └── data/                  IMBL + MPA boundaries GeoJSON
-└── ORCA UI/                   Vite + TypeScript chat workspace
-    └── src/services/orcaApiService.ts   backend client (panel/direct modes,
-                                          discussion streaming, alerts SSE)
-```
-
-Detailed backend engineering log: [`ORCA_Backend/SESSION_SUMMARY.md`](ORCA_Backend/SESSION_SUMMARY.md).
+- All three backend files: `python3 -m py_compile` clean, `pyflakes` shows
+  no new warnings (only pre-existing ones untouched by this change).
+- `OceanMap.ts`: full `tsc --noEmit` on the whole frontend passes clean.
+- Not verified against your live INCOIS feed or a live LLM call — my
+  sandbox can't reach `gemini.incois.gov.in` or your Groq key. Please
+  smoke-test the Mumbai query and a PFZ query after deploying.

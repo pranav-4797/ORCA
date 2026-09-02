@@ -53,6 +53,34 @@ def _source_line(language: str | None = "en") -> str:
     word = _SOURCE_WORD.get((language or "en").lower(), _SOURCE_WORD["en"])
     return f"*{word}: {_SOURCE_PROVENANCE}*"
 
+
+def _is_fishing_query(raw_query: str) -> bool:
+    """Shared fishing vocabulary (see agents/narrative.FISHING_KEYWORDS)."""
+    try:
+        from agents.narrative import is_fishing_query
+        return is_fishing_query(raw_query)
+    except Exception:
+        return False
+
+
+def _infer_intent(raw_query: str, pfz=None) -> str:
+    """Best-effort intent label for the narrative prompt when synthesis omitted
+    one. Only used to pick the FOCUS line — never to route agents."""
+    if is_pfz_lookup_query(raw_query or ""):
+        return "pfz_lookup"
+    if _is_fishing_query(raw_query or ""):
+        return "safety_check"
+    q = (raw_query or "").lower()
+    if any(k in q for k in ("safe", "danger", "risk", "venture", "go out")):
+        return "safety_check"
+    if any(k in q for k in ("boundary", "imbl", "eez", "border")):
+        return "geofence_check"
+    if any(k in q for k in ("route", "navigate", "reach")):
+        return "route_plan"
+    if any(k in q for k in ("trend", "months", "changed", "why has")):
+        return "trend_analysis"
+    return "ocean_state"
+
 # --------------------------------------------------------------------------
 # Context-aware summary generator (spec Parts 12-16)
 # --------------------------------------------------------------------------
@@ -84,6 +112,13 @@ _SUMMARY_SYSTEM_PROMPT = (
     "- ocean_state: what SST/wind/swell/current mean for going out.\n"
     "- pfz_lookup: fishing opportunity, distance, landing centre.\n"
     "- hazard/safety_check: safety, warnings, cyclone risk.\n"
+    "- FISHING-SUITABILITY (a 'can I go fishing here?' question): give a clear "
+    "GO / NO-GO recommendation that WEIGHS EVERYTHING together — how close the "
+    "nearest PFZ (fishing zone) is (distance + direction) AND the wind/gust, SST, "
+    "swell/wave height and current. If a PFZ is provided, say whether this spot is "
+    "near good fishing; if none, say so honestly. Then combine with the conditions: "
+    "recommend going only when it is both reasonably close to a fishing zone AND the "
+    "conditions are safe; otherwise advise caution or not going, and say why.\n"
     "- geofence_check/route_plan: EEZ/IMBL boundaries, navigation.\n"
     "- sar: emergency actions to take now.\n"
     "- trend_analysis: what changed and the likely why, from the stats only."
@@ -222,9 +257,20 @@ class ResponseAgent:
                 narrative=narrative, language=language,
             )
 
+        # Narrative mode (default): ONE pass writes the whole answer as varied
+        # prose — no fixed headings, no parameter table, a different structure
+        # every time (see agents/narrative.py). The rigid _compose_with_llm
+        # layout is kept as the fallback so an answer is always produced when
+        # the LLM is down or a narrative guard rejects the text.
+        narrated = None
         if official_pfz is not None:
             answer = official_pfz
         else:
+            narrated = self._narrate(context, synthesis, ocean_state, risk, pfz,
+                                     geofence, route, trend, language)
+        if official_pfz is None and narrated:
+            answer = narrated + "\n\n" + _source_line(language)
+        elif official_pfz is None:
             try:
                 answer = self._compose_with_llm(
                     context, synthesis, lang_name, ocean_state, pfz, geofence, route,
@@ -286,6 +332,106 @@ class ResponseAgent:
             duration_ms=duration_ms,
         )
         return answer, trace
+
+    # ------------------------------------------------------------------
+    def _narrate(self, context, synthesis, ocean_state, risk, pfz, geofence,
+                 route, trend, language: str) -> str | None:
+        """Whole-answer AI prose via agents.narrative — None to use the template.
+
+        Only fields the pipeline actually fetched are exposed, so the composer
+        cannot reference data that does not exist.
+        """
+        try:
+            from agents import narrative as _narr
+            if not _narr.is_enabled():
+                return None
+            ocean_d = None
+            if ocean_state is not None:
+                fs = getattr(ocean_state, "field_sources", {}) or {}
+
+                def _v(field, attr=None):
+                    if str(fs.get(field, "")) == "unavailable":
+                        return None
+                    return getattr(ocean_state, attr or field, None)
+
+                loc = getattr(ocean_state, "location", None)
+                ocean_d = {
+                    "location": getattr(loc, "name", None) if loc else None,
+                    "latitude": getattr(loc, "lat", None) if loc else None,
+                    "longitude": getattr(loc, "lon", None) if loc else None,
+                    "time_window": getattr(context, "time_window", None),
+                    "sst_celsius": _v("sst_celsius"),
+                    "wind_speed_kmh": _v("wind_speed_kmh"),
+                    "wind_gust_kmh": _v("wind_gust_kmh"),
+                    "wind_direction": getattr(ocean_state, "wind_direction", None),
+                    "wave_height_m": _v("wave_height_m"),
+                    "swell_height_m": _v("primary_swell_height_m"),
+                    "surface_current_mps": _v("surface_current_mps"),
+                    "chlorophyll_mg_m3": _v("chlorophyll_mg_m3"),
+                    "tide_level_m": _v("tide_level_m"),
+                }
+                ocean_d = {k: v for k, v in ocean_d.items() if v is not None}
+            pfz_d = None
+            if pfz is not None:
+                lc = getattr(pfz, "landing_center", None) or {}
+                pfz_d = {
+                    "distance_km": getattr(pfz, "distance_from_reference_km", None),
+                    "bearing_deg": getattr(pfz, "bearing_deg", None),
+                    "center_lat": getattr(pfz, "center_lat", None),
+                    "center_lon": getattr(pfz, "center_lon", None),
+                    "sst_at_zone_celsius": getattr(pfz, "sst_at_zone_celsius", None),
+                    "landing_centre": lc.get("name") if lc else None,
+                    "nearest_landmark": getattr(pfz, "nearest_landmark", None),
+                }
+                pfz_d = {k: v for k, v in pfz_d.items() if v is not None}
+            hazard_d = None
+            if risk is not None:
+                hazard_d = {
+                    "verdict": getattr(getattr(risk, "status", None), "value", None),
+                    "headline": getattr(risk, "headline", None),
+                    "flags": "; ".join(
+                        f"{f.label}: {f.detail}" for f in (getattr(risk, "flags", []) or [])[:2]
+                    ) or None,
+                    "marine_bulletins": "; ".join(
+                        getattr(risk, "marine_bulletins", []) or [])[:200] or None,
+                }
+                hazard_d = {k: v for k, v in hazard_d.items() if v is not None}
+            geo_d = None
+            if geofence is not None:
+                if getattr(geofence, "clear", True):
+                    geo_d = {"boundary_status": "clear of IMBL/MPA within buffer"}
+                else:
+                    geo_d = {"boundary_flags": "; ".join(
+                        f"{'inside ' if h.inside_zone else f'{h.distance_to_boundary_km} km from '}{h.zone_name}"
+                        for h in (getattr(geofence, "hits", []) or [])[:2])}
+            if route is not None:
+                geo_d = geo_d or {}
+                geo_d["route_km"] = getattr(route, "estimated_distance_km", None)
+                geo_d["avoided"] = ", ".join(getattr(route, "avoided_zones", []) or []) or "nothing"
+            trend_d = None
+            if trend is not None:
+                trend_d = {
+                    "window_months": getattr(trend, "window_months", None),
+                    "sst_trend_per_month": getattr(trend, "sst_trend_per_month", None),
+                    "chl_trend_per_month": getattr(trend, "chl_trend_per_month", None),
+                    "sst_chl_correlation": getattr(trend, "sst_chl_correlation", None),
+                }
+                trend_d = {k: v for k, v in trend_d.items() if v is not None}
+
+            raw_q = (getattr(context, "raw_query", "") or "")
+            return _narr.compose_narrative(
+                user_query=raw_q,
+                intent=(synthesis or {}).get("intent") or _infer_intent(raw_q, pfz),
+                language=language,
+                verdict=(synthesis or {}).get("verdict")
+                        or getattr(getattr(risk, "status", None), "value", None),
+                ocean=ocean_d, pfz=pfz_d, hazard=hazard_d,
+                geospatial=geo_d, trend=trend_d,
+                fishing_context=_is_fishing_query(raw_q),
+            )
+        except Exception as exc:  # never break a working answer
+            _log.warning("narrative composition failed (%s); using template", exc)
+            return None
 
     # ------------------------------------------------------------------
     def _compose_with_llm(

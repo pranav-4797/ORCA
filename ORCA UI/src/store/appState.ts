@@ -975,6 +975,9 @@ class AppStore {
             } else if ((chunk as any).content) {
               if (!assistantMsg.content) assistantMsg.content = (chunk as any).content;
             }
+            if ((chunk as any).hudMetrics) {
+              (assistantMsg as any).hudMetrics = (chunk as any).hudMetrics;
+            }
             if ((chunk as any).routing) {
               (assistantMsg as any).autoRouting = (chunk as any).routing;
               const agents = ((chunk as any).routing.agents || []).map((a: string) => a.replace('Agent','').trim()).join(' + ');

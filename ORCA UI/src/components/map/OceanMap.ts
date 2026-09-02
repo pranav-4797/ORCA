@@ -148,9 +148,10 @@ export class OceanMap {
         : store.vizSessionId ? 'NO MAP DATA' : 'ASK A QUESTION';
       return;
     }
-    if (geojson === this.lastGeojson && pfzToken === this.lastPfzToken) {
-      // Same data, but the panel may have re-parented us -- resize only.
-      this.map?.invalidateSize();
+    if (geojson === this.lastGeojson && pfzToken === this.lastPfzToken &&
+        this.map && this.layer && this.layer.getLayers().length > 0) {
+      // Same data AND we already have a populated map -- resize only.
+      this.map.invalidateSize();
       if (statusEl && hereLabel) statusEl.textContent = hereLabel;
       return;
     }

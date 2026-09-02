@@ -578,6 +578,13 @@ class Orchestrator:
         # Dependency repair: hazard needs an ocean reading.
         if "HazardAgent" in chosen:
             chosen.add("OceanStateAgent")
+        # Fishing-suitability: a "can I go fishing here?" query is routed as a
+        # safety_check/ocean_state but the answer must also weigh PROXIMITY TO A
+        # PFZ. Run the PFZ agent so the summary can give a holistic go/no-go
+        # (near a fishing zone + safe conditions -> go). The needs_pfz rule in
+        # _node_dispatch keys off "pfz" being in the selected nodes.
+        if plan.get("fishing_context") and _intent_val in ("safety_check", "ocean_state"):
+            chosen.add("PFZAgent")
         # Geospatial only runs for intents that actually ask about boundaries /
         # routes / zones — NEVER blanket-forced just because GPS was sent (an
         # "SST near me" query must stay ocean_state-only).
@@ -1680,7 +1687,10 @@ class Orchestrator:
         context = state.get("context")
         parts: list[str] = []
         # PFZ lookups: documented template (official or estimated) — always show Target Coordinates
-        # unless fleet convergence actively changed the recommendation.
+        # unless fleet convergence actively changed the recommendation. This one
+        # block stays structured on purpose: the coordinates, distance/bearing and
+        # source chip ARE the answer to "where are the fish" and a skipper steers
+        # by them. The prose above it is still AI-written and varies per query.
         if (state.get("plan", {}).get("intent") == "pfz_lookup"
                 and pfz is not None
                 and not (fleet and fleet.get("recommendation_changed"))):
@@ -1700,6 +1710,38 @@ class Orchestrator:
                                           language=state.get("language", "en"))
             if formatted:
                 return formatted[:1500]
+        # ---- Narrative mode (default) ---------------------------------------
+        # One AI pass writes the entire answer as varied prose — no fixed
+        # headings, no "| Parameter | Value |" table, a different structure each
+        # time. The verdict badge and the metric tiles are rendered by the UI
+        # from the STRUCTURED response fields, so nothing is lost by dropping
+        # the markdown scaffolding here. Falls through to the deterministic
+        # template below whenever the LLM is down or the guards reject the text.
+        try:
+            _narr_text = self._narrative_answer(
+                state, risk=risk, ocean=ocean, pfz=pfz,
+                geofence=geofence, route=route, trend=state.get("trend"),
+            )
+        except Exception:
+            _narr_text = None
+        if _narr_text:
+            _out = [_narr_text]
+            # Fleet convergence genuinely CHANGES the recommendation — keep it.
+            if fleet and fleet.get("recommendation_changed") and fleet.get("final_zone"):
+                _f = fleet["final_zone"]
+                _sim = " [DEMO — SIMULATED FLEET ACTIVITY]" if str(fleet.get("status", "")).startswith("SIMULATED") else ""
+                _out.append(
+                    f"🎣 Fleet convergence{_sim}: {_f['zone_id']} at "
+                    f"{_f['center_lat']:.3f}, {_f['center_lon']:.3f} is the less "
+                    f"crowded pick ({_f['fleet_count']} vessels, adjusted "
+                    f"suitability {_f['adjusted_suitability']})."
+                )
+            try:
+                from agents.response_agent import _source_line as _src_line
+                _out.append(_src_line(state.get("language", "en")))
+            except Exception:
+                _out.append("*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*")
+            return "\n\n".join(_out)[:1500]
         # Verdict line is authoritative and already rendered as HUD; answer complements it concisely.
         if risk is not None:
             if risk.status.value == "UNSAFE":
@@ -1824,6 +1866,13 @@ class Orchestrator:
                 )
         # PFZ + Fleet Convergence
         if pfz is not None:
+            # For a fishing-suitability question (safety_check/ocean_state with a
+            # fishing intent) the PFZ ran only to feed the holistic AI summary
+            # below — suppress the raw English "Nearest PFZ …/ZONE_A base…" lines
+            # so the answer stays "only imp info + summary". A genuine fleet
+            # RECOMMENDATION CHANGE is still surfaced (it materially changes advice).
+            _plan = state.get("plan", {}) or {}
+            _fish_suppress = bool(_plan.get("fishing_context")) and _plan.get("intent") in ("safety_check", "ocean_state")
             if fleet and fleet.get("recommendation_changed") and fleet.get("final_zone") and fleet.get("raw_best_zone"):
                 raw = fleet["raw_best_zone"]
                 final = fleet["final_zone"]
@@ -1836,7 +1885,9 @@ class Orchestrator:
                         parts.append(f"{cand['zone_id']}: base {cand['base_suitability']} fleet {cand['fleet_count']} adj {cand['adjusted_suitability']} {cand.get('crowding_label','')}")
             else:
                 # No fleet change or no fleet data
-                if fleet and fleet.get("status") == "UNAVAILABLE":
+                if _fish_suppress:
+                    pass  # AI summary carries PFZ proximity for fishing queries
+                elif fleet and fleet.get("status") == "UNAVAILABLE":
                     parts.append(f"Nearest PFZ {pfz.distance_from_reference_km:.1f} km away at {pfz.bearing_deg:.0f}° bearing (SST {pfz.sst_at_zone_celsius}°C). Fleet convergence unavailable — showing raw suitability.")
                 elif fleet and fleet.get("candidates"):
                     # Show fleet counts even when no change, for transparency
@@ -1891,6 +1942,22 @@ class Orchestrator:
         user_query = getattr(context, "raw_query", "") or state.get("raw_query", "")
         intent = plan.get("intent", "unknown")
         language = getattr(context, "language", None) or state.get("language", "en")
+        d = self._summary_dicts(state, risk=risk, ocean=ocean, pfz=pfz,
+                                geofence=geofence, route=route, trend=trend)
+        return generate_context_summary(
+            user_query=user_query, intent=intent,
+            ocean_state=d["ocean"], pfz=d["pfz"], hazard=d["hazard"],
+            geospatial=d["geospatial"], trend=d["trend"], language=language,
+        )
+
+    def _summary_dicts(self, state, risk=None, ocean=None, pfz=None,
+                       geofence=None, route=None, trend=None) -> dict:
+        """Flatten the live specialist findings into plain dicts of ONLY the
+        fields that are actually available. Shared by the one-line context
+        summary and the full narrative composer so both see identical data and
+        neither can reference a field the pipeline never produced."""
+        context = state.get("context")
+        plan = state.get("plan") or {}
 
         ocean_d = None
         if ocean is not None:
@@ -1952,10 +2019,31 @@ class Orchestrator:
             }
             trend_d = {k: v for k, v in trend_d.items() if v is not None}
 
-        return generate_context_summary(
-            user_query=user_query, intent=intent,
-            ocean_state=ocean_d, pfz=pfz_d, hazard=hazard_d,
-            geospatial=geo_d, trend=trend_d, language=language,
+        return {"ocean": ocean_d, "pfz": pfz_d, "hazard": hazard_d,
+                "geospatial": geo_d, "trend": trend_d}
+
+    def _narrative_answer(self, state, risk=None, ocean=None, pfz=None,
+                          geofence=None, route=None, trend=None) -> str | None:
+        """Compose the WHOLE answer as AI-written prose instead of the fixed
+        heading/table scaffolding (see agents/narrative.py). Returns None on any
+        failure so `_deterministic_answer` falls back to its template."""
+        from agents import narrative as _narr
+        if not _narr.is_enabled():
+            return None
+        context = state.get("context")
+        plan = state.get("plan") or {}
+        d = self._summary_dicts(state, risk=risk, ocean=ocean, pfz=pfz,
+                                geofence=geofence, route=route, trend=trend)
+        verdict = ((state.get("synthesis") or {}).get("verdict")
+                   or getattr(getattr(risk, "status", None), "value", None))
+        return _narr.compose_narrative(
+            user_query=getattr(context, "raw_query", "") or state.get("raw_query", ""),
+            intent=plan.get("intent", "unknown"),
+            language=getattr(context, "language", None) or state.get("language", "en"),
+            verdict=verdict,
+            ocean=d["ocean"], pfz=d["pfz"], hazard=d["hazard"],
+            geospatial=d["geospatial"], trend=d["trend"],
+            fishing_context=bool(plan.get("fishing_context")),
         )
 
     def _node_unsupported(self, state: ORCAGraphState) -> dict:
@@ -2234,6 +2322,17 @@ class Orchestrator:
             target_hour=plan.get("target_hour"),
             vessel_class=state.get("vessel_class") or "small_fishing_boat",
         )
+
+        # Fishing-suitability detection: a "can I go fishing here?" question is a
+        # safety_check whose answer must also weigh PROXIMITY TO A PFZ, not just
+        # wind/SST/waves. Flag it so _selected_specialists also runs the PFZ agent
+        # and the narrative composer gives a holistic go/no-go. Vocabulary is
+        # shared with the Response Agent (agents/narrative.py) so both paths agree.
+        try:
+            from agents.narrative import is_fishing_query as _is_fishing
+            plan["fishing_context"] = _is_fishing(raw_query, normalized_query)
+        except Exception:
+            plan["fishing_context"] = False
 
         # Persist the turn for the next follow-up.
         # Always store the resolved location's name (not the raw plan's "same"/"unknown")

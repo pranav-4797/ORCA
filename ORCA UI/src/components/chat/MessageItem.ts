@@ -234,6 +234,13 @@ export class MessageItem {
   }
 
   private extractMetrics(text: string): { label: string; value: string }[] {
+    // Prefer the STRUCTURED metrics the backend sent with the response. The
+    // answer body is now free-form AI prose (and often not in English), so
+    // regex-scraping it for "Wind: 28 km/h" no longer works — and must not be
+    // what the HUD depends on.
+    const structured = (this.message as any)?.hudMetrics as { label: string; value: string }[] | undefined;
+    if (structured && structured.length > 0) return structured;
+
     const metrics: { label: string; value: string }[] = [];
 
     // Wave Height / Swell

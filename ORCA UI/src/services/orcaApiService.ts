@@ -463,6 +463,7 @@ export class OrcaApiService implements IAIService {
       status: data.status,
       routing: data.routing,
       timings: data.timings,
+      hudMetrics: OrcaApiService.buildHudMetrics((data as any).ocean_state),
       fleetConvergence: (data as any).fleet_convergence,
       windDivergence: (data as any).wind_divergence,
       tokens: {
@@ -476,6 +477,35 @@ export class OrcaApiService implements IAIService {
       OrcaApiService.speak(fullText, data.language);
     }
     return streamed;
+  }
+
+  /**
+   * Verdict-card tiles from the backend's STRUCTURED ocean_state rather than
+   * regex over the answer text. The answer is now free-form AI prose written in
+   * the fisher's own language, so scraping it for "Wind: 28 km/h" would silently
+   * empty the HUD. Fields the pipeline could not fetch are simply omitted —
+   * never shown as a placeholder number.
+   */
+  private static buildHudMetrics(ocean: any): { label: string; value: string }[] {
+    if (!ocean) return [];
+    const fs = ocean.field_sources || {};
+    const have = (k: string) => String(fs[k] ?? '') !== 'unavailable';
+    const out: { label: string; value: string }[] = [];
+    const swell = ocean.primary_swell_height_m ?? ocean.wave_height_m;
+    if (swell != null && (have('primary_swell_height_m') || have('wave_height_m'))) {
+      out.push({ label: 'Wave / Swell', value: `${swell} m` });
+    }
+    const wind = ocean.wind_gust_kmh ?? ocean.wind_speed_kmh;
+    if (wind != null && (have('wind_gust_kmh') || have('wind_speed_kmh'))) {
+      out.push({ label: 'Wind / Gusts', value: `${wind} km/h` });
+    }
+    if (ocean.sst_celsius != null && have('sst_celsius')) {
+      out.push({ label: 'Sea Temp (SST)', value: `${ocean.sst_celsius} °C` });
+    }
+    if (ocean.surface_current_mps != null && have('surface_current_mps')) {
+      out.push({ label: 'Current', value: `${ocean.surface_current_mps} m/s` });
+    }
+    return out;
   }
 
   /** Compact "Official INCOIS PFZ" card appended under the answer when the

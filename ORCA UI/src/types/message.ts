@@ -35,6 +35,12 @@ export interface Message {
   };
   /** Structured safety verdict from backend (authoritative). Takes priority over text parsing. */
   status?: 'SAFE' | 'CAUTION' | 'UNSAFE' | 'CRITICAL' | 'INFO';
+  /**
+   * Verdict-card metric tiles built from the backend's structured ocean_state.
+   * The answer body is free-form AI prose in the user's own language, so the
+   * HUD must not depend on regex-scraping English labels out of it.
+   */
+  hudMetrics?: { label: string; value: string }[];
   /** Auto-routing explainability (which agents were selected and why). */
   autoRouting?: {
     intent: string;
