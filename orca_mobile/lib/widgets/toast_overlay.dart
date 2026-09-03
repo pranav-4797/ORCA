@@ -14,7 +14,7 @@ class ToastOverlay extends StatelessWidget {
         switch (state.toastType) {
           case 'error': bg = const Color(0xFFFF1744); break;
           case 'success': bg = const Color(0xFF00C853); break;
-          default: bg = const Color(0xFF1A237E);
+          default: bg = const Color(0xFF00626A); // Primary/brand teal
         }
         return Positioned(
           top: 12,

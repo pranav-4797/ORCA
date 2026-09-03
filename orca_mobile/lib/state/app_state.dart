@@ -48,6 +48,9 @@ class ChatMessage {
   bool isStreaming;
   String? agentId;
   String? modelUsed;
+  // The viz/session id whose geojson corresponds to this response, so a
+  // "View in Map" tap can re-center the contextual map on the right data.
+  String? vizSessionId;
 
   ChatMessage({
     required this.id,
@@ -67,6 +70,7 @@ class ChatMessage {
     this.isStreaming = false,
     this.agentId,
     this.modelUsed,
+    this.vizSessionId,
   });
 
   // Compatibility getters for old code
@@ -92,6 +96,7 @@ class ChatMessage {
         'isStreaming': isStreaming,
         'agentId': agentId,
         'modelUsed': modelUsed,
+        'vizSessionId': vizSessionId,
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
@@ -112,6 +117,7 @@ class ChatMessage {
         isStreaming: j['isStreaming'] as bool? ?? false,
         agentId: j['agentId'] as String?,
         modelUsed: j['modelUsed'] as String?,
+        vizSessionId: j['vizSessionId'] as String?,
       );
 }
 
@@ -345,6 +351,47 @@ class AppState extends ChangeNotifier {
     } catch(_) {}
   }
 
+  // Derives a real [lat, lon] focus point from the currently loaded viz
+  // geojson (query point / PFZ / hazard / fleet / SAR markers, in priority
+  // order) so the contextual map can center on actual returned data.
+  // Returns null when nothing usable is loaded — never fabricates coords.
+  List<double>? focusPointFromViz({String? preferredKind}) {
+    final geo = vizGeojson;
+    final features = geo?['features'] as List<dynamic>?;
+    if (features == null || features.isEmpty) return mapPoint;
+    const priority = ['query_point', 'pfz_primary', 'fleet_recommended', 'sar_unknown_high', 'sar', 'fleet_candidate'];
+    Map<String, dynamic>? pick(bool Function(String kind) matches) {
+      for (final f in features) {
+        final props = f['properties'] as Map<String, dynamic>?;
+        final geom = f['geometry'] as Map<String, dynamic>?;
+        final kind = props?['kind'] as String? ?? '';
+        if (geom?['type'] == 'Point' && matches(kind)) return geom;
+      }
+      return null;
+    }
+    if (preferredKind != null) {
+      final geom = pick((k) => k == preferredKind || k.startsWith(preferredKind));
+      if (geom != null) {
+        final coords = geom['coordinates'] as List<dynamic>;
+        return [(coords[1] as num).toDouble(), (coords[0] as num).toDouble()];
+      }
+    }
+    for (final kind in priority) {
+      final geom = pick((k) => k == kind || k.startsWith(kind));
+      if (geom != null) {
+        final coords = geom['coordinates'] as List<dynamic>;
+        return [(coords[1] as num).toDouble(), (coords[0] as num).toDouble()];
+      }
+    }
+    // Fall back to the first available point feature.
+    final geom = pick((_) => true);
+    if (geom != null) {
+      final coords = geom['coordinates'] as List<dynamic>;
+      return [(coords[1] as num).toDouble(), (coords[0] as num).toDouble()];
+    }
+    return mapPoint;
+  }
+
   // --- Chat management ---
   String createNewChat({String? agentId, String? title}) {
     final id = const Uuid().v4();
@@ -496,6 +543,7 @@ class AppState extends ChangeNotifier {
     assistantMsg.fleetConvergence = resp.fleetConvergence;
     assistantMsg.windDivergence = resp.windDivergence;
     assistantMsg.isStreaming = false;
+    assistantMsg.vizSessionId = resp.sessionId ?? chatId;
     if (resp.timings != null && resp.timings!['total_ms'] != null) {
       assistantMsg.modelUsed = '${assistantMsg.modelUsed} · ${resp.timings!['total_ms']}ms';
     }

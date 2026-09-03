@@ -11,11 +11,11 @@ class ChatDrawer extends StatelessWidget {
       builder: (context, state, _) {
         final chats = state.filteredChats;
         return Drawer(
-          backgroundColor: const Color(0xFF0D1F3C),
+          backgroundColor: const Color(0xFFFFFFFF), // Sidebar - White
           child: Column(
             children: [
               DrawerHeader(
-                decoration: const BoxDecoration(color: Color(0xFF0A1628)),
+                decoration: const BoxDecoration(color: Color(0xFFDDFBFF)), // Primary light background
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -23,15 +23,15 @@ class ChatDrawer extends StatelessWidget {
                       children: [
                         Container(
                           padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(color: const Color(0xFF00E5FF).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                          child: const Icon(Icons.sailing, color: Color(0xFF00E5FF), size: 20),
+                          decoration: BoxDecoration(color: const Color(0xFF00626A).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                          child: const Icon(Icons.sailing, color: Color(0xFF00626A), size: 20), // Primary/brand
                         ),
                         const SizedBox(width: 10),
-                        const Text('ORCA', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                        const Text('ORCA', style: TextStyle(color: Color(0xFF171C1F), fontSize: 18, fontWeight: FontWeight.w800)), // Primary text
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Text('${chats.length} mission sessions', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11)),
+                    Text('${chats.length} mission sessions', style: const TextStyle(color: Color(0xFF3E494A), fontSize: 11)), // Secondary text
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
@@ -42,7 +42,7 @@ class ChatDrawer extends StatelessWidget {
                         },
                         icon: const Icon(Icons.add, size: 16),
                         label: const Text('New Chat', style: TextStyle(fontSize: 13)),
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF), foregroundColor: const Color(0xFF0A1628), padding: const EdgeInsets.symmetric(vertical: 8)),
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00626A), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 8)), // Primary/brand
                       ),
                     ),
                   ],
@@ -51,14 +51,25 @@ class ChatDrawer extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.all(8),
                 child: TextField(
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: const TextStyle(color: Color(0xFF171C1F), fontSize: 13), // Primary text
                   decoration: InputDecoration(
                     hintText: 'Search conversations...',
-                    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 12),
-                    prefixIcon: const Icon(Icons.search, color: Colors.white24, size: 18),
+                    hintStyle: const TextStyle(color: Color(0xFF6E797A), fontSize: 12), // Tertiary text
+                    prefixIcon: const Icon(Icons.search, color: Color(0xFF6E797A), size: 18), // Tertiary text
                     filled: true,
-                    fillColor: Colors.white.withValues(alpha: 0.05),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    fillColor: const Color(0xFFF8FAFB), // Input background
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFD1D5DB)), // Default border
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFD1D5DB)), // Default border
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF00626A)), // Primary/brand
+                    ),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   ),
                   onChanged: (v) {
@@ -78,20 +89,37 @@ class ChatDrawer extends StatelessWidget {
                     final isActive = c.id == state.activeChatId;
                     return ListTile(
                       selected: isActive,
-                      selectedTileColor: const Color(0xFF00E5FF).withValues(alpha: 0.08),
-                      title: Text(c.title, style: TextStyle(color: isActive ? const Color(0xFF00E5FF) : Colors.white.withValues(alpha: 0.85), fontSize: 13, fontWeight: isActive ? FontWeight.w600 : FontWeight.w400), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Text(c.lastMessagePreview ?? '${c.messageCount} msgs', style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11), maxLines: 1),
-                      leading: Icon(c.pinned ? Icons.push_pin : Icons.chat_bubble_outline, size: 16, color: c.pinned ? const Color(0xFF00E5FF) : Colors.white24),
+                      selectedTileColor: const Color(0xFFDDFBFF), // Primary light background
+                      title: Text(
+                        c.title,
+                        style: TextStyle(
+                          color: isActive ? const Color(0xFF00626A) : const Color(0xFF171C1F), // Primary/brand : Primary text
+                          fontSize: 13,
+                          fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        c.lastMessagePreview ?? '${c.messageCount} msgs',
+                        style: const TextStyle(color: Color(0xFF6E797A), fontSize: 11), // Tertiary text
+                        maxLines: 1,
+                      ),
+                      leading: Icon(
+                        c.pinned ? Icons.push_pin : Icons.chat_bubble_outline,
+                        size: 16,
+                        color: c.pinned ? const Color(0xFF00626A) : const Color(0xFF6E797A), // Primary/brand : Tertiary text
+                      ),
                       trailing: PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_horiz, size: 16, color: Colors.white24),
+                        icon: const Icon(Icons.more_horiz, size: 16, color: Color(0xFF6E797A)), // Tertiary text
                         onSelected: (v) {
                           if (v == 'pin') state.togglePinChat(c.id);
                           if (v == 'rename') {
                             final ctrl = TextEditingController(text: c.title);
                             showDialog(context: context, builder: (d) => AlertDialog(
-                              backgroundColor: const Color(0xFF0D1F3C),
-                              title: const Text('Rename', style: TextStyle(color: Colors.white)),
-                              content: TextField(controller: ctrl, style: const TextStyle(color: Colors.white)),
+                              backgroundColor: const Color(0xFFFFFFFF), // Cards/surfaces
+                              title: const Text('Rename', style: TextStyle(color: Color(0xFF171C1F))), // Primary text
+                              content: TextField(controller: ctrl, style: const TextStyle(color: Color(0xFF171C1F))), // Primary text
                               actions: [
                                 TextButton(onPressed: ()=> Navigator.pop(d), child: const Text('Cancel')),
                                 TextButton(onPressed: (){ state.renameChat(c.id, ctrl.text); Navigator.pop(d); }, child: const Text('Save')),
@@ -114,18 +142,21 @@ class ChatDrawer extends StatelessWidget {
                   },
                 ),
               ),
-              const Divider(color: Colors.white10, height: 1),
+              const Divider(color: Color(0xFFE5E9EC), height: 1), // Subtle border
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(state.currentUser != null ? (state.currentUser!['displayName'] ?? 'Signed in') : 'Guest • ${state.guestCount}/3', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11)),
+                      child: Text(
+                        state.currentUser != null ? (state.currentUser!['displayName'] ?? 'Signed in') : 'Guest • ${state.guestCount}/3',
+                        style: const TextStyle(color: Color(0xFF3E494A), fontSize: 11), // Secondary text
+                      ),
                     ),
                     if (state.currentUser == null)
-                      TextButton(onPressed: () => state.loginMock('Officer'), child: const Text('Sign in', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 12)))
+                      TextButton(onPressed: () => state.loginMock('Officer'), child: const Text('Sign in', style: TextStyle(color: Color(0xFF00626A), fontSize: 12))) // Primary/brand
                     else
-                      TextButton(onPressed: () => state.logout(), child: const Text('Sign out', style: TextStyle(color: Colors.white38, fontSize: 11))),
+                      TextButton(onPressed: () => state.logout(), child: const Text('Sign out', style: TextStyle(color: Color(0xFF6E797A), fontSize: 11))), // Tertiary text
                   ],
                 ),
               ),

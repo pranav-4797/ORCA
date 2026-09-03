@@ -17,7 +17,7 @@ class VerdictBadge extends StatelessWidget {
       case 'CRITICAL':
         return const Color(0xFFFF1744);
       default:
-        return const Color(0xFF90A4AE);
+        return const Color(0xFF6E797A); // Tertiary/muted grey
     }
   }
 

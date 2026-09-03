@@ -7,12 +7,31 @@ import 'services/storage_service.dart';
 import 'services/tts_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/chat_screen.dart';
-import 'screens/map_screen.dart';
 import 'screens/sar_screen.dart';
 import 'screens/settings_screen.dart';
 import 'widgets/app_header.dart';
 import 'widgets/chat_drawer.dart';
 import 'widgets/toast_overlay.dart';
+
+// ---- App color palette ----
+class AppColors {
+  static const appBackground = Color(0xFFF6FAFD); // Very pale blue-white
+  static const sidebar = Color(0xFFFFFFFF); // White
+  static const surface = Color(0xFFFFFFFF); // Cards / surfaces
+  static const inputBackground = Color(0xFFF8FAFB); // Near-white
+  static const hoverSurface = Color(0xFFF0F4F7); // Light blue-grey
+  static const activeSurface = Color(0xFFEAEEF1); // Slightly darker grey
+  static const primaryText = Color(0xFF171C1F); // Very dark charcoal
+  static const secondaryText = Color(0xFF3E494A); // Dark grey
+  static const tertiaryText = Color(0xFF6E797A); // Muted grey
+  static const subtleBorder = Color(0xFFE5E9EC); // Very light grey
+  static const defaultBorder = Color(0xFFD1D5DB); // Light grey
+  static const strongBorder = Color(0xFF6E797A); // Grey
+  static const primary = Color(0xFF00626A); // Deep teal
+  static const primaryContainer = Color(0xFF0E7C86); // Ocean teal
+  static const primaryHover = Color(0xFF004F56); // Dark teal
+  static const primaryLightBackground = Color(0xFFDDFBFF); // Pale cyan
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,11 +58,11 @@ class ORCAApp extends StatelessWidget {
       child: MaterialApp(
         title: 'ORCA',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData.dark().copyWith(
-          scaffoldBackgroundColor: const Color(0xFF0A1628),
-          colorScheme: const ColorScheme.dark(
-            primary: Color(0xFF00E5FF),
-            surface: Color(0xFF0D1F3C),
+        theme: ThemeData.light().copyWith(
+          scaffoldBackgroundColor: AppColors.appBackground,
+          colorScheme: const ColorScheme.light(
+            primary: AppColors.primary,
+            surface: AppColors.surface,
           ),
         ),
         home: kIsWeb ? const _WebPhoneFrame(child: MainShell()) : const MainShell(),
@@ -62,16 +81,16 @@ class _WebPhoneFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF060E1E),
+      backgroundColor: AppColors.hoverSurface,
       body: Center(
         child: Container(
           width: 412,
           height: 892,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: const Color(0xFF0A1628),
+            color: AppColors.appBackground,
             borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: const Color(0xFF1A2E4A), width: 2),
+            border: Border.all(color: AppColors.defaultBorder, width: 2),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.5),
@@ -103,7 +122,6 @@ class _MainShellState extends State<MainShell> {
   final _screens = const [
     HomeScreen(), // Overview
     ChatScreen(), // Ask ORCA
-    MapScreen(), // Operational picture
     SarScreen(), // Authority / SAR
     SettingsScreen(), // System
   ];
@@ -130,25 +148,20 @@ class _MainShellState extends State<MainShell> {
           bottomNavigationBar: NavigationBar(
             selectedIndex: _currentIndex,
             onDestinationSelected: (i) => setState(() => _currentIndex = i),
-            backgroundColor: const Color(0xFF0D1F3C),
-            indicatorColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+            backgroundColor: AppColors.sidebar,
+            indicatorColor: AppColors.primaryLightBackground,
             height: 64,
             labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
             destinations: [
               const NavigationDestination(
                 icon: Icon(Icons.dashboard_outlined, size: 22),
-                selectedIcon: Icon(Icons.dashboard, size: 22, color: Color(0xFF00E5FF)),
+                selectedIcon: Icon(Icons.dashboard, size: 22, color: AppColors.primary),
                 label: 'Overview',
               ),
               const NavigationDestination(
                 icon: Icon(Icons.chat_bubble_outline, size: 22),
-                selectedIcon: Icon(Icons.chat_bubble, size: 22, color: Color(0xFF00E5FF)),
+                selectedIcon: Icon(Icons.chat_bubble, size: 22, color: AppColors.primary),
                 label: 'Ask ORCA',
-              ),
-              const NavigationDestination(
-                icon: Icon(Icons.map_outlined, size: 22),
-                selectedIcon: Icon(Icons.map, size: 22, color: Color(0xFF00E5FF)),
-                label: 'Map',
               ),
               NavigationDestination(
                 icon: Badge(
@@ -159,13 +172,13 @@ class _MainShellState extends State<MainShell> {
                 selectedIcon: Badge(
                   isLabelVisible: appState.alerts.where((a) => !a.dismissed).isNotEmpty,
                   backgroundColor: const Color(0xFFFF1744),
-                  child: const Icon(Icons.shield, size: 22, color: Color(0xFF00E5FF)),
+                  child: const Icon(Icons.shield, size: 22, color: AppColors.primary),
                 ),
                 label: 'Authority',
               ),
               const NavigationDestination(
                 icon: Icon(Icons.settings_outlined, size: 22),
-                selectedIcon: Icon(Icons.settings, size: 22, color: Color(0xFF00E5FF)),
+                selectedIcon: Icon(Icons.settings, size: 22, color: AppColors.primary),
                 label: 'System',
               ),
             ],

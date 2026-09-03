@@ -17,17 +17,17 @@ class PresetQueryButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF00E5FF).withValues(alpha: 0.08),
+          color: const Color(0xFFDDFBFF), // Primary light background
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: const Color(0xFF00E5FF).withValues(alpha: 0.25),
+            color: const Color(0xFF00626A).withValues(alpha: 0.25), // Primary/brand
             width: 1,
           ),
         ),
         child: Text(
           label,
           style: const TextStyle(
-            color: Color(0xFF00E5FF),
+            color: Color(0xFF00626A), // Primary/brand
             fontSize: 13,
             fontWeight: FontWeight.w500,
           ),

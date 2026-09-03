@@ -18,8 +18,8 @@ class VizChart extends StatelessWidget {
       return Container(
         height: 180,
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12)),
-        child: const Center(child: Text('No hourly series for this query', style: TextStyle(color: Colors.white38, fontSize: 12))),
+        decoration: BoxDecoration(color: const Color(0xFFF8FAFB), borderRadius: BorderRadius.circular(12)),
+        child: const Center(child: Text('No hourly series for this query', style: TextStyle(color: Color(0xFF6E797A), fontSize: 12))),
       );
     }
 
@@ -32,26 +32,26 @@ class VizChart extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFF0D1F3C), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
+      decoration: BoxDecoration(color: const Color(0xFFFFFFFF), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE5E9EC))),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('48H WAVE / GUST', style: TextStyle(color: Colors.white54, fontSize: 9, letterSpacing: 0.8, fontWeight: FontWeight.w700)),
+          const Text('48H WAVE / GUST', style: TextStyle(color: Color(0xFF6E797A), fontSize: 9, letterSpacing: 0.8, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
           SizedBox(
             height: 140,
             child: LineChart(
               LineChartData(
-                gridData: FlGridData(show: true, drawVerticalLine: false, horizontalInterval: 1, getDrawingHorizontalLine: (_) => FlLine(color: Colors.white10, strokeWidth: 0.5)),
+                gridData: FlGridData(show: true, drawVerticalLine: false, horizontalInterval: 1, getDrawingHorizontalLine: (_) => FlLine(color: const Color(0xFFE5E9EC), strokeWidth: 0.5)),
                 titlesData: FlTitlesData(
-                  leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 32, getTitlesWidget: (v, m) => Text(v.toStringAsFixed(1), style: const TextStyle(color: Colors.white30, fontSize: 8)))),
+                  leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 32, getTitlesWidget: (v, m) => Text(v.toStringAsFixed(1), style: const TextStyle(color: Color(0xFF6E797A), fontSize: 8)))),
                   bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
                 borderData: FlBorderData(show: false),
                 lineBarsData: [
-                  LineChartBarData(spots: waveSpots, isCurved: true, color: const Color(0xFF00E5FF), barWidth: 2, dotData: const FlDotData(show: false), belowBarData: BarAreaData(show: true, color: const Color(0xFF00E5FF).withValues(alpha: 0.12))),
+                  LineChartBarData(spots: waveSpots, isCurved: true, color: const Color(0xFF0E7C86), barWidth: 2, dotData: const FlDotData(show: false), belowBarData: BarAreaData(show: true, color: const Color(0xFF0E7C86).withValues(alpha: 0.12))),
                   if (gustSpots.isNotEmpty) LineChartBarData(spots: gustSpots, isCurved: true, color: const Color(0xFFFF6D00), barWidth: 1.5, dotData: const FlDotData(show: false)),
                 ],
                 extraLinesData: ExtraLinesData(
@@ -65,7 +65,7 @@ class VizChart extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Row(children: [
-            _Legend(color: const Color(0xFF00E5FF), label: 'Wave m'),
+            _Legend(color: const Color(0xFF0E7C86), label: 'Wave m'),
             const SizedBox(width: 12),
             _Legend(color: const Color(0xFFFF6D00), label: 'Gust km/h'),
             const Spacer(),
@@ -78,8 +78,8 @@ class VizChart extends StatelessWidget {
               runSpacing: 4,
               children: (tides as List).map<Widget>((t) => Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(16)),
-                child: Text('${t['kind']}: ${t['time_local']?.toString().substring(11,16) ?? ''} • ${t['height_m']} m', style: const TextStyle(color: Colors.white70, fontSize: 10)),
+                decoration: BoxDecoration(color: const Color(0xFFF0F4F7), borderRadius: BorderRadius.circular(16)),
+                child: Text('${t['kind']}: ${t['time_local']?.toString().substring(11,16) ?? ''} • ${t['height_m']} m', style: const TextStyle(color: Color(0xFF3E494A), fontSize: 10)),
               )).toList(),
             ),
           ],
@@ -95,6 +95,6 @@ class _Legend extends StatelessWidget {
   const _Legend({required this.color, required this.label});
   @override
   Widget build(BuildContext context) {
-    return Row(children: [Container(width: 12, height: 3, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))), const SizedBox(width: 4), Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10))]);
+    return Row(children: [Container(width: 12, height: 3, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))), const SizedBox(width: 4), Text(label, style: const TextStyle(color: Color(0xFF6E797A), fontSize: 10))]);
   }
 }

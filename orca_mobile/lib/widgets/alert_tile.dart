@@ -68,8 +68,8 @@ class AlertTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   alert.message,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.85),
+                  style: const TextStyle(
+                    color: Color(0xFF3E494A), // Secondary text
                     fontSize: 14,
                     height: 1.3,
                   ),
@@ -77,8 +77,8 @@ class AlertTile extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   _formatTime(alert.timestamp),
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.35),
+                  style: const TextStyle(
+                    color: Color(0xFF6E797A), // Tertiary text
                     fontSize: 11,
                   ),
                 ),
@@ -88,10 +88,10 @@ class AlertTile extends StatelessWidget {
           if (onDismiss != null)
             GestureDetector(
               onTap: onDismiss,
-              child: Icon(
+              child: const Icon(
                 Icons.close,
                 size: 18,
-                color: Colors.white.withValues(alpha: 0.4),
+                color: Color(0xFF6E797A), // Tertiary text
               ),
             ),
         ],

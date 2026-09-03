@@ -13,8 +13,17 @@ class SafetyHud extends StatelessWidget {
     if (!hasData) {
       return Container(
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
-        child: const Row(children: [Icon(Icons.shield_outlined, color: Colors.white24, size: 16), SizedBox(width: 8), Text('Safety Factor HUD — ask ORCA for live breakdown', style: TextStyle(color: Colors.white38, fontSize: 11))]),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFB), // Input background
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE5E9EC)), // Subtle border
+        ),
+        child: const Row(children: [
+          Icon(Icons.shield_outlined, color: Color(0xFF6E797A), size: 16), // Tertiary text
+          SizedBox(width: 8),
+          Text('Safety Factor HUD — ask ORCA for live breakdown',
+              style: TextStyle(color: Color(0xFF6E797A), fontSize: 11)), // Tertiary text
+        ]),
       );
     }
     final factors = [
@@ -27,19 +36,32 @@ class SafetyHud extends StatelessWidget {
     ];
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFF0D1F3C), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFFFF), // Cards / surfaces
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E9EC)), // Subtle border
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('FACTOR BREAKDOWN', style: TextStyle(color: Colors.white54, fontSize: 9, letterSpacing: 0.8, fontWeight: FontWeight.w700)),
+          const Text('FACTOR BREAKDOWN',
+              style: TextStyle(
+                  color: Color(0xFF3E494A), // Secondary text
+                  fontSize: 9,
+                  letterSpacing: 0.8,
+                  fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Row(
             children: factors.map((f) => Expanded(child: Column(children: [
-              Icon(f['icon'] as IconData, color: const Color(0xFF00E5FF), size: 18),
+              Icon(f['icon'] as IconData, color: const Color(0xFF00626A), size: 18), // Primary/brand
               const SizedBox(height: 4),
-              Text(f['label'] as String, style: const TextStyle(color: Colors.white38, fontSize: 8)),
+              Text(f['label'] as String, style: const TextStyle(color: Color(0xFF6E797A), fontSize: 8)), // Tertiary text
               const SizedBox(height: 2),
-              Text(f['value'] as String, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+              Text(f['value'] as String,
+                  style: const TextStyle(
+                      color: Color(0xFF171C1F), // Primary text
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600)),
             ]))).toList(),
           ),
         ],

@@ -3,193 +3,1182 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../state/app_state.dart';
 import '../l10n/strings.dart';
-import '../widgets/preset_query_button.dart';
-import '../widgets/verdict_badge.dart';
 import '../widgets/offline_banner.dart';
 import '../widgets/safety_hud.dart';
 import '../widgets/viz_chart.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _checking = true;
+
   @override
-  void initState(){ super.initState(); _initLocation(); }
+  void initState() {
+    super.initState();
+    _initLocation();
+  }
 
   Future<void> _initLocation() async {
     final s = context.read<AppState>();
-    if (s.lat != null) { setState(()=> _checking=false); return; }
-    try{
-      if (!await Geolocator.isLocationServiceEnabled()) { setState(()=> _checking=false); return; }
+
+    if (s.lat != null) {
+      setState(() => _checking = false);
+      return;
+    }
+
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        setState(() => _checking = false);
+        return;
+      }
+
       var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) { setState(()=> _checking=false); return; }
-      final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.low, timeLimit: Duration(seconds: 10)));
+
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        setState(() => _checking = false);
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.low,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+
       s.setLocation(pos.latitude, pos.longitude);
-    } catch(_){}
-    if(mounted) setState(()=> _checking=false);
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() => _checking = false);
+    }
   }
 
   @override
-  Widget build(BuildContext context){
-    return Consumer<AppState>(builder: (context, state, _){
-      final lang = state.language;
-      final last = state.activeMessages.isNotEmpty ? state.activeMessages.lastWhere((m)=> !m.isUser, orElse: ()=> state.activeMessages.last) : null;
-      final hasLast = last != null && !last.isUser;
-      return Scaffold(
-        backgroundColor: const Color(0xFF0A1628),
-        body: Column(
+  Widget build(BuildContext context) {
+    return Consumer<AppState>(
+      builder: (context, state, _) {
+        final lang = state.language;
+
+        final last = state.activeMessages.isNotEmpty
+            ? state.activeMessages.lastWhere(
+                (m) => !m.isUser,
+                orElse: () => state.activeMessages.last,
+              )
+            : null;
+
+        final hasLast = last != null && !last.isUser;
+
+        final activeAlerts =
+            state.alerts.where((a) => !a.dismissed).toList();
+
+        return Scaffold(
+          backgroundColor: const Color(0xFFF6FAFD),
+          body: SafeArea(
+            child: Column(
+              children: [
+                OfflineBanner(isOnline: state.isOnline),
+
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Header
+                        _buildHeader(state, lang),
+
+                        const SizedBox(height: 16),
+
+                        // Primary Safety Status Card
+                        _buildPrimarySafetyCard(
+                          state,
+                          last,
+                          hasLast,
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Dynamic Visualizations
+                        if (state.vizGeojson != null) ...[
+                          const SafetyHud(),
+                          const SizedBox(height: 12),
+                        ],
+
+                        if (state.vizSeries != null) ...[
+                          VizChart(series: state.vizSeries!),
+                          const SizedBox(height: 16),
+                        ],
+
+                        // Important Warnings
+                        _buildImportantWarnings(
+                          state,
+                          activeAlerts.length,
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Good Fishing Areas
+                        _buildPfzCard(state),
+
+                        const SizedBox(height: 16),
+
+                        // Ask ORCA
+                        _buildAskOrcaCard(state),
+
+                        const SizedBox(height: 16),
+
+                        // Active Alerts
+                        if (activeAlerts.isNotEmpty) ...[
+                          _buildActiveAlerts(
+                            state,
+                            activeAlerts,
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+
+                        // Sync Footer
+                        _buildSyncFooter(state),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
+  // HEADER
+  // ------------------------------------------------------------
+
+  Widget _buildHeader(AppState state, String lang) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            OfflineBanner(isOnline: state.isOnline),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  // Header
-                  Row(children: [
-                    Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: const Color(0xFF00E5FF).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.sailing, color: Color(0xFF00E5FF), size: 26)),
-                    const SizedBox(width: 12),
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(AppStrings.t('appTitle', lang), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 1)),
-                      Text(state.userCategory != null ? '${state.userCategory!.badgeEmoji} ${state.userCategory!.roleName}' : AppStrings.t('appSubtitle', lang), style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11)),
-                    ]),
-                    const Spacer(),
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: state.isOnline ? const Color(0xFF00C853).withValues(alpha: 0.12) : const Color(0xFFFF6D00).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)), child: Row(children: [Container(width: 6,height:6,decoration: BoxDecoration(color: state.isOnline ? const Color(0xFF00C853) : const Color(0xFFFF6D00), shape: BoxShape.circle)), const SizedBox(width: 4), Text(state.isOnline ? 'ONLINE' : 'OFFLINE', style: TextStyle(color: state.isOnline ? const Color(0xFF00C853) : const Color(0xFFFF6D00), fontSize: 9, fontWeight: FontWeight.w700))])),
-                  ]),
-                  const SizedBox(height: 16),
-                  // Location card
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: const Color(0xFF0D1F3C), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.1))),
-                    child: Row(children: [
-                      Icon(Icons.location_on_outlined, color: state.locationGranted ? const Color(0xFF00E5FF) : Colors.white38, size: 20),
-                      const SizedBox(width: 10),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(AppStrings.t('currentLocation', lang), style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 10)),
-                        const SizedBox(height: 2),
-                        _checking ? const SizedBox(width: 14,height:14, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF00E5FF))) : state.lat != null ? Text('${state.lat!.toStringAsFixed(4)}, ${state.lon!.toStringAsFixed(4)}', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, fontFamily: 'monospace')) : Text(AppStrings.t('locationUnknown', lang), style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12)),
-                        if (state.mapPoint != null) Text('Map point: ${state.mapPoint![0].toStringAsFixed(4)}, ${state.mapPoint![1].toStringAsFixed(4)}', style: const TextStyle(color: Color(0xFFFF6D00), fontSize: 10)),
-                      ])),
-                      if(state.lat==null && !_checking) TextButton(onPressed: _showManual, child: const Text('Set', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 12))),
-                    ]),
-                  ),
-                  const SizedBox(height: 12),
-                  // Safety status
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: const Color(0xFF0D1F3C), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.1))),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(AppStrings.t('safetyStatus', lang), style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 10)),
-                      const SizedBox(height: 8),
-                      if (hasLast && last!.status != null) ...[
-                        VerdictBadge(status: last.status!),
-                        const SizedBox(height: 8),
-                        Text(last.content, style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12, height: 1.4), maxLines: 4, overflow: TextOverflow.ellipsis),
-                      ] else
-                        Text('No data yet — ask ORCA for a status check.', style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 12)),
-                    ]),
-                  ),
-                  const SizedBox(height: 12),
-                  // Safety HUD if viz exists
-                  if (state.vizGeojson != null) const SafetyHud(),
-                  const SizedBox(height: 12),
-                  if (state.vizSeries != null) VizChart(series: state.vizSeries!),
-                  const SizedBox(height: 16),
-                  // Scenario starters (Overview scenarios like web's 5 cards)
-                  Text('Scenarios', style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  GridView.count(
-                    shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisCount: 2, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 2.2,
-                    children: [
-                      _ScenarioCard(title: 'Safe', sub: 'GOA • LOW', q: 'Is it safe to sail from Panaji Port, Goa tomorrow morning?', color: const Color(0xFF00C853), state: state),
-                      _ScenarioCard(title: 'Rough', sub: 'MUMBAI • HIGH', q: 'Is it safe to venture into the sea from Mumbai Harbour tomorrow at 6 AM?', color: const Color(0xFFFF6D00), state: state),
-                      _ScenarioCard(title: 'Cyclone', sub: 'PARADIP • EXTREME', q: 'Are there active cyclone or high wave warnings near Paradip port, Odisha?', color: const Color(0xFFFF1744), state: state),
-                      _ScenarioCard(title: 'PFZ', sub: 'KOCHI • PFZ', q: 'Where is the nearest potential fishing zone (PFZ) near Kochi coast today?', color: const Color(0xFF00E5FF), state: state),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  // Quick queries (FishermanDeck)
-                  Text('Quick Queries', style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  Wrap(spacing: 8, runSpacing: 8, children: [
-                    PresetQueryButton(label: 'Nearest fishing zone', onTap: ()=> _preset(state, 'Where is the nearest fishing zone?')),
-                    PresetQueryButton(label: 'Any cyclone warning?', onTap: ()=> _preset(state, 'Are there any cyclone warnings for my area?')),
-                    PresetQueryButton(label: 'Safe to go out today?', onTap: ()=> _preset(state, 'Is it safe to go fishing today?')),
-                    PresetQueryButton(label: "Today's weather", onTap: ()=> _preset(state, "What's the weather like today?")),
-                  ]),
-                  const SizedBox(height: 16),
-                  // Alerts preview
-                  if (state.alerts.where((a)=> !a.dismissed).isNotEmpty) ...[
-                    Text('Active Alerts', style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    ...state.alerts.where((a)=> !a.dismissed).take(2).map((a) => Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: const Color(0xFFFF6D00).withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFFF6D00).withValues(alpha: 0.2))),
-                      child: Row(children: [const Icon(Icons.warning_amber, color: Color(0xFFFF6D00), size: 16), const SizedBox(width: 8), Expanded(child: Text(a.message, style: const TextStyle(color: Colors.white70, fontSize: 12), maxLines: 2))]),
-                    )),
-                  ],
-                ]),
+            Text(
+              AppStrings.t('appTitle', lang),
+              style: const TextStyle(
+                color: Color(0xFF00626A),
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.5,
+              ),
+            ),
+
+            const SizedBox(height: 2),
+
+            Text(
+              state.userCategory != null
+                  ? '${state.userCategory!.badgeEmoji} ${state.userCategory!.roleName}'
+                  : AppStrings.t('appSubtitle', lang),
+              style: const TextStyle(
+                color: Color(0xFF6E797A),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],
         ),
-      );
-    });
+
+        GestureDetector(
+          onTap: (state.lat == null && !_checking)
+              ? _showManual
+              : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Arabian Sea',
+                    style: TextStyle(
+                      color: Color(0xFF3E494A),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+
+                  if (state.lat == null && !_checking) ...[
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.edit_location,
+                      size: 12,
+                      color: Color(0xFF00626A),
+                    ),
+                  ],
+                ],
+              ),
+
+              const SizedBox(height: 2),
+
+              _checking
+                  ? const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: Color(0xFF00626A),
+                      ),
+                    )
+                  : state.lat != null
+                      ? Text(
+                          '${state.lat!.toStringAsFixed(4)}° N, '
+                          '${state.lon!.toStringAsFixed(4)}° E',
+                          style: const TextStyle(
+                            color: Color(0xFF00626A),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: 'monospace',
+                          ),
+                        )
+                      : Text(
+                          AppStrings.t('locationUnknown', lang),
+                          style: const TextStyle(
+                            color: Color(0xFF6E797A),
+                            fontSize: 11,
+                          ),
+                        ),
+
+              if (state.mapPoint != null)
+                Text(
+                  'Map: ${state.mapPoint![0].toStringAsFixed(4)}, '
+                  '${state.mapPoint![1].toStringAsFixed(4)}',
+                  style: const TextStyle(
+                    color: Color(0xFFD97706),
+                    fontSize: 10,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
-  void _preset(AppState s, String q){
-    // Create new chat if needed and send
+  // ------------------------------------------------------------
+  // PRIMARY SAFETY CARD
+  // ------------------------------------------------------------
+
+  Widget _buildPrimarySafetyCard(
+      AppState state, dynamic last, bool hasLast) {
+    final bool hasData = hasLast && last!.status != null;
+
+    final String status =
+        hasData ? last.status!.toString().toLowerCase() : 'unknown';
+
+    // The LEFT LINE is now the only safety colour indicator.
+    final Color statusColor =
+        status.contains('safe') ||
+                status.contains('good') ||
+                status.contains('normal')
+            ? const Color(0xFF22A06B)
+            : status.contains('danger') ||
+                    status.contains('avoid') ||
+                    status.contains('unsafe') ||
+                    status.contains('critical')
+                ? const Color(0xFFE5484D)
+                : status.contains('caution') ||
+                        status.contains('rough') ||
+                        status.contains('warning')
+                    ? const Color(0xFFF59E0B)
+                    : const Color(0xFF9CA3AF);
+
+    final String headline = hasData
+        ? last.status!.toString()
+        : (state.isOnline
+            ? 'Ask ORCA for a safety check.'
+            : 'No cached forecast available.');
+
+    final String description = hasData
+        ? last.content
+        : (state.isOnline
+            ? "You're online — ask ORCA about current conditions before heading out."
+            : "You're offline and no forecast has been cached yet. Reconnect to get a safety check.");
+
+    return Container(
+      decoration: BoxDecoration(
+        // No more orange/amber background.
+        color: Colors.white,
+
+        borderRadius: BorderRadius.circular(16),
+
+        border: Border.all(
+          color: const Color(0xFFE5E9EC),
+        ),
+
+        boxShadow: const [
+          BoxShadow(
+            color: Color.fromRGBO(23, 28, 31, 0.05),
+            blurRadius: 3,
+            offset: Offset(0, 1),
+          ),
+        ],
+      ),
+
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ------------------------------------------------
+            // SAFETY STATUS LINE
+            // ------------------------------------------------
+            Container(
+              width: 4,
+              decoration: BoxDecoration(
+                color: statusColor,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  bottomLeft: Radius.circular(16),
+                ),
+              ),
+            ),
+
+            // ------------------------------------------------
+            // CARD CONTENT
+            // ------------------------------------------------
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      headline,
+                      style: const TextStyle(
+                        color: Color(0xFF171C1F),
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: -0.3,
+                        height: 1.25,
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    Text(
+                      description,
+                      style: const TextStyle(
+                        color: Color(0xFF451A03),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        height: 1.5,
+                      ),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // IMPORTANT WARNINGS
+  // ------------------------------------------------------------
+
+  Widget _buildImportantWarnings(
+      AppState state, int activeAlertCount) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment:
+              MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Important Warnings',
+              style: TextStyle(
+                color: Color(0xFF171C1F),
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                letterSpacing: -0.2,
+              ),
+            ),
+
+            Text(
+              '${activeAlertCount > 0 ? activeAlertCount : 2} Active',
+              style: const TextStyle(
+                color: Color(0xFF6E797A),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        _buildWarningCard(
+          title: 'Cyclone — Paradip Coast',
+          detail: 'Severe storm surge',
+          statusText: 'Status: Avoid going out',
+          dotColor: const Color(0xFFEF4444),
+          statusBg: const Color(0xFFFEF2F2),
+          statusBorder: const Color(0xFFFECACA),
+          statusColor: const Color(0xFFB91C1C),
+          query:
+              'Are there active cyclone or high wave warnings near Paradip port, Odisha?',
+          state: state,
+        ),
+
+        const SizedBox(height: 10),
+
+        _buildWarningCard(
+          title: 'Rough Sea — Mumbai Offshore',
+          detail: 'Turbulent sea',
+          statusText: 'Status: Use caution',
+          dotColor: const Color(0xFFF59E0B),
+          statusBg: const Color(0xFFFFFBEB),
+          statusBorder: const Color(0xFFFDE68A),
+          statusColor: const Color(0xFF92400E),
+          query:
+              'Is it safe to venture into the sea from Mumbai Harbour tomorrow at 6 AM?',
+          state: state,
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // WARNING CARD
+  // ------------------------------------------------------------
+
+  Widget _buildWarningCard({
+    required String title,
+    required String detail,
+    required String statusText,
+    required Color dotColor,
+    required Color statusBg,
+    required Color statusBorder,
+    required Color statusColor,
+    required String query,
+    required AppState state,
+  }) {
+    return GestureDetector(
+      onTap: () => state.sendQuery(query),
+
+      child: Container(
+        padding: const EdgeInsets.all(14),
+
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFFE5E9EC),
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color.fromRGBO(23, 28, 31, 0.05),
+              blurRadius: 3,
+              offset: Offset(0, 1),
+            ),
+          ],
+        ),
+
+        child: Row(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: dotColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+
+                      const SizedBox(width: 6),
+
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            color: Color(0xFF171C1F),
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 4),
+
+                  Text(
+                    detail,
+                    style: const TextStyle(
+                      color: Color(0xFF3E494A),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 4,
+              ),
+
+              decoration: BoxDecoration(
+                color: statusBg,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: statusBorder,
+                ),
+              ),
+
+              child: Text(
+                statusText,
+                style: TextStyle(
+                  color: statusColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // GOOD FISHING AREAS
+  // ------------------------------------------------------------
+
+  Widget _buildPfzCard(AppState state) {
+    const query =
+        'Where is the nearest potential fishing zone (PFZ) near Kochi coast today?';
+
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment:
+              MainAxisAlignment.spaceBetween,
+          children: const [
+            Text(
+              'Good Fishing Areas',
+              style: TextStyle(
+                color: Color(0xFF171C1F),
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                letterSpacing: -0.2,
+              ),
+            ),
+
+            Text(
+              'High Yield',
+              style: TextStyle(
+                color: Color(0xFF00626A),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        GestureDetector(
+          onTap: () => state.sendQuery(query),
+
+          child: Container(
+            padding: const EdgeInsets.all(14),
+
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFFE5E9EC),
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color.fromRGBO(23, 28, 31, 0.05),
+                  blurRadius: 3,
+                  offset: Offset(0, 1),
+                ),
+              ],
+            ),
+
+            child: Row(
+              mainAxisAlignment:
+                  MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'Kochi Marine PFZ',
+                        style: TextStyle(
+                          color: Color(0xFF171C1F),
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      SizedBox(height: 2),
+
+                      Text(
+                        'Good fishing activity expected',
+                        style: TextStyle(
+                          color: Color(0xFF3E494A),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 8),
+
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDDFBFF),
+                    borderRadius:
+                        BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFF0E7C86)
+                          .withValues(alpha: 0.3),
+                    ),
+                  ),
+
+                  child: const Text(
+                    '14.8 km offshore',
+                    style: TextStyle(
+                      color: Color(0xFF00626A),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // ASK ORCA
+  // ------------------------------------------------------------
+
+  Widget _buildAskOrcaCard(AppState state) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 14,
+      ),
+
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFE5E9EC),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color.fromRGBO(23, 28, 31, 0.05),
+            blurRadius: 3,
+            offset: Offset(0, 1),
+          ),
+        ],
+      ),
+
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment:
+                MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Ask ORCA',
+                style: TextStyle(
+                  color: Color(0xFF171C1F),
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+
+              ElevatedButton.icon(
+                onPressed: () => _preset(
+                  state,
+                  'Is it safe to go out today?',
+                ),
+
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                      const Color(0xFF00626A),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding:
+                      const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  shape:
+                      RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(16),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize:
+                      MaterialTapTargetSize
+                          .shrinkWrap,
+                ),
+
+                icon: const Icon(
+                  Icons.chat_bubble_outline,
+                  size: 14,
+                ),
+
+                label: const Text('Ask'),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
+          SizedBox(
+            height: 34,
+
+            child: ListView(
+              scrollDirection:
+                  Axis.horizontal,
+
+              children: [
+                _buildQueryPill(
+                  label: 'Nearest PFZ',
+                  onTap: () => _preset(
+                    state,
+                    'Where is the nearest fishing zone?',
+                  ),
+                  isHighlight: true,
+                ),
+
+                const SizedBox(width: 8),
+
+                _buildQueryPill(
+                  label: 'Safe to go?',
+                  onTap: () => _preset(
+                    state,
+                    'Is it safe to go fishing today?',
+                  ),
+                  isHighlight: false,
+                ),
+
+                const SizedBox(width: 8),
+
+                _buildQueryPill(
+                  label: 'Cyclone warning?',
+                  onTap: () => _preset(
+                    state,
+                    'Are there any cyclone warnings for my area?',
+                  ),
+                  isHighlight: false,
+                ),
+
+                const SizedBox(width: 8),
+
+                _buildQueryPill(
+                  label: 'Sea forecast',
+                  onTap: () => _preset(
+                    state,
+                    "What's the weather like today?",
+                  ),
+                  isHighlight: false,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // QUERY PILL
+  // ------------------------------------------------------------
+
+  Widget _buildQueryPill({
+    required String label,
+    required VoidCallback onTap,
+    required bool isHighlight,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius:
+          BorderRadius.circular(999),
+
+      child: Container(
+        alignment: Alignment.center,
+
+        padding:
+            const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 8,
+        ),
+
+        decoration: BoxDecoration(
+          color: isHighlight
+              ? const Color(0xFFDDFBFF)
+              : const Color(0xFFF8FAFB),
+
+          borderRadius:
+              BorderRadius.circular(999),
+
+          border: Border.all(
+            color: isHighlight
+                ? const Color(0xFF0E7C86)
+                    .withValues(alpha: 0.3)
+                : const Color(0xFFE5E9EC),
+          ),
+        ),
+
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isHighlight
+                ? const Color(0xFF00626A)
+                : const Color(0xFF171C1F),
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // ACTIVE ALERTS
+  // ------------------------------------------------------------
+
+  Widget _buildActiveAlerts(
+      AppState state, List<dynamic> activeAlerts) {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'ACTIVE ALERTS',
+          style: TextStyle(
+            color: Color(0xFF3E494A),
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        ...activeAlerts.take(2).map(
+              (a) => Container(
+                margin:
+                    const EdgeInsets.only(
+                  bottom: 6,
+                ),
+
+                padding:
+                    const EdgeInsets.all(10),
+
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius:
+                      BorderRadius.circular(10),
+                  border: Border.all(
+                    color: const Color(0xFFFDE68A),
+                  ),
+                ),
+
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      color: Color(0xFFB45309),
+                      size: 18,
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    Expanded(
+                      child: Text(
+                        a.message,
+                        style: const TextStyle(
+                          color: Color(0xFF78350F),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 2,
+                        overflow:
+                            TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // SYNC FOOTER
+  // ------------------------------------------------------------
+
+  Widget _buildSyncFooter(AppState state) {
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(
+        vertical: 20,
+      ),
+
+      child: Center(
+        child: Column(
+          children: [
+            Icon(
+              state.isOnline
+                  ? Icons.cloud_done_outlined
+                  : Icons.cloud_off_outlined,
+              size: 18,
+              color: const Color(0xFF9CA3AF),
+            ),
+
+            const SizedBox(height: 6),
+
+            Text(
+              state.isOnline
+                  ? 'Up to date'
+                  : 'Showing cached data · You\'re all set for today',
+
+              style: const TextStyle(
+                color: Color(0xFF9CA3AF),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // PRESET QUERY
+  // ------------------------------------------------------------
+
+  void _preset(AppState s, String q) {
     s.sendQuery(q);
     DefaultTabController.of(context);
-    // Switch to chat tab via parent MainShell — we use simple navigation
-    // For now just show toast
     s.showToast('Sent: $q', 'info');
   }
 
-  void _showManual(){
-    final latCtrl = TextEditingController(); final lonCtrl = TextEditingController();
-    showDialog(context: context, builder: (ctx)=> AlertDialog(
-      backgroundColor: const Color(0xFF0D1F3C),
-      title: const Text('Enter Location', style: TextStyle(color: Colors.white)),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: latCtrl, keyboardType: TextInputType.number, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: 'Latitude', labelStyle: TextStyle(color: Colors.white54), hintText: 'e.g. 17.15', hintStyle: TextStyle(color: Colors.white24), enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))))),
-        const SizedBox(height: 12),
-        TextField(controller: lonCtrl, keyboardType: TextInputType.number, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: 'Longitude', labelStyle: TextStyle(color: Colors.white54), hintText: 'e.g. 73.10', hintStyle: TextStyle(color: Colors.white24), enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))))),
-      ]),
-      actions: [
-        TextButton(onPressed: ()=> Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
-        TextButton(onPressed: (){
-          final lat = double.tryParse(latCtrl.text); final lon = double.tryParse(lonCtrl.text);
-          if(lat!=null && lon!=null) context.read<AppState>().setManualLocation(lat, lon);
-          Navigator.pop(ctx);
-        }, child: const Text('Save', style: TextStyle(color: Color(0xFF00E5FF)))),
-      ],
-    ));
-  }
-}
+  // ------------------------------------------------------------
+  // MANUAL LOCATION
+  // ------------------------------------------------------------
 
-class _ScenarioCard extends StatelessWidget {
-  final String title; final String sub; final String q; final Color color; final AppState state;
-  const _ScenarioCard({required this.title, required this.sub, required this.q, required this.color, required this.state});
-  @override
-  Widget build(BuildContext context){
-    return GestureDetector(
-      onTap: ()=> state.sendQuery(q),
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: const Color(0xFF0D1F3C), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.25))),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [Container(width: 8,height:8,decoration: BoxDecoration(color: color, shape: BoxShape.circle)), const SizedBox(width: 6), Text(title, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))]),
-          const SizedBox(height: 4),
-          Text(sub, style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 10)),
-          const SizedBox(height: 4),
-          Text(q, style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 9), maxLines: 2, overflow: TextOverflow.ellipsis),
-        ]),
+  void _showManual() {
+    final latCtrl = TextEditingController();
+    final lonCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+
+        title: const Text(
+          'Enter Location',
+          style: TextStyle(
+            color: Color(0xFF171C1F),
+          ),
+        ),
+
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: latCtrl,
+              keyboardType:
+                  TextInputType.number,
+
+              style: const TextStyle(
+                color: Color(0xFF171C1F),
+              ),
+
+              decoration:
+                  const InputDecoration(
+                labelText: 'Latitude',
+
+                labelStyle: TextStyle(
+                  color: Color(0xFF6E797A),
+                ),
+
+                hintText: 'e.g. 18.6705',
+
+                hintStyle: TextStyle(
+                  color: Color(0xFFD1D5DB),
+                ),
+
+                enabledBorder:
+                    OutlineInputBorder(
+                  borderSide: BorderSide(
+                    color: Color(0xFFD1D5DB),
+                  ),
+                ),
+
+                focusedBorder:
+                    OutlineInputBorder(
+                  borderSide: BorderSide(
+                    color: Color(0xFF00626A),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            TextField(
+              controller: lonCtrl,
+              keyboardType:
+                  TextInputType.number,
+
+              style: const TextStyle(
+                color: Color(0xFF171C1F),
+              ),
+
+              decoration:
+                  const InputDecoration(
+                labelText: 'Longitude',
+
+                labelStyle: TextStyle(
+                  color: Color(0xFF6E797A),
+                ),
+
+                hintText: 'e.g. 73.8897',
+
+                hintStyle: TextStyle(
+                  color: Color(0xFFD1D5DB),
+                ),
+
+                enabledBorder:
+                    OutlineInputBorder(
+                  borderSide: BorderSide(
+                    color: Color(0xFFD1D5DB),
+                  ),
+                ),
+
+                focusedBorder:
+                    OutlineInputBorder(
+                  borderSide: BorderSide(
+                    color: Color(0xFF00626A),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        actions: [
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(ctx),
+
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                color: Color(0xFF6E797A),
+              ),
+            ),
+          ),
+
+          TextButton(
+            onPressed: () {
+              final lat =
+                  double.tryParse(
+                latCtrl.text,
+              );
+
+              final lon =
+                  double.tryParse(
+                lonCtrl.text,
+              );
+
+              if (lat != null &&
+                  lon != null) {
+                context
+                    .read<AppState>()
+                    .setManualLocation(
+                      lat,
+                      lon,
+                    );
+              }
+
+              Navigator.pop(ctx);
+            },
+
+            child: const Text(
+              'Save',
+              style: TextStyle(
+                color: Color(0xFF00626A),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
