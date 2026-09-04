@@ -139,6 +139,13 @@ _DEGRADED_MESSAGES: dict[str, str] = {
     "gu": "સેવા હાલમાં મર્યાદિત મોડમાં ચાલી રહી છે. કૃપા કરીને થોડા સમય પછી ફરી પ્રયાસ કરો અથવા અંગ્રેજીમાં પૂછો.",
     "or": "ସେବା ବର୍ତ୍ତମାନ ସୀମିତ ମୋଡରେ ଚାଲୁଛି। ଦୟାକରି କିଛି ସମୟ ପରେ ପୁନର୍ବାର ଚେଷ୍ଟା କରନ୍ତୁ କିମ୍ବା ଇଂରାଜୀରେ ପଚାରନ୍ତୁ।",
     "pa": "ਸੇਵਾ ਇਸ ਵੇਲੇ ਸੀਮਤ ਮੋਡ ਵਿੱਚ ਚੱਲ ਰਹੀ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ ਥੋੜ੍ਹੀ ਦੇਰ ਬਾਅਦ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ ਜਾਂ ਅੰਗਰੇਜ਼ੀ ਵਿੱਚ ਪੁੱਛੋ।",
+    "kok": "सेवा सध्या मर्यादित मोडांत चलता आसा। कृपया थोड्या वेळान परतून प्रयत्न करात वा इंग्लीशींनी विचारा।",
+    "tcy": "ಸೇವೆ ಪ್ರಸ್ತುತ ಸೀಮಿತ ಮೋಡ್‌ಡ್ ಉಂಡು। ದಯಮಲ್ತ್ ಕೊಂಚ ಪೊರ್ತುಡ್ದು ಬೊಕ್ಕ ಪ್ರಯತ್ನ ಮಲ್ಪುಲೆ ಅತ್ತಂಡ ಇಂಗ್ಲಿಷ್‌ಡ್ ಕೇನ್ಲೆ।",
+    "kfr": "સેવા અત્યારે મર્યાદિત મોડમાં હે. મહેરબાની કરી થોડીક વાર પછી ફરી કોશિશ કરો કે અંગ્રેજીમાં પૂછો.",
+    "byr": "ಸೇವೆ ಇತ್ತೆ ಸೀಮಿತ ಮೋಡ್‌ಡ್ ಉಂಡು. ದಯಮಲ್ತ್ ಕೊಂಚ ಪೊರ್ತುಡ್ದು ಬೊಕ್ಕ ಪ್ರಯತ್ನ ಮಲ್ಪುಲೆ.",
+    "mvv": "सेवा सध्या मर्यादित मोडमध्ये आसा। कृपया थोड्या वेळान परतून प्रयत्न करा।",
+    "ncr": "Service is running in limited mode right now, please try again shortly or ask in English.",
+    "adm": "Service is running in limited mode right now, please try again shortly or ask in English.",
 }
 
 
@@ -1748,7 +1755,21 @@ class Orchestrator:
                 if tourism and len(tourism) > 0:
                     loc = getattr(context, "location", None) if context else None
                     loc_name = getattr(loc, "name", "") if loc else (state.get("plan", {}).get("location_name") or "this coast")
-                    header = f"### 🏖️ Coastal Points of Interest — {loc_name}"
+                    # Localized heading
+                    try:
+                        import i18n as _i18n_t
+                        _t_lang = state.get("language", "en") or "en"
+                        _t_head = _i18n_t.heading("tourism", _t_lang)
+                        _t_poi = _i18n_t.param_label("poi", _t_lang)
+                        _t_type = _i18n_t.param_label("type", _t_lang)
+                        _t_safety = _i18n_t.param_label("safety", _t_lang)
+                        _t_details = _i18n_t.param_label("details", _t_lang)
+                        _t_src = _i18n_t.source_word(_t_lang)
+                    except Exception:
+                        _t_head = "Coastal Points of Interest"
+                        _t_poi, _t_type, _t_safety, _t_details = "POI", "Type", "Safety", "Details"
+                        _t_src = "Source"
+                    header = f"### 🏖️ {_t_head} — {loc_name}"
                     # Build a markdown table: name, type, safety, coordinates
                     rows = []
                     for poi in tourism[:8]:
@@ -1758,17 +1779,24 @@ class Orchestrator:
                         rs = getattr(poi, "reasoning", "") or ""
                         # compact reasoning to 60 chars
                         rs_short = (rs[:60] + "…") if len(rs) > 60 else rs
-                        coord = f"{poi.lat:.4f}°N, {poi.lon:.4f}°E"
                         rows.append(f"| {nm} | {tp} | **{st}** | {rs_short} |")
-                    table = "| POI | Type | Safety | Details |\n|---|---|---|---|\n" + "\n".join(rows)
+                    table = f"| {_t_poi} | {_t_type} | {_t_safety} | {_t_details} |\n|---|---|---|---|\n" + "\n".join(rows)
                     coord_note = f"📍 {loc.lat:.4f}°N, {loc.lon:.4f}°E — radius ~10 km" if loc and getattr(loc, "lat", None) is not None else ""
                     block = header
                     if coord_note:
                         block += f"  \n{coord_note}"
-                    block += f"\n\n{table}\n\n*Source: 🌐 OpenStreetMap live + INCOIS Ocean State Forecast*"
+                    block += f"\n\n{table}\n\n*{_t_src}: 🌐 OpenStreetMap live + INCOIS Ocean State Forecast*"
                     parts.append(block)
                 else:
-                    parts.append("### 🏖️ Coastal Points of Interest\nNo beaches, lighthouses, harbours or viewpoints were found within ~10 km of this location in OpenStreetMap. Try a broader coastal search or another location.\n\n*Source: 🌐 OpenStreetMap live*")
+                    try:
+                        import i18n as _i18n_t2
+                        _t_lang2 = state.get("language", "en") or "en"
+                        _t_head2 = _i18n_t2.heading("tourism", _t_lang2)
+                        _t_src2 = _i18n_t2.source_word(_t_lang2)
+                    except Exception:
+                        _t_head2 = "Coastal Points of Interest"
+                        _t_src2 = "Source"
+                    parts.append(f"### 🏖️ {_t_head2}\nNo beaches, lighthouses, harbours or viewpoints were found within ~10 km of this location in OpenStreetMap. Try a broader coastal search or another location.\n\n*{_t_src2}: 🌐 OpenStreetMap live*")
                 # For poi_lookup, tourism IS the answer — skip the generic ocean table re-derivation and continue to synthesis summary only.
                 # We still allow narrative to wrap it, but we have a deterministic table already.
                 if state.get("plan", {}).get("intent") == "poi_lookup":
@@ -1849,23 +1877,46 @@ class Orchestrator:
             except Exception:
                 _out.append("*Source: Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ*")
             return "\n\n".join(_out)[:1500]
-        # Verdict line is authoritative and already rendered as HUD; answer complements it concisely.
+        # Verdict line is authoritative and already rendered as HUD; answer complements it concisely — localized.
         if risk is not None:
+            try:
+                import i18n as _i18n_v
+                _v_lang = state.get("language", "en") or "en"
+                _vw = _i18n_v.verdict_word(risk.status.value, _v_lang)
+            except Exception:
+                _v_lang = "en"
+                _vw = risk.status.value
+                _i18n_v = None  # type: ignore
             if risk.status.value == "UNSAFE":
                 flag_txt = "; ".join(f"{f.label}: {f.detail}" for f in risk.flags[:2]) if risk.flags else risk.headline
                 wave_txt = ""
                 if ocean is not None:
                     wh = f"{ocean.wave_height_m} m" if getattr(ocean, "wave_height_m", None) is not None else "—"
                     gs = f"{ocean.wind_gust_kmh} km/h" if getattr(ocean, "wind_gust_kmh", None) is not None else "—"
-                    wave_txt = f"  \nWave: {wh} · Gusts: {gs}"
-                parts.append(f"### 🔴 UNSAFE — Do not venture out\n**{flag_txt}.**{wave_txt}  \n{risk.headline}")
+                    # Localize wave/gust labels if possible
+                    try:
+                        _w_lbl = _i18n_v.param_label("waves", _v_lang) if _i18n_v else "Wave"
+                        _wind_lbl = _i18n_v.param_label("wind", _v_lang) if _i18n_v else "Gusts"
+                    except Exception:
+                        _w_lbl, _wind_lbl = "Wave", "Gusts"
+                    wave_txt = f"  \n{_w_lbl}: {wh} · {_wind_lbl}: {gs}"
+                parts.append(f"### 🔴 {_vw} — Do not venture out\n**{flag_txt}.**{wave_txt}  \n{risk.headline}")
             elif risk.status.value == "CAUTION":
                 wv = f"{ocean.wave_height_m} m" if ocean and getattr(ocean, "wave_height_m", None) is not None else "—"
                 gs = f"{ocean.wind_gust_kmh} km/h" if ocean and getattr(ocean, "wind_gust_kmh", None) is not None else "—"
-                parts.append(f"### 🟠 CAUTION — Borderline conditions\n**{risk.headline}**  \nWave: {wv} · Gusts: {gs}")
+                try:
+                    _wv_lbl = _i18n_v.param_label("waves", _v_lang) if _i18n_v else "Wave"
+                    _gs_lbl = _i18n_v.param_label("wind", _v_lang) if _i18n_v else "Gusts"
+                except Exception:
+                    _wv_lbl, _gs_lbl = "Wave", "Gusts"
+                parts.append(f"### 🟠 {_vw} — Borderline conditions\n**{risk.headline}**  \n{_wv_lbl}: {wv} · {_gs_lbl}: {gs}")
             else:
                 wh = f"{ocean.wave_height_m} m" if ocean and getattr(ocean, "wave_height_m", None) is not None else "—"
-                parts.append(f"### 🟢 SAFE — {risk.headline}  \nWave: {wh} · Wind moderate")
+                try:
+                    _wh_lbl = _i18n_v.param_label("waves", _v_lang) if _i18n_v else "Wave"
+                except Exception:
+                    _wh_lbl = "Wave"
+                parts.append(f"### 🟢 {_vw} — {risk.headline}  \n{_wh_lbl}: {wh} · Wind moderate")
             for w in getattr(risk, "exceedance_windows", [])[:1]:
                 parts.append(f"⏰ Conditions worsen {w.start_local}–{w.end_local} (peak {w.peak_value}{w.unit}).")
             for m in getattr(risk, "marine_bulletins", [])[:1]:
@@ -1893,7 +1944,16 @@ class Orchestrator:
                 return True
 
             marine_note = getattr(ocean, "marine_location_note", "") or ""
-            header = f"### 🌊 Marine Conditions — {short_name} ({tw_label})"
+            # Localized heading
+            try:
+                import i18n as _i18n_orc
+                _lang = state.get("language", "en") or "en"
+                _head_mc = _i18n_orc.heading("marine_conditions", _lang)
+                _lbl = lambda k: _i18n_orc.param_label(k, _lang)
+            except Exception:
+                _head_mc = "Marine Conditions"
+                _lbl = lambda k: {"sst": "SST", "wind": "Wind", "waves": "Waves", "swell": "Swell", "current": "Current", "chlorophyll": "Chlorophyll", "tide": "Tide", "parameter": "Parameter", "value": "Value"}.get(k, k)
+            header = f"### 🌊 {_head_mc} — {short_name} ({tw_label})"
             coord_line = ""
             if loc and getattr(loc, "lat", None) is not None:
                 coord_line = f"📍 {loc.lat:.4f}°N, {loc.lon:.4f}°E"
@@ -1917,32 +1977,32 @@ class Orchestrator:
                 return mapping.get(field, False)
             detail: list[str] = []
             if _have("sst_celsius") and getattr(ocean, "sst_celsius", None) is not None and _wants("sst_celsius"):
-                detail.append(f"| 🌡️ SST | **{ocean.sst_celsius}°C** |")
+                detail.append(f"| 🌡️ {_lbl('sst')} | **{ocean.sst_celsius}°C** |")
             w_dir = getattr(ocean, "wind_direction", None)
             if _have("wind_speed_kmh") and getattr(ocean, "wind_speed_kmh", None) is not None and _wants("wind_speed_kmh"):
                 wdtxt = f" {w_dir}" if w_dir else ""
-                detail.append(f"| 💨 Wind | **{ocean.wind_speed_kmh} km/h{wdtxt}** |")
+                detail.append(f"| 💨 {_lbl('wind')} | **{ocean.wind_speed_kmh} km/h{wdtxt}** |")
             cur = getattr(ocean, "surface_current_mps", None)
             if _have("surface_current_mps") and cur is not None and _wants("surface_current_mps"):
-                detail.append(f"| 🌊 Current | **{cur} m/s** |")
+                detail.append(f"| 🌊 {_lbl('current')} | **{cur} m/s** |")
             swell_val = getattr(ocean, "primary_swell_height_m", None) if hasattr(ocean, "primary_swell_height_m") else getattr(ocean, "wave_height_m", None)
             if _have("primary_swell_height_m") and swell_val is not None and _wants("primary_swell_height_m"):
-                detail.append(f"| 🌊 Swell | **{swell_val} m** |")
+                detail.append(f"| 🌊 {_lbl('swell')} | **{swell_val} m** |")
             elif _have("wave_height_m") and getattr(ocean, "wave_height_m", None) is not None and _wants("wave_height_m"):
-                detail.append(f"| 🌊 Waves | **{ocean.wave_height_m} m** |")
+                detail.append(f"| 🌊 {_lbl('waves')} | **{ocean.wave_height_m} m** |")
             extremes = getattr(ocean, "tide_extremes", []) or []
             if extremes and _wants("tide_extremes"):
                 tide_txt = ", ".join(f"{e.kind} at {e.time_local[11:16]} ({e.height_m} m)" for e in extremes[:4])
-                detail.append(f"| 🌗 Tide | {tide_txt} |")
+                detail.append(f"| 🌗 {_lbl('tide')} | {tide_txt} |")
             elif _have("tide_level_m") and getattr(ocean, "tide_level_m", None) not in (None, 0.0) and _wants("tide_level_m"):
-                detail.append(f"| 🌗 Tide | {ocean.tide_level_m} m |")
+                detail.append(f"| 🌗 {_lbl('tide')} | {ocean.tide_level_m} m |")
             if _have("chlorophyll_mg_m3") and getattr(ocean, "chlorophyll_mg_m3", None) is not None and _wants("chlorophyll_mg_m3"):
-                detail.append(f"| 🟢 Chlorophyll | **{ocean.chlorophyll_mg_m3} mg/m³** |")
+                detail.append(f"| 🟢 {_lbl('chlorophyll')} | **{ocean.chlorophyll_mg_m3} mg/m³** |")
 
             debug_lines = getattr(ocean, "debug_incois", None) or {}
             _DEBUG = os.getenv("ORCA_DEBUG_INCOIS", "").strip().lower() in ("1", "true", "yes")
             if detail:
-                table = "| Parameter | Value |\n|---|---|\n" + "\n".join(detail)
+                table = f"| {_lbl('parameter')} | {_lbl('value')} |\n|---|---|\n" + "\n".join(detail)
                 block = header
                 if coord_line:
                     block += f"  \n{coord_line}"
@@ -2229,6 +2289,12 @@ class Orchestrator:
             detected = _detect_romanized_language(raw_query) or _detect_romanized_language(normalized_query) or "hi"
             lang = detected
             translation_missing = True
+        # Allow i18n deterministic fallback for all supported coastal languages even when LLM is down
+        # (romanized or native script) — the templates via i18n.py can answer in that language without translation.
+        if lang != "en" and translation_missing:
+            _supported = {"hi","mr","ta","te","kn","ml","bn","gu","or","pa","kok","tcy","kfr","byr","mvv","ncr","adm"}
+            if lang.lower() in _supported or lang_mode == "rules-romanized" or is_romanized:
+                translation_missing = False
         if lang != "en" and translation_missing:
             degraded_msg = _degraded_message_for(lang)
             plan = {

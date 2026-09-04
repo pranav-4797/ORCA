@@ -37,6 +37,8 @@ _LANGUAGE_NAMES = {
     "en": "English", "hi": "Hindi", "mr": "Marathi", "ta": "Tamil",
     "te": "Telugu", "bn": "Bengali", "ml": "Malayalam", "kn": "Kannada",
     "gu": "Gujarati", "or": "Odia", "pa": "Punjabi",
+    "kok": "Konkani", "tcy": "Tulu", "kfr": "Kutchi", "byr": "Beary",
+    "mvv": "Malvani", "ncr": "Nicobarese", "adm": "Andamanese",
 }
 
 _DANGER_VERDICTS = ("UNSAFE", "EXTREME", "CRITICAL")

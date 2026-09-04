@@ -44,6 +44,8 @@ INTENT_KEYWORDS = {
         r"\bbeach(es)?\b", r"\bharbour\b", r"\bharbor\b", r"\blighthouse\b",
         r"viewpoint", r"touris", r"sightseeing", r"visit.*beach", r"nearby.*beach",
         r"coastal.*poi", r"attractions?", r"places to visit",
+        r"समुद्र तट", r"बीच", r"तट", r"पर्यटन", r"लाइटहाउस", r"बंदर",
+        r"கடற்கரை", r"சுற்றுலா", r"సముద్ర తీరం", r"బీచ్", r"കര", r"ബീച്ച്", r"ಸಮುದ್ರ ತೀರ", r"બીચ",
     ],
     "trend_analysis": [
         r"why has", r"why is", r"trend", r"declined", r"change.*over",

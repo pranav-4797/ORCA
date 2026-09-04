@@ -32,9 +32,20 @@ try:
 except ImportError:  # pragma: no cover - defensive, keeps the demo alive
     LANGGRAPH_AVAILABLE = False
 
-# Pre-seeded coordinate cache
+# Pre-seeded coordinate cache — includes native-script transliterations of key demo ports
+# so Hindi-script queries like "रत्नागिरी में SST" still resolve to the real location
+# even when the LLM (translator) is unavailable.
 KNOWN_LOCATIONS = {
     "ratnagiri": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "रत्नागिरी": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "ரத்னகிரி": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "రత్నగిరి": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "ರತ್ನಗಿರಿ": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "രത്നഗിരി": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "রত্নগিরি": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "રત્નાગિરિ": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "ରତ୍ନଗିରି": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
+    "ਰਤਨਾਗਿਰੀ": Location(name="Ratnagiri Coast", lat=16.9902, lon=73.3120),
     "kochi": Location(name="Kochi Coast", lat=9.9312, lon=76.2673),
     "visakhapatnam": Location(name="Visakhapatnam Coast", lat=17.6868, lon=83.2185),
     "odisha": Location(name="Odisha Coast (Puri)", lat=19.8135, lon=85.8312),
@@ -66,6 +77,13 @@ _DEGRADED_MESSAGES: dict[str, str] = {
     "gu": "સેવા હાલમાં મર્યાદિત મોડમાં ચાલી રહી છે. કૃપા કરીને થોડા સમય પછી ફરી પ્રયાસ કરો અથવા અંગ્રેજીમાં પૂછો.",
     "or": "ସେବା ବର୍ତ୍ତମାନ ସୀମିତ ମୋଡରେ ଚାଲୁଛି। ଦୟାକରି କିଛି ସମୟ ପରେ ପୁନର୍ବାର ଚେଷ୍ଟା କରନ୍ତୁ କିମ୍ବା ଇଂରାଜୀରେ ପଚାରନ୍ତୁ।",
     "pa": "ਸੇਵਾ ਇਸ ਵੇਲੇ ਸੀਮਤ ਮੋਡ ਵਿੱਚ ਚੱਲ ਰਹੀ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ ਥੋੜ੍ਹੀ ਦੇਰ ਬਾਅਦ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ ਜਾਂ ਅੰਗਰੇਜ਼ੀ ਵਿੱਚ ਪੁੱਛੋ।",
+    "kok": "सेवा सध्या मर्यादित मोडांत चलता आसा। कृपया थोड्या वेळान परतून प्रयत्न करात वा इंग्लीशींनी विचारा।",
+    "tcy": "ಸೇವೆ ಪ್ರಸ್ತುತ ಸೀಮಿತ ಮೋಡ್‌ಡ್ ಉಂಡು। ದಯಮಲ್ತ್ ಕೊಂಚ ಪೊರ್ತುಡ್ದು ಬೊಕ್ಕ ಪ್ರಯತ್ನ ಮಲ್ಪುಲೆ ಅತ್ತಂಡ ಇಂಗ್ಲಿಷ್‌ಡ್ ಕೇನ್ಲೆ।",
+    "kfr": "સેવા અત્યારે મર્યાદિત મોડમાં હે. મહેરબાની કરી થોડીક વાર પછી ફરી કોશિશ કરો કે અંગ્રેજીમાં પૂછો.",
+    "byr": "ಸೇವೆ ಇತ್ತೆ ಸೀಮಿತ ಮೋಡ್‌ಡ್ ಉಂಡು. ದಯಮಲ್ತ್ ಕೊಂಚ ಪೊರ್ತುಡ್ದು ಬೊಕ್ಕ ಪ್ರಯತ್ನ ಮಲ್ಪುಲೆ.",
+    "mvv": "सेवा सध्या मर्यादित मोडमध्ये आसा। कृपया थोड्या वेळान परतून प्रयत्न करा।",
+    "ncr": "Service is running in limited mode right now, please try again shortly or ask in English.",
+    "adm": "Service is running in limited mode right now, please try again shortly or ask in English.",
 }
 
 def _degraded_message_for(lang: str) -> str:
@@ -91,12 +109,15 @@ ROMANIZED_KEYWORDS: dict[str, list[str]] = {
         "surakshit", "suraksha", "machli", "machhli", "machhara", "samundar",
         "samundra", "toofan", "khatra", "chetavni", "leher", "hawa",
         "kinara", "mausam", "jaal", "machuara",
+        "kya", "hai", "hain", "kaisa", "kaisi", "kaise", "kahan", "kab", "kyun", "nahi", "nahin",
+        "kaisa hai", "kya hai", "kahan hai",
     ],
     # Marathi (mr)
     "mr": [
         "surakshit", "maasa", "samudra", "vadal", "dhoka", "ishara",
         "lahari", "vaara", "kinara", "maasaemari", "hawaman", "kolivada",
         "maase", "dhokadayak",
+        "kay", "ahe", "aahe", "kuthe", "kasa", "kashi", "kahe", "nahi",
     ],
     # Tamil (ta)
     "ta": [
@@ -146,6 +167,29 @@ ROMANIZED_KEYWORDS: dict[str, list[str]] = {
         "hawa", "kinara", "machhi", "mausam", "toofan", "chakravat",
         "jal", "samundra",
     ],
+    # Konkani (kok) — coastal Goa
+    "kok": [
+        "kitem", "kosem", "khavn", "choi", "zoi", "mhaka", "mhaka", "kitem", "koslem",
+    ],
+    # Tulu (tcy) — coastal Karnataka
+    "tcy": [
+        "yen", "da", "ye", "pura", "kaal", "kadal", "meen", "bale", "tulu",
+    ],
+    # Kutchi (kfr) — Kutch, Gujarat
+    "kfr": [
+        "chhe", "mane", "khoij", "kem", "bhani", "aayo", "vato", "kutchi",
+    ],
+    # Beary (byr) — coastal Karnataka
+    "byr": [
+        "nannu", "ente", "bare", "hogtay", "evvarike", "hogutare",
+    ],
+    # Malvani (mvv) — Konkan
+    "mvv": [
+        "khella", "zali", "poytay", "bando", "mi", "kasa", "aasa",
+    ],
+    # Nicobarese / Andamanese — minimal placeholders
+    "ncr": ["nicobar", "car", "nancowry"],
+    "adm": ["andaman", "jarawa", "onge"],
 }
 
 # Flatten for quick check and map lowercased word -> language
@@ -185,19 +229,34 @@ def _contains_romanized_regional_language(text: str) -> bool:
     return False
 
 def _detect_romanized_language(text: str) -> str | None:
-    """Return language code for first romanized keyword found, else None."""
+    """Return language code for romanized query using majority voting.
+
+    Previous implementation returned the first keyword hit, which caused
+    ambiguous queries like "samudra kaisa hai?" (samudra=mr, kaisa/hai=hi)
+    to be mis-classified as Marathi because 'samudra' appeared first.
+    Voting picks the language with most matched keywords/phrases.
+    """
     if not text:
         return None
     low = text.lower()
     import re
-    words = re.findall(r"[a-zA-Z]+", low)
-    for w in words:
-        if w in _ROMANIZED_WORD_TO_LANG:
-            return _ROMANIZED_WORD_TO_LANG[w]
+    scores: dict[str, int] = {}
     for kw, lang in _ROMANIZED_WORD_TO_LANG.items():
         if re.search(r"\b" + re.escape(kw) + r"\b", low):
-            return lang
-    return None
+            scores[lang] = scores.get(lang, 0) + 1
+    if not scores:
+        return None
+    # Tie-breaker: prefer Hindi for "kya hai" etc. when counts equal
+    # (hi is most common romanized coastal lingua). Order matters only on tie.
+    max_score = max(scores.values())
+    candidates = [l for l, s in scores.items() if s == max_score]
+    if len(candidates) == 1:
+        return candidates[0]
+    # Prefer hi > mr > gu > others on tie
+    for pref in ("hi", "mr", "gu", "ta", "te", "kn", "ml", "bn", "or", "pa"):
+        if pref in candidates:
+            return pref
+    return candidates[0]
 
 def resolve_location(place_name: str) -> Location | None:
     """Return Location or None if no location determinable. Never defaults to Panaji."""

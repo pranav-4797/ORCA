@@ -46,7 +46,19 @@ def _detect_by_script(text: str) -> str:
             if lo <= cp <= hi:
                 counts[code] = counts.get(code, 0) + 1
                 break
-    return max(counts, key=counts.get) if counts else "en"
+    lang = max(counts, key=counts.get) if counts else "en"
+    # Devanagari is shared by Hindi, Marathi and Konkani — disambiguate with vocabulary
+    if lang == "hi":
+        low = text.lower()
+        # Marathi distinctive Devanagari words (not in Hindi)
+        mr_markers = ["मध्ये", "आहे", "काय", "साठी", "आणि", "होते", "होता", "निर्णय"]
+        kok_markers = ["आसा", "कितें", "कोसेम"]
+        if any(m in low for m in kok_markers):
+            return "kok"
+        if any(m in low for m in mr_markers):
+            return "mr"
+        # If contains Marathi city name in Devanagari but no Hindi markers, keep hi as fallback
+    return lang
 
 
 class LanguageAgent:
@@ -56,10 +68,20 @@ class LanguageAgent:
         """Returns {"language": code, "normalized_query": text} + trace."""
         start = time.perf_counter()
 
-        # Latency fast path: pure-ASCII queries are English for all practical
-        # purposes (every Indic script is non-ASCII), so skip the LLM round
-        # trip -- the Planning Agent handles semantics regardless.
+        # Pre-detect romanized coastal language for ASCII queries (matters for
+        # both the fast-path and for correcting an LLM mis-classification that
+        # returns "en" for romanized Hindi/Marathi etc.).
+        roman_hint: str | None = None
         if raw_query.isascii():
+            try:
+                from orchestrator.state import _detect_romanized_language
+                roman_hint = _detect_romanized_language(raw_query)
+            except Exception:
+                roman_hint = None
+
+        # Latency fast path: pure-ASCII English queries can skip the LLM.
+        # Romanized Indic is also ASCII but must NOT be fast-pathed as English.
+        if raw_query.isascii() and roman_hint is None:
             result = {
                 "language": "en",
                 "normalized_query": raw_query.strip(),
@@ -77,6 +99,26 @@ class LanguageAgent:
                 duration_ms=duration_ms,
             )
             return result, trace
+
+        # Romanized detected + LLM unavailable -> answer directly in that language
+        if roman_hint and not llm_client.is_available():
+            result = {
+                "language": roman_hint,
+                "normalized_query": raw_query.strip(),
+                "mode": "rules-romanized",
+            }
+            duration_ms = (time.perf_counter() - start) * 1000
+            trace = AgentTrace(
+                agent_name=self.name,
+                action=f"Detected language '{roman_hint}' [mode=rules-romanized, romanized heuristic]",
+                result_summary=(
+                    f"Romanized {roman_hint} detected ({len(result['normalized_query'])} chars); LLM unavailable — using heuristic."
+                ),
+                data_sources=[],
+                duration_ms=duration_ms,
+            )
+            return result, trace
+        # Otherwise (non-ASCII native script, or romanized with LLM available) fall through to LLM
 
         try:
             args = llm_client.complete_structured(
@@ -150,12 +192,27 @@ class LanguageAgent:
                 "normalized_query": str(args.get("normalized_query", raw_query)).strip(),
                 "mode": "llm",
             }
+            # Romanized heuristic correction: LLM occasionally returns "en"
+            # for romanized Hindi/Marathi/Gujarati etc. that our keyword table
+            # catches reliably. Prefer the heuristic when LLM says English but
+            # roman hint is a strong coastal language.
+            if result["language"] == "en" and roman_hint and roman_hint != "en":
+                result["language"] = roman_hint
+                result["mode"] = "llm+romanized-fix"
         except llm_client.LLMUnavailableError:
-            result = {
-                "language": _detect_by_script(raw_query),
-                "normalized_query": raw_query,
-                "mode": "rules",
-            }
+            # Script fallback already catches native scripts; also honour romanized
+            if roman_hint:
+                result = {
+                    "language": roman_hint,
+                    "normalized_query": raw_query,
+                    "mode": "rules-romanized",
+                }
+            else:
+                result = {
+                    "language": _detect_by_script(raw_query),
+                    "normalized_query": raw_query,
+                    "mode": "rules",
+                }
 
         duration_ms = (time.perf_counter() - start) * 1000
         trace = AgentTrace(

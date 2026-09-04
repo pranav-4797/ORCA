@@ -234,6 +234,12 @@ class PlanningMixin:
             detected = _detect_romanized_language(raw_query) or _detect_romanized_language(normalized_query) or "hi"
             lang = detected
             translation_missing = True
+        # Allow i18n deterministic fallback for all supported coastal languages even when LLM is down
+        # (romanized or native script) — the templates via i18n.py can answer in that language without translation.
+        if lang != "en" and translation_missing:
+            _supported = {"hi","mr","ta","te","kn","ml","bn","gu","or","pa","kok","tcy","kfr","byr","mvv","ncr","adm"}
+            if lang.lower() in _supported or lang_mode == "rules-romanized" or is_romanized:
+                translation_missing = False
         if lang != "en" and translation_missing:
             degraded_msg = _degraded_message_for(lang)
             plan = {

@@ -271,15 +271,22 @@ def extract_named_place(query: str) -> Optional[str]:
     Hinglish "<place> ke paas" / "<place> ke aas paas". This is the safeguard
     (spec Parts D/I): when the user names a coastal town, we NEVER silently
     let a 'near me'/device-GPS heuristic drag the recommendation to another
-    state. Word-boundary matched, longest key first. Returns the canonical
-    gazetteer key (e.g. "mumbai") or None.
+    state. Word-boundary matched for ASCII, substring for Indic scripts (where
+    \\b does not work). Longest key first. Returns the canonical gazetteer
+    key (e.g. "mumbai") or None.
     """
     q = (query or "").lower()
     if not q:
         return None
     for key in _known_place_keys():
-        if re.search(r"\b" + re.escape(key) + r"\b", q):
-            return key
+        # ASCII keys can use word boundaries; Indic script keys need plain substring
+        # because \\b is ASCII-only and fails for Devanagari/Tamil etc.
+        if key.isascii():
+            if re.search(r"\b" + re.escape(key) + r"\b", q):
+                return key
+        else:
+            if key in q:
+                return key
     return None
 
 

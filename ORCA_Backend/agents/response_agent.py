@@ -34,22 +34,32 @@ _LANGUAGE_NAMES = {
     "en": "English", "hi": "Hindi", "mr": "Marathi", "ta": "Tamil",
     "te": "Telugu", "bn": "Bengali", "ml": "Malayalam", "kn": "Kannada",
     "gu": "Gujarati", "or": "Odia", "pa": "Punjabi",
+    "kok": "Konkani", "tcy": "Tulu", "kfr": "Kutchi", "byr": "Beary",
+    "mvv": "Malvani", "ncr": "Nicobarese", "adm": "Andamanese",
 }
 
-# Localized word for "Source" so the provenance footer reads in the user's
-# language on deterministic (LLM-down) paths. Product/proper nouns (INCOIS,
-# OceanSat-2, Gemini PFZ) stay as-is.
-_SOURCE_WORD = {
-    "en": "Source", "hi": "स्रोत", "mr": "स्रोत", "ta": "ஆதாரம்",
-    "te": "మూలం", "bn": "উৎস", "ml": "ഉറവിടം", "kn": "ಮೂಲ",
-    "gu": "સ્રોત", "or": "ଉତ୍ସ", "pa": "ਸਰੋਤ",
-}
+# Localized word for "Source" — now delegated to shared i18n (keeps fallback unified).
+try:
+    import i18n as _i18n
+except Exception:
+    _i18n = None  # type: ignore
 
 _SOURCE_PROVENANCE = "Official INCOIS Ocean State Forecast + OceanSat-2 + Gemini PFZ"
 
 
 def _source_line(language: str | None = "en") -> str:
     """Italic provenance footer with the word 'Source' localized."""
+    if _i18n is not None:
+        try:
+            return _i18n.source_line(language)
+        except Exception:
+            pass
+    # Fallback (should never hit when i18n is present)
+    _SOURCE_WORD = {
+        "en": "Source", "hi": "स्रोत", "mr": "स्रोत", "ta": "ஆதாரம்",
+        "te": "మూలం", "bn": "উৎস", "ml": "ഉറവിടം", "kn": "ಮೂಲ",
+        "gu": "સ્રોત", "or": "ଉତ୍ସ", "pa": "ਸਰੋਤ",
+    }
     word = _SOURCE_WORD.get((language or "en").lower(), _SOURCE_WORD["en"])
     return f"*{word}: {_SOURCE_PROVENANCE}*"
 
@@ -657,9 +667,15 @@ class ResponseAgent:
     def _fallback_answer(self, context, synthesis, risk, pfz, geofence, route, ocean_state=None, trend=None) -> str:
         verdict = synthesis.get('verdict', 'CAUTION') if isinstance(synthesis, dict) else getattr(synthesis, 'verdict', 'CAUTION')
         language = getattr(context, "language", None) or "en"
+        # Use shared i18n for verdict localization (fallback to English if missing)
+        try:
+            import i18n as _i18n_fb
+            _v_word = _i18n_fb.verdict_word(verdict, language)
+            _icon_map = {"SAFE": f"🟢 {_v_word}", "CAUTION": f"🟠 {_v_word}", "UNSAFE": f"🔴 {_v_word}", "EXTREME": f"🔴 {_v_word}", "CRITICAL": f"🔴 {_v_word}"}
+            verdict_icon = _icon_map.get(verdict, _v_word)
+        except Exception:
+            verdict_icon = {"SAFE": "🟢 SAFE", "CAUTION": "🟠 CAUTION", "UNSAFE": "🔴 UNSAFE"}.get(verdict, verdict)
         risk_headline = risk.headline if risk else ""
-        # Map verdict to readable heading
-        verdict_icon = {"SAFE": "🟢 SAFE", "CAUTION": "🟠 CAUTION", "UNSAFE": "🔴 UNSAFE"}.get(verdict, verdict)
         parts = [f"### {verdict_icon} — {risk_headline or verdict}"]
 
         ocean = ocean_state
@@ -683,76 +699,115 @@ class ResponseAgent:
                 if not specific: return True
                 m = {"sst_celsius": sst_kw, "wind_speed_kmh": wind_kw, "wind_gust_kmh": wind_kw, "wave_height_m": wave_kw, "primary_swell_height_m": wave_kw, "surface_current_mps": curr_kw, "chlorophyll_mg_m3": chl_kw, "tide_level_m": tide_kw, "tide_extremes": tide_kw}
                 return m.get(f, False)
+            # Localized labels — fallback to English if i18n missing
+            try:
+                import i18n as _i18n_lbl
+                _lbl = lambda k: _i18n_lbl.param_label(k, language)
+                _head = _i18n_lbl.heading("marine_conditions", language)
+            except Exception:
+                _lbl = lambda k: {"sst": "SST", "wind": "Wind", "waves": "Waves", "swell": "Swell", "current": "Current", "chlorophyll": "Chlorophyll", "tide": "Tide", "parameter": "Parameter", "value": "Value"}.get(k, k)
+                _head = "Marine Conditions"
             rows: list[str] = []
             if _want("sst_celsius") and getattr(ocean, "sst_celsius", None) is not None and str(fs.get("sst_celsius","")) != "unavailable":
-                rows.append(f"| 🌡️ SST | **{ocean.sst_celsius}°C** |")
+                rows.append(f"| 🌡️ {_lbl('sst')} | **{ocean.sst_celsius}°C** |")
             if _want("wind_speed_kmh") and getattr(ocean, "wind_speed_kmh", None) is not None and str(fs.get("wind_speed_kmh","")) != "unavailable":
                 wdir = getattr(ocean, "wind_direction", "") or ""
-                rows.append(f"| 💨 Wind | **{ocean.wind_speed_kmh} km/h {wdir}** |".strip())
+                rows.append(f"| 💨 {_lbl('wind')} | **{ocean.wind_speed_kmh} km/h {wdir}** |".strip())
             if _want("wave_height_m") and getattr(ocean, "wave_height_m", None) is not None and str(fs.get("wave_height_m","")) != "unavailable":
-                rows.append(f"| 🌊 Waves | **{ocean.wave_height_m} m** |")
+                rows.append(f"| 🌊 {_lbl('waves')} | **{ocean.wave_height_m} m** |")
             elif _want("primary_swell_height_m") and getattr(ocean, "primary_swell_height_m", None) is not None and str(fs.get("primary_swell_height_m","")) != "unavailable":
-                rows.append(f"| 🌊 Swell | **{ocean.primary_swell_height_m} m** |")
+                rows.append(f"| 🌊 {_lbl('swell')} | **{ocean.primary_swell_height_m} m** |")
             cur = getattr(ocean, "surface_current_mps", None)
             if _want("surface_current_mps") and cur is not None and str(fs.get("surface_current_mps","")) != "unavailable":
-                rows.append(f"| 🌊 Current | **{cur} m/s** |")
+                rows.append(f"| 🌊 {_lbl('current')} | **{cur} m/s** |")
             if _want("chlorophyll_mg_m3") and getattr(ocean, "chlorophyll_mg_m3", None) is not None and str(fs.get("chlorophyll_mg_m3","")) != "unavailable":
-                rows.append(f"| 🟢 Chlorophyll | **{ocean.chlorophyll_mg_m3} mg/m³** |")
+                rows.append(f"| 🟢 {_lbl('chlorophyll')} | **{ocean.chlorophyll_mg_m3} mg/m³** |")
             extremes = getattr(ocean, "tide_extremes", []) or []
             if extremes:
                 tide_txt = ", ".join(f"{e.kind} at {e.time_local[11:16]} ({e.height_m} m)" for e in extremes[:4])
-                rows.append(f"| 🌗 Tide | {tide_txt} |")
+                rows.append(f"| 🌗 {_lbl('tide')} | {tide_txt} |")
             elif getattr(ocean, "tide_level_m", None) is not None and str(fs.get("tide_level_m","")) != "unavailable":
-                rows.append(f"| 🌗 Tide | {ocean.tide_level_m} m |")
+                rows.append(f"| 🌗 {_lbl('tide')} | {ocean.tide_level_m} m |")
             if rows:
-                block = f"### 🌊 Marine Conditions — {loc_name or 'Selected Location'} ({tw})"
+                block = f"### 🌊 {_head} — {loc_name or 'Selected Location'} ({tw})"
                 if coord:
                     block += f"  \n{coord}"
-                block += "\n\n| Parameter | Value |\n|---|---|\n" + "\n".join(rows)
+                block += f"\n\n| {_lbl('parameter')} | {_lbl('value')} |\n|---|---|\n" + "\n".join(rows)
                 parts.append(block)
-                # Short AI-style actionable recommendation (was LLM-only, now also in fallback so
-                # SST/wind queries still get the 1-sentence summary even when LLM is unavailable)
+                # Localized actionable recommendation via shared i18n (fallback to English)
+                try:
+                    import i18n as _i18n_rec
+                    _use_i18n = True
+                except Exception:
+                    _use_i18n = False
                 _rec = ""
-                # query-aware, value-quoting recommendation in simple language (easy to understand)
                 _sst_v = getattr(ocean, "sst_celsius", None)
                 _wind_v = getattr(ocean, "wind_speed_kmh", None)
                 _wave_v = getattr(ocean, "wave_height_m", None) if getattr(ocean, "wave_height_m", None) is not None else getattr(ocean, "primary_swell_height_m", None)
                 _wdir = getattr(ocean, "wind_direction", "") or ""
-                if specific and _want("sst_celsius") and not _want("wind_speed_kmh") and not _want("wave_height_m") and not _want("surface_current_mps"):
-                    _rec = f"SST is {_sst_v}°C at this location — the sea surface is warm; monitor for rapid temperature changes that can affect fish movement and vessel comfort. Proceed with normal caution."
-                    if _sst_v is None:
-                        _rec = "Monitor the sea-surface temperature closely and be prepared for possible rapid changes that could affect vessel performance."
-                elif specific and _want("wind_speed_kmh") and not _want("sst_celsius"):
-                    _ws = _wind_v
-                    _tail = f" Wind is {_ws} km/h {_wdir}".strip() + "." if _ws is not None else ""
-                    if _ws is not None and _ws >= 30:
-                        _rec = f"Wind is strong ({_ws} km/h {_wdir}) with noticeable chop — small craft handling will be affected; delay departure or proceed with extra caution.{_tail if 'strong' not in _rec else ''}"
-                        _rec = f"Wind is {_ws} km/h {_wdir} — strong with noticeable chop; small craft handling will be affected. Delay departure or proceed with extra caution."
-                    elif _ws is not None and _ws >= 18:
-                        _rec = f"Wind is {_ws} km/h {_wdir} — moderate with a gentle surface chop. It can affect small craft handling, so proceed with caution."
+                if _use_i18n:
+                    if specific and _want("sst_celsius") and not _want("wind_speed_kmh") and not _want("wave_height_m") and not _want("surface_current_mps"):
+                        _rec = _i18n_rec.recommendation("sst_only", language, v=_sst_v) if _sst_v is not None else _i18n_rec.recommendation("sst_missing", language)
+                    elif specific and _want("wind_speed_kmh") and not _want("sst_celsius"):
+                        _ws = _wind_v
+                        if _ws is not None and _ws >= 30:
+                            _rec = _i18n_rec.recommendation("wind_strong", language, v=_ws, d=_wdir)
+                        elif _ws is not None and _ws >= 18:
+                            _rec = _i18n_rec.recommendation("wind_mod", language, v=_ws, d=_wdir)
+                        else:
+                            _rec = _i18n_rec.recommendation("wind_light", language, v=_ws, d=_wdir)
+                    elif specific and (_want("wave_height_m") or _want("primary_swell_height_m")):
+                        _rec = _i18n_rec.recommendation("wave", language, v=_wave_v) if _wave_v is not None else _i18n_rec.recommendation("wave_missing", language)
+                    elif specific and _want("surface_current_mps"):
+                        _cur = getattr(ocean, "surface_current_mps", None)
+                        _rec = _i18n_rec.recommendation("current", language, v=_cur) if _cur is not None else _i18n_rec.recommendation("current_missing", language)
                     else:
-                        _rec = f"Wind is {_ws} km/h {_wdir} — light and generally favorable for handling, but keep monitoring for sudden gusts."
-                    _rec = _rec.replace("  ", " ").strip()
-                elif specific and (_want("wave_height_m") or _want("primary_swell_height_m")):
-                    _rec = f"Waves are {_wave_v} m at this location — even moderate seas can impact small vessels. Proceed carefully and keep monitoring the swell."
-                    if _wave_v is None:
-                        _rec = "Monitor wave/swell heights closely — even moderate seas can impact small vessels; proceed carefully."
-                elif specific and _want("surface_current_mps"):
-                    _cur = getattr(ocean, "surface_current_mps", None)
-                    _rec = f"Surface current is {_cur} m/s — account for drift in navigation and fishing operations." if _cur is not None else "Surface currents are present — account for drift in navigation and fishing operations."
+                        _vals = []
+                        if _sst_v is not None: _vals.append(f"SST {_sst_v}°C")
+                        if _wind_v is not None: _vals.append(f"wind {_wind_v} km/h")
+                        if _wave_v is not None: _vals.append(f"waves {_wave_v} m")
+                        _vals_txt = ", ".join(_vals) + ". " if _vals else ""
+                        if verdict == "SAFE":
+                            _rec = _i18n_rec.recommendation("generic_safe", language, vals=_vals_txt)
+                        elif verdict == "UNSAFE":
+                            _rec = _i18n_rec.recommendation("generic_unsafe", language, vals=_vals_txt)
+                        else:
+                            _rec = _i18n_rec.recommendation("generic_caution", language, vals=_vals_txt)
                 else:
-                    # generic (all params) — brief overall guidance tied to verdict, quoting live numbers
-                    _vals = []
-                    if _sst_v is not None: _vals.append(f"SST {_sst_v}°C")
-                    if _wind_v is not None: _vals.append(f"wind {_wind_v} km/h")
-                    if _wave_v is not None: _vals.append(f"waves {_wave_v} m")
-                    _vals_txt = ", ".join(_vals) + ". " if _vals else ""
-                    if verdict == "SAFE":
-                        _rec = f"{_vals_txt}Conditions are generally favorable — suitable for venturing out, but keep monitoring official updates."
-                    elif verdict == "UNSAFE":
-                        _rec = f"{_vals_txt}Conditions are unsafe — avoid venturing out and wait for improvement in wind/wave parameters."
+                    # English fallback (original)
+                    if specific and _want("sst_celsius") and not _want("wind_speed_kmh") and not _want("wave_height_m") and not _want("surface_current_mps"):
+                        _rec = f"SST is {_sst_v}°C at this location — the sea surface is warm; monitor for rapid temperature changes that can affect fish movement and vessel comfort. Proceed with normal caution."
+                        if _sst_v is None:
+                            _rec = "Monitor the sea-surface temperature closely and be prepared for possible rapid changes that could affect vessel performance."
+                    elif specific and _want("wind_speed_kmh") and not _want("sst_celsius"):
+                        _ws = _wind_v
+                        _tail = f" Wind is {_ws} km/h {_wdir}".strip() + "." if _ws is not None else ""
+                        if _ws is not None and _ws >= 30:
+                            _rec = f"Wind is {_ws} km/h {_wdir} — strong with noticeable chop; small craft handling will be affected. Delay departure or proceed with extra caution."
+                        elif _ws is not None and _ws >= 18:
+                            _rec = f"Wind is {_ws} km/h {_wdir} — moderate with a gentle surface chop. It can affect small craft handling, so proceed with caution."
+                        else:
+                            _rec = f"Wind is {_ws} km/h {_wdir} — light and generally favorable for handling, but keep monitoring for sudden gusts."
+                        _rec = _rec.replace("  ", " ").strip()
+                    elif specific and (_want("wave_height_m") or _want("primary_swell_height_m")):
+                        _rec = f"Waves are {_wave_v} m at this location — even moderate seas can impact small vessels. Proceed carefully and keep monitoring the swell."
+                        if _wave_v is None:
+                            _rec = "Monitor wave/swell heights closely — even moderate seas can impact small vessels; proceed carefully."
+                    elif specific and _want("surface_current_mps"):
+                        _cur = getattr(ocean, "surface_current_mps", None)
+                        _rec = f"Surface current is {_cur} m/s — account for drift in navigation and fishing operations." if _cur is not None else "Surface currents are present — account for drift in navigation and fishing operations."
                     else:
-                        _rec = f"{_vals_txt}Borderline conditions — proceed carefully, keep monitoring for rapid changes, and stay within safe limits for your vessel class."
+                        _vals = []
+                        if _sst_v is not None: _vals.append(f"SST {_sst_v}°C")
+                        if _wind_v is not None: _vals.append(f"wind {_wind_v} km/h")
+                        if _wave_v is not None: _vals.append(f"waves {_wave_v} m")
+                        _vals_txt = ", ".join(_vals) + ". " if _vals else ""
+                        if verdict == "SAFE":
+                            _rec = f"{_vals_txt}Conditions are generally favorable — suitable for venturing out, but keep monitoring official updates."
+                        elif verdict == "UNSAFE":
+                            _rec = f"{_vals_txt}Conditions are unsafe — avoid venturing out and wait for improvement in wind/wave parameters."
+                        else:
+                            _rec = f"{_vals_txt}Borderline conditions — proceed carefully, keep monitoring for rapid changes, and stay within safe limits for your vessel class."
                 if _rec:
                     parts.append(_rec)
                 parts.append(_source_line(language))
