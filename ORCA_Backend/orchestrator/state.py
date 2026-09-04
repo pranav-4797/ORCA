@@ -270,6 +270,14 @@ SPECIALIST_REGISTRY = {
         ),
         "requires": [],
     },
+    "tourism": {
+        "name": "Tourism Agent",
+        "description": (
+            "Nearby coastal POIs (beaches, lighthouses, harbours, viewpoints) "
+            "from live OpenStreetMap with per-POI live marine safety verdicts"
+        ),
+        "requires": [],
+    },
 }
 
 INTENT_DEFAULT_AGENTS = {
@@ -281,6 +289,7 @@ INTENT_DEFAULT_AGENTS = {
     "hazard_alerts": ["HazardAgent", "OceanStateAgent"],
     "trend_analysis": ["TrendAgent"],
     "zone_scan": ["PFZAgent", "OceanStateAgent", "HazardAgent", "GeospatialAgent"],
+    "poi_lookup": ["TourismAgent", "GeospatialAgent"],
 }
 
 PLANNING_TOOL_SCHEMA = {
@@ -297,6 +306,7 @@ PLANNING_TOOL_SCHEMA = {
                 "hazard_alerts",
                 "trend_analysis",
                 "zone_scan",
+                "poi_lookup",
                 "unknown",
             ],
             "description": (
@@ -352,7 +362,7 @@ PLANNING_TOOL_SCHEMA = {
                 "type": "string",
                 "enum": [
                     "OceanStateAgent", "HazardAgent",
-                    "PFZAgent", "GeospatialAgent", "TrendAgent",
+                    "PFZAgent", "GeospatialAgent", "TrendAgent", "TourismAgent",
                 ],
             },
             "description": (
@@ -376,6 +386,7 @@ class Intent:
     HAZARD_ALERTS = "hazard_alerts"
     TREND_ANALYSIS = "trend_analysis"
     ZONE_SCAN = "zone_scan"
+    POI_LOOKUP = "poi_lookup"
     UNKNOWN = "unknown"
 
 class ORCAGraphState(TypedDict, total=False):
@@ -400,6 +411,7 @@ class ORCAGraphState(TypedDict, total=False):
     geofence: Optional[object]
     route: Optional[object]
     trend: Optional[object]
+    tourism: Optional[object]
     discussion: Optional[dict]
     synthesis: Optional[dict]
     response: Optional[OrchestratorResponse]

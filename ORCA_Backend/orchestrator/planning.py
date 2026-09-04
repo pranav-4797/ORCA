@@ -61,6 +61,8 @@ class PlanningMixin:
 
     def _route_intent(self, query: str) -> str:
         q = query.lower()
+        if any(kw in q for kw in ["beach", "harbour", "harbor", "lighthouse", "viewpoint", "touris", "sightseeing", "places to visit", "attractions", "poi"]):
+            return Intent.POI_LOOKUP
         if any(kw in q for kw in ["why has", "why is", "trend", "declined", "decline", "changed over", "over the last", "productivity"]):
             return Intent.TREND_ANALYSIS
         if any(kw in q for kw in ["which zones", "which regions", "zones to avoid", "where should i fish", "good zones"]):

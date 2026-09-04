@@ -27,12 +27,28 @@ class DispatchMixin:
         if "TrendAgent" in chosen and plan["intent"] == Intent.TREND_ANALYSIS:
             nodes.append("trend")
             return nodes
+        if plan["intent"] == Intent.POI_LOOKUP:
+            if "TourismAgent" in chosen:
+                nodes.append("tourism")
+            if "GeospatialAgent" in chosen:
+                nodes.append("geospatial")
+            if "OceanStateAgent" in chosen and "tourism" not in nodes:
+                nodes.append("ocean_state")
+            if "HazardAgent" in chosen and "ocean_state" not in nodes:
+                nodes.append("hazard")
+            if "PFZAgent" in chosen:
+                nodes.append("pfz")
+            return nodes
         if "OceanStateAgent" in chosen:
             nodes.append("ocean_state")
+        if "HazardAgent" in chosen:
+            nodes.append("hazard")
         if "PFZAgent" in chosen:
             nodes.append("pfz")
         if "GeospatialAgent" in chosen:
             nodes.append("geospatial")
+        if "TourismAgent" in chosen:
+            nodes.append("tourism")
         return nodes
 
     def _should_run_discussion(self, state) -> bool:

@@ -532,6 +532,22 @@ def viz_geojson(session_id: str):
                 "geometry": {"type": "Polygon", "coordinates": [ring]},
             })
 
+    tourism = getattr(r, "tourism", None)
+    if tourism:
+        for poi in tourism:
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "kind": "tourism_poi",
+                    "name": poi.name,
+                    "type": poi.type,
+                    "status": poi.status.value,
+                    "reasoning": poi.reasoning,
+                    "confidence": poi.confidence,
+                },
+                "geometry": {"type": "Point", "coordinates": [poi.lon, poi.lat]},
+            })
+
     geo = getattr(r, "geofence", None)
     if geo is not None:
         for h in geo.hits:

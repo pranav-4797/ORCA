@@ -51,6 +51,7 @@ export class OceanMap {
     sar_low_confidence: { color: '#94a3b8', fill: '#94a3b8' },
     sar_other: { color: '#64748b', fill: '#64748b' },
     imbl_line: { color: '#f87171', fill: 'none' },
+    tourism_poi: { color: '#facc15', fill: '#facc15' },
   };
 
   constructor() {
@@ -62,7 +63,14 @@ export class OceanMap {
           <span class="chart-coord-label">INDIAN COASTAL WATERS • SCALE VARIES</span>
         </div>
         <div class="chart-header-right">
-          <span class="data-mono-sm" id="ocean-map-status" style="color:var(--text-tertiary);">NO FIX</span>
+          <div class="chart-header-toggles" style="display:flex;gap:8px;align-items:center;">
+            <button id="ocean-map-toggle-tourism" class="chart-toggle-btn" title="Toggle Tourism POIs"
+                    style="background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-secondary);
+                           padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font-mono);">
+              TOURISM
+            </button>
+            <span class="data-mono-sm" id="ocean-map-status" style="color:var(--text-tertiary);">NO FIX</span>
+          </div>
         </div>
       </div>
       <div class="ocean-map-canvas-wrap">
@@ -95,6 +103,15 @@ export class OceanMap {
       </div>
     `;
     store.subscribe(() => this.onState());
+
+    const tourismBtn = this.element.querySelector('#ocean-map-toggle-tourism') as HTMLButtonElement;
+    if (tourismBtn) {
+      tourismBtn.addEventListener('click', () => {
+        store.tourismEnabled = !store.tourismEnabled;
+        tourismBtn.style.backgroundColor = store.tourismEnabled ? 'var(--accent-primary)' : 'var(--bg-secondary)';
+        tourismBtn.style.color = store.tourismEnabled ? '#fff' : 'var(--text-secondary)';
+      });
+    }
   }
 
   public getElement(): HTMLElement {
@@ -441,8 +458,9 @@ export class OceanMap {
       }
     }
 
-    this.renderShapes([...boundsFeatures, ...(geojson?.features ?? [])],
-      (f: any) => this.isBackgroundKind(f.properties?.kind));
+    this.renderShapes([...boundsFeatures, ...(geojson?.features ?? []).filter((f: any) =>
+      f.properties?.kind !== 'tourism_poi' || store.tourismEnabled
+    )], (f: any) => this.isBackgroundKind(f.properties?.kind));
 
     // Auto-frame: fit the view to the query's own features (primary zone, alternates,
     // reference/user location) every time new results arrive. Exclude background
@@ -504,16 +522,18 @@ export class OceanMap {
         const isPfz = kind.startsWith('pfz') && !this.isBackgroundKind(kind);
         const isSar = kind.startsWith('sar_');
         const isBackground = this.isBackgroundKind(kind);
+        const isTourism = kind === 'tourism_poi';
         shape = L.circleMarker([lat, lon], {
           radius: kind === 'query_point' ? 8
             : isPfz ? 6
             : isBackground ? 3
             : isSar ? 7
+            : isTourism ? 6
             : kind === 'wind_divergence' ? 6
             : 5,
           color: c.color,
           fillColor: c.fill,
-          fillOpacity: isSar ? 0.95 : isBackground ? 0.7 : 0.85,
+          fillOpacity: isSar ? 0.95 : isBackground ? 0.7 : isTourism ? 0.9 : 0.85,
           weight: isSar ? 2.5 : isBackground ? 1 : 2,
         });
         if (kind === 'wind_divergence') {
@@ -643,6 +663,19 @@ export class OceanMap {
         rows.push(row('Coordinates', this.coordLabel(geometry.coordinates[1], geometry.coordinates[0])));
       }
       rows.push(row('Source', '🛡️ Official INCOIS PFZ'));
+      return `<div style="max-width:240px;">${rows.join('')}</div>`;
+    }
+
+    if (kind === 'tourism_poi') {
+      const rows: string[] = [];
+      if (p?.name) rows.push(row('POI Name', p.name));
+      if (p?.type) rows.push(row('Type', p.type));
+      if (p?.status) rows.push(row('Safety Verdict', `<b style="color:var(--text-primary);">${p.status}</b>`));
+      if (p?.reasoning) rows.push(row('Reasoning', p.reasoning));
+      if (geometry?.type === 'Point') {
+        rows.push(row('Coordinates', this.coordLabel(geometry.coordinates[1], geometry.coordinates[0])));
+      }
+      rows.push(row('Source', '🌐 OpenStreetMap live'));
       return `<div style="max-width:240px;">${rows.join('')}</div>`;
     }
 

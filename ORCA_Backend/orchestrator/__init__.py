@@ -76,6 +76,7 @@ from agents.pfz_agent import PFZAgent
 from agents.pfz_output import format_pfz_answer
 from agents.response_agent import ResponseAgent
 from agents.synthesis_agent import SynthesisAgent
+from agents.tourism_agent import TourismAgent
 from agents.trend_agent import TrendAgent
 from models import (
     AgentTrace,
@@ -322,6 +323,14 @@ SPECIALIST_REGISTRY = {
         ),
         "requires": [],
     },
+    "tourism": {
+        "name": "Tourism Agent",
+        "description": (
+            "Nearby coastal POIs (beaches, lighthouses, harbours, viewpoints) "
+            "from live OpenStreetMap with per-POI live marine safety verdicts"
+        ),
+        "requires": [],
+    },
 }
 
 # intent -> default specialist set when the planner names none explicitly
@@ -334,6 +343,7 @@ INTENT_DEFAULT_AGENTS = {
     "hazard_alerts": ["HazardAgent", "OceanStateAgent"],
     "trend_analysis": ["TrendAgent"],
     "zone_scan": ["PFZAgent", "OceanStateAgent", "HazardAgent", "GeospatialAgent"],
+    "poi_lookup": ["TourismAgent", "GeospatialAgent"],
 }
 
 PLANNING_TOOL_SCHEMA = {
@@ -350,6 +360,7 @@ PLANNING_TOOL_SCHEMA = {
                 "hazard_alerts",   # any cyclone/lightning/advisory for my area?
                 "trend_analysis",  # WHY has something changed over weeks/months?
                 "zone_scan",       # which zones to seek / avoid around me?
+                "poi_lookup",      # nearby coastal POIs with safety
                 "unknown",
             ],
             "description": (
@@ -405,7 +416,7 @@ PLANNING_TOOL_SCHEMA = {
                 "type": "string",
                 "enum": [
                     "OceanStateAgent", "HazardAgent",
-                    "PFZAgent", "GeospatialAgent", "TrendAgent",
+                    "PFZAgent", "GeospatialAgent", "TrendAgent", "TourismAgent",
                 ],
             },
             "description": (
@@ -430,6 +441,7 @@ class Intent:
     HAZARD_ALERTS = "hazard_alerts"
     TREND_ANALYSIS = "trend_analysis"
     ZONE_SCAN = "zone_scan"
+    POI_LOOKUP = "poi_lookup"
     UNKNOWN = "unknown"
 
 
@@ -466,6 +478,7 @@ class ORCAGraphState(TypedDict, total=False):
     geofence: Optional[object]              # GeofenceStatus
     route: Optional[object]                 # RoutePlan
     trend: Optional[object]                 # TrendAnalysis
+    tourism: Optional[object]               # list[TourismPoi]
     discussion: Optional[dict]              # {"turns": [...], "consensus": str}
     synthesis: Optional[dict]               # reconciled verdict + conflicts
 
@@ -489,6 +502,7 @@ class Orchestrator:
         self.pfz_agent = PFZAgent()
         self.geospatial_agent = GeospatialAgent()
         self.trend_agent = TrendAgent()
+        self.tourism_agent = TourismAgent()
         self.discussion_agent = DiscussionAgent()
         self.synthesis_agent = SynthesisAgent()
         self.response_agent = ResponseAgent()
@@ -595,6 +609,23 @@ class Orchestrator:
         if "TrendAgent" in chosen and plan["intent"] == Intent.TREND_ANALYSIS:
             nodes.append("trend")
             return nodes
+        if plan["intent"] == Intent.POI_LOOKUP:
+            # POI/tourism is a standalone scan — TourismAgent owns the full
+            # fetch+per-POI safety already, so skip sibling specialists unless
+            # the LLM explicitly asked for them (e.g. combined route request).
+            if "TourismAgent" in chosen:
+                nodes.append("tourism")
+            if "GeospatialAgent" in chosen:
+                nodes.append("geospatial")
+            # If POI lookup also requested ocean components (e.g. compound query),
+            # honour them without re-running hazard already covered inside tourism.
+            if "OceanStateAgent" in chosen and "tourism" not in nodes:
+                nodes.append("ocean_state")
+            if "HazardAgent" in chosen and "ocean_state" not in nodes:
+                nodes.append("hazard")
+            if "PFZAgent" in chosen:
+                nodes.append("pfz")
+            return nodes
         if "OceanStateAgent" in chosen:
             nodes.append("ocean_state")
         if "HazardAgent" in chosen:
@@ -603,6 +634,8 @@ class Orchestrator:
             nodes.append("pfz")
         if "GeospatialAgent" in chosen:
             nodes.append("geospatial")
+        if "TourismAgent" in chosen:
+            nodes.append("tourism")
         return nodes
 
     # ------------------------------------------------------------------
@@ -1070,7 +1103,7 @@ class Orchestrator:
         plan = state["plan"]
         # If location unresolved, skip all specialists — response will ask user
         if plan.get("needs_location"):
-            return {"ocean_state": None, "pfz": None, "geofence": None, "route": None, "trend": None, "risk": None, "timings": {}, "traces": []}
+            return {"ocean_state": None, "pfz": None, "geofence": None, "route": None, "trend": None, "tourism": None, "risk": None, "timings": {}, "traces": []}
         ctx = state["context"]
         location = state["location"]
         selected = self._selected_specialists(
@@ -1082,7 +1115,8 @@ class Orchestrator:
         needs_pfz = "pfz" in selected
         needs_geo = "geospatial" in selected
         needs_trend = "trend" in selected
-        # Hazard is needed for most intents except pure pfz/geofence/trend
+        needs_tourism = "tourism" in selected
+        # Hazard is needed for most intents except pure pfz/geofence/trend/tourism
         needs_hazard = needs_ocean and plan.get("intent") in ("safety_check", "hazard_alerts", "zone_scan", "route_plan")
         # Also if hazard explicitly requested via agents_needed
         if "HazardAgent" in set(plan.get("agents_needed") or []):
@@ -1097,7 +1131,7 @@ class Orchestrator:
         import logging
         logger = logging.getLogger("orca.orchestrator")
 
-        with ThreadPoolExecutor(max_workers=5) as pool:
+        with ThreadPoolExecutor(max_workers=6) as pool:
             futures: dict[str, object] = {}
             # Launch independent specialists immediately
             t_ocean0 = None
@@ -1134,6 +1168,10 @@ class Orchestrator:
             if needs_trend:
                 months = int(plan.get("months_back") or 6)
                 futures["trend"] = pool.submit(self.trend_agent.run, location, months)
+            if needs_tourism:
+                futures["tourism"] = pool.submit(
+                    self.tourism_agent.run, location, plan["time_window"], ctx.vessel_class
+                )
 
             # Wait for ocean first, then launch hazard (if needed) while others still running
             # Timeout env-configurable: fast fail to simulated fallback rather than hanging 30s
@@ -1194,10 +1232,17 @@ class Orchestrator:
             pfz_res = None
             geo_res = None
             trend_res = None
-            for key in ("pfz", "geofence", "trend"):
+            for key in ("pfz", "geofence", "trend", "tourism"):
                 if key in futures:
-                    # PFZ needs longer for INCOIS fetch (500KB + inland SST ring)
-                    _to = 35.0 if key == "pfz" else (15.0 if key == "geofence" else 25.0)
+                    # PFZ needs longer for INCOIS fetch (500KB + inland SST ring); tourism fans out to many ocean/hazard calls
+                    if key == "pfz":
+                        _to = 35.0
+                    elif key == "tourism":
+                        _to = 45.0
+                    elif key == "geofence":
+                        _to = 15.0
+                    else:
+                        _to = 25.0
                     try:
                         val = futures[key].result(timeout=_to)  # type: ignore
                         if key == "pfz":
@@ -1218,6 +1263,11 @@ class Orchestrator:
                             traces.append(val[1])
                             results["trend"] = val[0]
                             timings["trend_ms"] = round(val[1].duration_ms, 1)
+                        elif key == "tourism":
+                            pois, tr = val
+                            traces.append(tr)
+                            results["tourism"] = pois
+                            timings["tourism_ms"] = round(tr.duration_ms, 1)
                     except Exception as exc:
                         logger.warning("%s failed (%s: %s); continuing without it", key, type(exc).__name__, exc)
                     finally:
@@ -1295,6 +1345,8 @@ class Orchestrator:
             update["route"] = results["route"]
         if "trend" in results:
             update["trend"] = results["trend"]
+        if "tourism" in results:
+            update["tourism"] = results["tourism"]
         return update
 
     def _node_fleet_convergence(self, state: ORCAGraphState) -> dict:
@@ -1643,7 +1695,7 @@ class Orchestrator:
         depth_policy = (state.get("query_depth") or QUERY_DEPTH).lower()
         use_deterministic = (
             mode == "auto" and complexity in ("fast", "standard") and depth_policy != "deep"
-            and (risk is not None or state.get("pfz") is not None or state.get("geofence") is not None)
+            and (risk is not None or state.get("pfz") is not None or state.get("geofence") is not None or state.get("tourism") is not None)
         )
         # But if synthesis required LLM (deep), allow response LLM
         if use_deterministic and not self._should_use_synthesis_llm(state):
@@ -1684,8 +1736,63 @@ class Orchestrator:
         geofence = state.get("geofence")
         route = state.get("route")
         fleet = state.get("fleet_convergence")
+        tourism = state.get("tourism")
         context = state.get("context")
         parts: list[str] = []
+        # Tourism / POI lookups — dedicated readable block with live safety per POI.
+        # Always shown when tourism was dispatched, even if narrative fails.
+        if tourism is not None and len(tourism or []) >= 0:
+            # Only render tourism block when intent is poi_lookup OR tourism data non-empty.
+            # Empty list (no POIs found) still gets an honest disclosure.
+            if state.get("plan", {}).get("intent") == "poi_lookup" or tourism:
+                if tourism and len(tourism) > 0:
+                    loc = getattr(context, "location", None) if context else None
+                    loc_name = getattr(loc, "name", "") if loc else (state.get("plan", {}).get("location_name") or "this coast")
+                    header = f"### 🏖️ Coastal Points of Interest — {loc_name}"
+                    # Build a markdown table: name, type, safety, coordinates
+                    rows = []
+                    for poi in tourism[:8]:
+                        nm = getattr(poi, "name", "Unnamed")
+                        tp = getattr(poi, "type", "POI")
+                        st = getattr(getattr(poi, "status", None), "value", str(getattr(poi, "status", ""))) or "CAUTION"
+                        rs = getattr(poi, "reasoning", "") or ""
+                        # compact reasoning to 60 chars
+                        rs_short = (rs[:60] + "…") if len(rs) > 60 else rs
+                        coord = f"{poi.lat:.4f}°N, {poi.lon:.4f}°E"
+                        rows.append(f"| {nm} | {tp} | **{st}** | {rs_short} |")
+                    table = "| POI | Type | Safety | Details |\n|---|---|---|---|\n" + "\n".join(rows)
+                    coord_note = f"📍 {loc.lat:.4f}°N, {loc.lon:.4f}°E — radius ~10 km" if loc and getattr(loc, "lat", None) is not None else ""
+                    block = header
+                    if coord_note:
+                        block += f"  \n{coord_note}"
+                    block += f"\n\n{table}\n\n*Source: 🌐 OpenStreetMap live + INCOIS Ocean State Forecast*"
+                    parts.append(block)
+                else:
+                    parts.append("### 🏖️ Coastal Points of Interest\nNo beaches, lighthouses, harbours or viewpoints were found within ~10 km of this location in OpenStreetMap. Try a broader coastal search or another location.\n\n*Source: 🌐 OpenStreetMap live*")
+                # For poi_lookup, tourism IS the answer — skip the generic ocean table re-derivation and continue to synthesis summary only.
+                # We still allow narrative to wrap it, but we have a deterministic table already.
+                if state.get("plan", {}).get("intent") == "poi_lookup":
+                    # Try narrative wrapper for poi_lookup as well (prose intro), but keep the table.
+                    try:
+                        _narr_text = self._narrative_answer(
+                            state, risk=risk, ocean=ocean, pfz=pfz,
+                            geofence=geofence, route=route, trend=state.get("trend"),
+                        )
+                    except Exception:
+                        _narr_text = None
+                    if _narr_text:
+                        return (_narr_text + "\n\n" + "\n\n".join(parts))[:1500]
+                    # Also add geofence context if TourismAgent second agent was geofence
+                    if geofence is not None and not geofence.clear:
+                        for h in geofence.hits[:1]:
+                            parts.append(f"Boundary alert: {h.zone_name} {'inside' if h.inside_zone else f'{h.distance_to_boundary_km} km away'}.")
+                    try:
+                        summary = self._context_summary(state, risk=risk, ocean=ocean, pfz=pfz, geofence=geofence, route=route, trend=state.get("trend"))
+                        if summary:
+                            parts.append(summary)
+                    except Exception:
+                        pass
+                    return "\n\n".join(parts)[:1500]
         # PFZ lookups: documented template (official or estimated) — always show Target Coordinates
         # unless fleet convergence actively changed the recommendation. This one
         # block stays structured on purpose: the coordinates, distance/bearing and
@@ -2533,6 +2640,7 @@ class Orchestrator:
             geofence=geofence,
             route=state.get("route"),
             trend=state.get("trend"),
+            tourism=state.get("tourism"),
             avoid_zones=avoid_zones,
             confidence_score=confidence_score,
             evidence_tiers=evidence_tiers,
@@ -2613,7 +2721,7 @@ class Orchestrator:
         }
         dispatch_out = self._node_dispatch(tmp_state)  # type: ignore
         # Merge dispatch results
-        for k in ("ocean_state", "risk", "pfz", "geofence", "route", "trend"):
+        for k in ("ocean_state", "risk", "pfz", "geofence", "route", "trend", "tourism"):
             if k in dispatch_out:
                 state[k] = dispatch_out[k]
         trace.extend(dispatch_out.get("traces", []))
@@ -2788,7 +2896,7 @@ class Orchestrator:
 
         # Response gating — deterministic for fast auto queries
         t_resp0 = time.perf_counter()
-        use_deterministic = auto_mode and state.get("complexity") in ("fast", "standard") and state.get("query_depth") != "deep" and state.get("risk") is not None and not use_llm_synth
+        use_deterministic = auto_mode and state.get("complexity") in ("fast", "standard") and state.get("query_depth") != "deep" and (state.get("risk") is not None or state.get("pfz") is not None or state.get("geofence") is not None or state.get("tourism") is not None) and not use_llm_synth
         if use_deterministic:
             answer = self._deterministic_answer(state)  # type: ignore
             t = AgentTrace(agent_name="ResponseAgent", action="Composed deterministic answer (fast path)", result_summary=f"Answer {len(answer)} chars deterministic", data_sources=[], duration_ms=(time.perf_counter()-t_resp0)*1000)
@@ -2899,12 +3007,18 @@ class Orchestrator:
             state["trend"] = trend
             return [t]
 
+        def _run_tourism():
+            pois, t = self.tourism_agent.run(location, plan["time_window"], context.vessel_class)
+            state["tourism"] = pois
+            return [t]
+
         runners = {
             "ocean_state": _run_ocean,
             "hazard": _run_hazard,
             "pfz": _run_pfz,
             "geospatial": _run_geospatial,
             "trend": _run_trend,
+            "tourism": _run_tourism,
         }
         for key in dict.fromkeys([*spec["requires"], target_key]):
             try:
@@ -3244,6 +3358,9 @@ class Orchestrator:
     # ------------------------------------------------------------------
     def _route_intent(self, query: str) -> str:
         q = query.lower()
+        # Tourism / POI — beaches, lighthouses, harbours, viewpoints, sightseeing
+        if any(kw in q for kw in ["beach", "harbour", "harbor", "lighthouse", "viewpoint", "touris", "sightseeing", "places to visit", "attractions", "poi"]):
+            return Intent.POI_LOOKUP
         if any(kw in q for kw in ["why has", "why is", "trend", "declined", "decline",
                                   "changed over", "over the last", "productivity"]):
             return Intent.TREND_ANALYSIS

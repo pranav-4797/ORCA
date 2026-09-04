@@ -103,6 +103,8 @@ class AppStore {
   // whenever the app comes online. Feed is cached server-side for 10 minutes.
   public pfzLive: OrcaPfzLive | null = null;
   public pfzLiveLoadedAt: number = 0;
+  public tourismEnabled: boolean = false;
+
 
   public queryMode: 'auto' | 'panel' | 'agent' = 'auto';
   public directAgentKey: string = '';

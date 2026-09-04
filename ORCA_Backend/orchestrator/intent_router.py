@@ -70,18 +70,18 @@ CONF_LOW = 0.50
 # Taxonomy
 # --------------------------------------------------------------------------
 # Router-level intents (Part 5 of the spec) -- what the LLM classifies into.
-ROUTER_INTENTS = ("pfz", "ocean_state", "hazard", "geospatial", "trend", "sar", "general")
+ROUTER_INTENTS = ("pfz", "ocean_state", "hazard", "geospatial", "trend", "sar", "general", "tourism")
 
 # ORCA's existing orchestrator intents. The router ALSO emits one of these so
 # the existing plan builder / dispatcher / INTENT_DEFAULT_AGENTS table keeps
 # working byte-for-byte. No downstream contract changes.
 ORCA_INTENTS = (
     "safety_check", "ocean_state", "pfz_lookup", "route_plan",
-    "geofence_check", "hazard_alerts", "trend_analysis", "zone_scan", "unknown",
+    "geofence_check", "hazard_alerts", "trend_analysis", "zone_scan", "poi_lookup", "unknown",
 )
 
 DISPATCHABLE_AGENTS = (
-    "OceanStateAgent", "HazardAgent", "PFZAgent", "GeospatialAgent", "TrendAgent",
+    "OceanStateAgent", "HazardAgent", "PFZAgent", "GeospatialAgent", "TrendAgent", "TourismAgent",
 )
 
 # Deterministic repair table: router intent -> (orca intent, agents).
@@ -99,6 +99,7 @@ ROUTER_TO_ORCA: dict[str, tuple[str, list[str]]] = {
     "trend": ("trend_analysis", ["TrendAgent"]),
     "sar": ("safety_check", ["OceanStateAgent", "HazardAgent", "GeospatialAgent"]),
     "general": ("unknown", []),
+    "tourism": ("poi_lookup", ["TourismAgent", "GeospatialAgent"]),
 }
 
 # Reverse view: given an ORCA intent, which router intent describes it. Used
@@ -113,6 +114,7 @@ ORCA_TO_ROUTER: dict[str, str] = {
     "hazard_alerts": "hazard",
     "trend_analysis": "trend",
     "zone_scan": "pfz",
+    "poi_lookup": "tourism",
     "unknown": "general",
 }
 
@@ -343,6 +345,7 @@ intent (pick the PRIMARY one):
 - geospatial   boundaries (EEZ/IMBL/MPA), "am I inside", navigation, routes, distance to a place
 - trend        how something CHANGED over weeks/months and why (analytical)
 - sar          a missing/overdue/lost boat or person, distress, search and rescue
+- tourism      coastal POIs — beaches, lighthouses, harbours, viewpoints, places to visit/sightseeing near the coast
 - general      not about the sea, fishing, weather, safety or coasts
 
 agents = the ORCA specialists genuinely needed. Combine them for combined asks:
@@ -351,9 +354,10 @@ agents = the ORCA specialists genuinely needed. Combine them for combined asks:
 - PFZAgent         potential fishing zones
 - GeospatialAgent  boundary geofencing and route planning
 - TrendAgent       multi-month history and correlation
+- TourismAgent     nearby coastal POIs (beaches/lighthouses/harbours/viewpoints) with per-POI live safety
 
-orca_intent = ORCA's internal plan label. Use: ocean_state, pfz_lookup, safety_check, hazard_alerts, geofence_check, route_plan, trend_analysis, zone_scan, unknown.
-Use safety_check for "is it safe to go out" questions, hazard_alerts for "is there a cyclone/warning" questions, route_plan when the user wants to travel/navigate somewhere, geofence_check for boundary questions.
+orca_intent = ORCA's internal plan label. Use: ocean_state, pfz_lookup, safety_check, hazard_alerts, geofence_check, route_plan, trend_analysis, zone_scan, poi_lookup, unknown.
+Use safety_check for "is it safe to go out" questions, hazard_alerts for "is there a cyclone/warning" questions, route_plan when the user wants to travel/navigate somewhere, geofence_check for boundary questions, poi_lookup for beaches/lighthouses/harbours/tourism POI queries (also covers "places to visit near the coast").
 
 Rules:
 - location_name: copy the place name as written ("Goa", "Veraval", "Kochi"). Use "same" when the user refers back to a previous location without naming one. Use "unknown" when no place is named.
@@ -377,6 +381,8 @@ Examples (query -> intent | agents):
 "Safest route from Ratnagiri to Mumbai" -> geospatial | GeospatialAgent, OceanStateAgent, HazardAgent (orca_intent=route_plan)
 "Boat missing near Kochi since morning" -> sar | OceanStateAgent, GeospatialAgent, HazardAgent (orca_intent=safety_check)
 "Why has fish productivity declined over the last 6 months?" -> trend | TrendAgent (orca_intent=trend_analysis)
+"Beaches near Goa" -> tourism | TourismAgent, GeospatialAgent (orca_intent=poi_lookup)
+"Harbour and lighthouse near Kochi" -> tourism | TourismAgent, GeospatialAgent (orca_intent=poi_lookup)
 "Who won the cricket match?" -> general | (none)
 """
 

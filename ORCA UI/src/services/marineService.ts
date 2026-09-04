@@ -3,7 +3,7 @@
  * Each layer queries same coordinate resolver as OceanStateAgent (GPS > map > chat > PFZ).
  */
 
-export type MarineLayer = 'sst' | 'wind' | 'current' | 'swell' | 'chlorophyll' | 'pfz';
+export type MarineLayer = 'sst' | 'wind' | 'current' | 'swell' | 'chlorophyll' | 'pfz' | 'tourism';
 
 const DELTA = 0.05;
 

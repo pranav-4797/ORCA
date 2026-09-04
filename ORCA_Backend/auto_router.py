@@ -33,11 +33,18 @@ INTENT_DEFAULT_AGENTS = {
     "hazard_alerts": ["HazardAgent", "OceanStateAgent"],
     "trend_analysis": ["TrendAgent"],
     "zone_scan": ["PFZAgent", "OceanStateAgent", "HazardAgent", "GeospatialAgent"],
+    "poi_lookup": ["TourismAgent", "GeospatialAgent"],
     "unknown": [],
 }
 
 # Per-intent keyword sets — ordered by specificity (more specific first)
 INTENT_KEYWORDS = {
+    "poi_lookup": [
+        r"poi", r"point of interest", r"points of interest",
+        r"\bbeach(es)?\b", r"\bharbour\b", r"\bharbor\b", r"\blighthouse\b",
+        r"viewpoint", r"touris", r"sightseeing", r"visit.*beach", r"nearby.*beach",
+        r"coastal.*poi", r"attractions?", r"places to visit",
+    ],
     "trend_analysis": [
         r"why has", r"why is", r"trend", r"declined", r"change.*over",
         r"over the last", r"productivity", r"correlation", r"correlate",
@@ -258,6 +265,7 @@ def fast_route(normalized_query: str) -> RoutingDecision | None:
         "hazard_alerts": "Cyclone/storm warning check requires current hazards.",
         "pfz_lookup": "Official PFZ advisory lookup via nearest INCOIS landing centre.",
         "safety_check": "Safety question requires current sea-state and hazard thresholds.",
+        "poi_lookup": "Coastal POI (beach/lighthouse/harbour/viewpoint) lookup with live safety per point via OpenStreetMap.",
     }
 
     return RoutingDecision(

@@ -336,6 +336,18 @@ class AgentTrace:
 
 
 @dataclass
+class TourismPoi:
+    """One coastal point of interest with a live safety verdict."""
+    name: str
+    type: str
+    lat: float
+    lon: float
+    status: SafetyStatus
+    reasoning: str
+    confidence: float = 1.0
+
+
+@dataclass
 class OrchestratorResponse:
     answer: str
     status: SafetyStatus
@@ -369,6 +381,8 @@ class OrchestratorResponse:
     geofence: Optional[GeofenceStatus] = None
     route: Optional[RoutePlan] = None
     trend: Optional[TrendAnalysis] = None
+    tourism: Optional[list[TourismPoi]] = None
+
     # Region-scan avoid list (P1 #12): combined hazard+geofence zones to stay
     # clear of, each as {"zone", "reason", "distance_km"}.
     avoid_zones: list = field(default_factory=list)
@@ -381,3 +395,4 @@ class OrchestratorResponse:
     # Satellite-Model Wind Divergence Flag (Innovation #4) — dict form of
     # WindDivergenceResult, None when the check wasn't run for this query.
     wind_divergence: Optional[dict] = None
+
