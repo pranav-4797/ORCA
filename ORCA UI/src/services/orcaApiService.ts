@@ -725,6 +725,96 @@ export class OrcaApiService implements IAIService {
   }
 
   // -------------------------------------------------------------------------
+  // Smart Dashboard (P0 #14) — "Before You Sail" panel that mounts in the
+  // space below the map. Three endpoints: /dashboard, /dashboard/card-tap,
+  // /dashboard/invalidate. All return the same DashboardSnapshot shape.
+  // -------------------------------------------------------------------------
+  public static async fetchDashboard(req: {
+    user_key?: string | null;
+    lat?: number | null;
+    lon?: number | null;
+    location_name?: string | null;
+    language?: string;
+    time_window?: string;
+    vessel_class?: string;
+    skip_briefing?: boolean;
+  }): Promise<any | null> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/dashboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_key: req.user_key || undefined,
+          lat: req.lat ?? undefined,
+          lon: req.lon ?? undefined,
+          location_name: req.location_name || undefined,
+          language: req.language || 'en',
+          time_window: req.time_window || 'today',
+          vessel_class: req.vessel_class || 'small_fishing_boat',
+          skip_briefing: !!req.skip_briefing,
+        }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res.ok) return null;
+      return res.json();
+    } catch (err) {
+      console.warn('[ORCA] dashboard fetch failed:', err);
+      return null;
+    }
+  }
+
+  public static async tapDashboardCard(req: {
+    user_key?: string | null;
+    lat?: number | null;
+    lon?: number | null;
+    location_name?: string | null;
+    language?: string;
+    card: string;
+  }): Promise<any | null> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/dashboard/card-tap?card=${encodeURIComponent(req.card)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_key: req.user_key || undefined,
+          lat: req.lat ?? undefined,
+          lon: req.lon ?? undefined,
+          location_name: req.location_name || undefined,
+          language: req.language || 'en',
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return null;
+      return res.json();
+    } catch (err) {
+      console.warn('[ORCA] dashboard card-tap failed:', err);
+      return null;
+    }
+  }
+
+  public static async invalidateDashboard(req: {
+    user_key?: string | null;
+    lat?: number | null;
+    lon?: number | null;
+  }): Promise<boolean> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/dashboard/invalidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_key: req.user_key || undefined,
+          lat: req.lat ?? undefined,
+          lon: req.lon ?? undefined,
+        }),
+        signal: AbortSignal.timeout(4000),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // SAR Boundary Surveillance (Innovation #3)
   // -------------------------------------------------------------------------
   public static async getSarStatus(): Promise<any> {
