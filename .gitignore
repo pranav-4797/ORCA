@@ -36,3 +36,12 @@ _pre_incois_backup/
 
 # ---- CI / Workflows (skip if lacking workflow scope) ----
 .github/
+
+# ---- Local smoke-test artifacts (never commit) ----
+server_test.out
+server_test.err
+vite_test.out
+vite_test.err
+dashboard_test.json
+dashboard_user.json
+
