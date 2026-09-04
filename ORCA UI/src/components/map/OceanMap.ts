@@ -738,4 +738,112 @@ export class OceanMap {
       })
       .join('');
   }
+
+  // ---------------------------------------------------------------------
+  // Smart Dashboard hooks (P0 #14)
+  // ---------------------------------------------------------------------
+  // The dashboard dispatches map actions through these public methods so
+  // the dashboard component never has to know about Leaflet directly.
+
+  private overlayLayers: { sst?: L.TileLayer.WMS; wind?: L.TileLayer.WMS;
+    chlorophyll?: L.TileLayer.WMS } = {};
+
+  /** Toggle a WMS overlay driven by a dashboard card tap. Idempotent. */
+  public setOverlay(kind: 'sst' | 'wind' | 'chlorophyll', on: boolean): void {
+    if (!this.map) return;
+    const layer = this.overlayLayers[kind];
+    if (on) {
+      if (layer && !this.map.hasLayer(layer)) layer.addTo(this.map);
+      if (!layer) {
+        const wms = this._buildWmsLayer(kind);
+        if (wms) {
+          this.overlayLayers[kind] = wms;
+          wms.addTo(this.map);
+        }
+      }
+    } else if (layer && this.map.hasLayer(layer)) {
+      this.map.removeLayer(layer);
+    }
+  }
+
+  private _buildWmsLayer(kind: 'sst' | 'wind' | 'chlorophyll'): L.TileLayer.WMS | null {
+    // INCOIS THREDDS WMS endpoints (per the official ORCA backend OSF paths).
+    // These are the same sources the backend hits; the UI mirror is read-only
+    // and degrades to a no-op when the upstream is down.
+    const config: Record<string, { url: string; layers: string; format?: string }> = {
+      sst: {
+        url: 'https://incois.gov.in/thredds/wms/osf/winds/SST_NIO.nc',
+        layers: 'SST',
+        format: 'image/png',
+      },
+      wind: {
+        url: 'https://incois.gov.in/thredds/wms/osf/ww3/rsmc_combined_ww3.nc',
+        layers: 'UWND__VWND-mag',
+        format: 'image/png',
+      },
+      chlorophyll: {
+        url: 'https://incois.gov.in/thredds/wms/osf/chl/EOS6_OCM_NIO_L4.nc',
+        layers: 'CHL',
+        format: 'image/png',
+      },
+    };
+    const cfg = config[kind];
+    if (!cfg) return null;
+    return L.tileLayer.wms(cfg.url, {
+      layers: cfg.layers,
+      format: cfg.format || 'image/png',
+      transparent: true,
+      opacity: 0.65,
+      version: '1.3.0',
+      attribution: 'INCOIS / ISRO',
+    });
+  }
+
+  /** Pan/zoom to a PFZ center, draw a temporary highlight ring, and open a
+   * detail popup with distance / bearing / SST / wind / chlorophyll. */
+  public flyToPFZ(opts: {
+    center: [number, number];
+    distance_km: number;
+    bearing_deg: number;
+    bearing_compass: string;
+    sst?: number | null;
+    landmark?: string | null;
+    headline?: string;
+    source?: string;
+  }): void {
+    if (!this.map) return;
+    const { center, distance_km, bearing_deg, bearing_compass, sst, landmark,
+            headline, source } = opts;
+    this.map.flyTo(center, Math.max(this.map.getZoom(), 10), { animate: true, duration: 1.2 });
+    const ring = L.circle(center, {
+      radius: 1500, color: '#22c55e', fillColor: '#22c55e',
+      fillOpacity: 0.18, weight: 2, dashArray: '4,4',
+    }).addTo(this.map);
+    setTimeout(() => { try { this.map?.removeLayer(ring); } catch {} }, 6000);
+    const sstLine = sst != null ? `<div><b>SST at zone:</b> ${sst} °C</div>` : '';
+    const sourceLine = source ? `<div><b>Source:</b> ${source}</div>` : '';
+    const landmarkLine = landmark ? `<div><b>Nearest landmark:</b> ${landmark}</div>` : '';
+    const html = `
+      <div class="orca-pfz-popup">
+        <div class="popup-title">🎣 ${headline || 'Nearest PFZ'}</div>
+        <div><b>Distance:</b> ${distance_km.toFixed(1)} km</div>
+        <div><b>Bearing:</b> ${bearing_deg.toFixed(0)}° (${bearing_compass})</div>
+        ${sstLine}
+        ${landmarkLine}
+        ${sourceLine}
+      </div>`;
+    L.popup({ closeButton: true, autoClose: false, offset: [0, -8] })
+      .setLatLng(center).setContent(html).openOn(this.map);
+  }
+
+  /** Highlight the hazard area (zoom to bounding box of CAP polygons). */
+  public highlightHazard(geojson: any | null): void {
+    if (!this.map || !geojson?.features) return;
+    const polys = geojson.features
+      .filter((f: any) => f.properties?.kind === 'cap_hazard' && f.geometry?.type === 'Polygon')
+      .map((f: any) => f.geometry.coordinates[0].map(([lon, lat]: [number, number]) => L.latLng(lat, lon)));
+    if (polys.length === 0) return;
+    const bounds = L.latLngBounds(polys.flat());
+    this.map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 9, duration: 1.2 });
+  }
 }
