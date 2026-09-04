@@ -90,6 +90,9 @@ class TTLStore:
 # Shared instances (one namespace per concern).
 session_store = TTLStore("sessions")
 response_cache = TTLStore("responses")
+memory_store = TTLStore("memory")        # long-term inferred fisher preferences
+dashboard_store = TTLStore("dashboard")  # proactive dashboard payload cache
+tile_cache = TTLStore("tiles")           # INCOIS WMS GetMap proxy cache
 
 
 def info() -> dict:

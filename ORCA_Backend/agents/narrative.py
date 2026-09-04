@@ -72,6 +72,28 @@ def is_fishing_query(*texts: str) -> bool:
     return any(k in blob for k in FISHING_KEYWORDS)
 
 
+# The anti-fabrication contract. Shared verbatim by every prose writer in this
+# module (full answers and dashboard briefings) so honesty rules can never
+# drift apart between the two.
+_HARD_RULES = (
+    "HARD RULES:\n"
+    "- Use ONLY the live fields supplied below. NEVER invent or estimate a "
+    "number, place, distance, catch report or forecast that is not given, and "
+    "never restate a figure with a different value.\n"
+    "- Quote every figure EXACTLY as supplied — do not round it, truncate it, "
+    "drop a decimal or convert its unit. 28.49 km/h is '28.49 km/h', never "
+    "'28 km/h' or '~28.5 km/h'. You may describe a bearing in words in addition "
+    "to the exact degrees, but the degrees themselves stay unchanged.\n"
+    "- If a field is absent, simply do not mention it. Do not say data is "
+    "missing unless nothing at all was supplied.\n"
+    "- If the safety verdict is UNSAFE, EXTREME or CRITICAL, your FIRST "
+    "sentence must plainly tell them not to venture out.\n"
+    "- Write the ENTIRE answer in the requested language, including the "
+    "insight and the recommendation. Keep only proper nouns (INCOIS, SAMUDRA, "
+    "OceanSat-2, place names) and unit symbols as they are.\n"
+)
+
+
 _SYSTEM_PROMPT = (
     "You are an expert marine advisory specialist and oceanographer writing for "
     "Indian coastal fishers and small-vessel skippers. You turn raw INCOIS live "
@@ -104,22 +126,8 @@ _SYSTEM_PROMPT = (
     "watching. Keep coordinates, distance and bearing verbatim when supplied — "
     "that is what a skipper steers by.\n"
     "\n"
-    "HARD RULES:\n"
-    "- Use ONLY the live fields supplied below. NEVER invent or estimate a "
-    "number, place, distance, catch report or forecast that is not given, and "
-    "never restate a figure with a different value.\n"
-    "- Quote every figure EXACTLY as supplied — do not round it, truncate it, "
-    "drop a decimal or convert its unit. 28.49 km/h is '28.49 km/h', never "
-    "'28 km/h' or '~28.5 km/h'. You may describe a bearing in words in addition "
-    "to the exact degrees, but the degrees themselves stay unchanged.\n"
-    "- If a field is absent, simply do not mention it. Do not say data is "
-    "missing unless nothing at all was supplied.\n"
-    "- If the safety verdict is UNSAFE, EXTREME or CRITICAL, your FIRST "
-    "sentence must plainly tell them not to venture out.\n"
-    "- Write the ENTIRE answer in the requested language, including the "
-    "insight and the recommendation. Keep only proper nouns (INCOIS, SAMUDRA, "
-    "OceanSat-2, place names) and unit symbols as they are.\n"
-    "- Plain prose only: no headings, no tables, no bullet lists, no bold or "
+    + _HARD_RULES
+    + "- Plain prose only: no headings, no tables, no bullet lists, no bold or "
     "italic markers, no emoji. One or two paragraphs, blank line between them."
 )
 
@@ -186,6 +194,20 @@ def _fmt_block(label: str, d: dict | None) -> str:
 
 
 _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+# Words that make "do not go out" unmistakable, across the supported languages.
+# Used to verify the model actually honoured a danger verdict.
+_DANGER_WORDS = (
+    "not", "avoid", "don't", "do not", "stay", "unsafe", "danger",
+    "नहीं", "मत", "न ", "टाळ", "नका", "வேண்டாம்", "கூடாது",
+    "వద్దు", "వెళ్లవద్దు", "അരുത്", "പോകരുത്", "ಬೇಡಿ", "ન ", "না",
+    "যাবেন না",
+)
+
+
+def _honours_danger(text: str) -> bool:
+    low = (text or "").lower()
+    return any(w in low for w in _DANGER_WORDS)
 
 
 def _numbers_in(d: dict | None) -> list[str]:
@@ -305,18 +327,182 @@ def compose_narrative(
         return None
 
     # Safety guard: a danger verdict must be unmistakable in the text.
-    if verdict_txt in _DANGER_VERDICTS:
-        low = text.lower()
-        negative = any(
-            w in low for w in (
-                "not", "avoid", "don't", "do not", "stay", "unsafe", "danger",
-                "नहीं", "मत", "न ", "टाळ", "नका", "வேண்டாம்", "கூடாது",
-                "వద్దు", "వెళ్లవద్దు", "അരുത്", "പോകരുത്", "ಬೇಡಿ", "ન ", "না",
-                "যাবেন না",
-            )
-        )
-        if not negative:
-            _log.info("narrative dropped — danger verdict not honoured")
-            return None
+    if verdict_txt in _DANGER_VERDICTS and not _honours_danger(text):
+        _log.info("narrative dropped — danger verdict not honoured")
+        return None
 
     return text
+
+
+# ---------------------------------------------------------------------------
+# "Before You Sail" dashboard briefing
+# ---------------------------------------------------------------------------
+# The dashboard needs three short pieces of localized prose: the briefing, one
+# sentence explaining why the top card is on top, and one sentence explaining
+# the readiness score. They are produced in a SINGLE forced-tool-call so the
+# whole proactive dashboard costs exactly one LLM call, and they reuse the
+# _HARD_RULES contract above so a briefing can never invent a figure either.
+
+_BRIEFING_SYSTEM_PROMPT = (
+    "You are ORCA's pre-departure briefing writer for Indian coastal fishers "
+    "and small-vessel skippers. You are NOT answering a question — nobody "
+    "asked anything. You are the first thing the fisher sees when they open "
+    "the app, so you tell them what today's live INCOIS data means for going "
+    "out, before they have to ask.\n"
+    "\n"
+    "Write like an experienced skipper briefing a friend on the jetty: "
+    "concrete, calm, practical. Lead with the decision (go, go carefully, or "
+    "stay in), support it with the figures that decide it, and close with the "
+    "one thing to watch. No greetings, no 'here is your briefing', no "
+    "restating the location name back at them.\n"
+    "\n"
+    + _HARD_RULES
+    + "- Plain prose only: no headings, no bullet lists, no bold markers, no "
+    "emoji.\n"
+    "\n"
+    "OUTPUT FORMAT — exactly three lines, each starting with its tag, nothing "
+    "before or after:\n"
+    "BRIEFING: <one paragraph of 40 to 80 words, no line breaks>\n"
+    "WHY: <one sentence on why the top-ranked card matters most right now, "
+    "using its figures>\n"
+    "READINESS: <one short sentence naming the factor that most affected the "
+    "readiness score; never repeat the numeric score>\n"
+    "Write the text after every tag in the requested language. Keep the three "
+    "tags themselves in English exactly as shown."
+)
+
+_BRIEFING_TAGS = ("BRIEFING", "WHY", "READINESS")
+
+
+def _parse_tagged(raw: str) -> dict:
+    """Split the three tagged lines out of the briefing completion.
+
+    Tolerant by design: a tag the model dropped simply comes back empty, and
+    the caller decides whether what survived is usable.
+    """
+    out = {tag: "" for tag in _BRIEFING_TAGS}
+    current = None
+    for line in (raw or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        matched = False
+        for tag in _BRIEFING_TAGS:
+            match = re.match(rf"^\**{tag}\**\s*[:：]\s*(.*)$", stripped, re.IGNORECASE)
+            if match:
+                current, matched = tag, True
+                out[tag] = match.group(1).strip()
+                break
+        if not matched and current:
+            out[current] = (out[current] + " " + stripped).strip()
+    return out
+
+
+def _card_block(cards: list | None) -> str:
+    """Compact 'what the dashboard is showing' block for the prompt."""
+    if not cards:
+        return ""
+    lines = []
+    for card in cards[:6]:
+        bits = [f"{card.get('type', '?')}"]
+        if card.get("value") is not None:
+            bits.append(f"{card['value']}{(' ' + card['unit']) if card.get('unit') else ''}")
+        for entry in (card.get("why") or [])[:3]:
+            bits.append(f"{entry.get('key')}={entry.get('value')}")
+        lines.append("  * " + "; ".join(str(b) for b in bits))
+    return "- Cards on the dashboard, highest priority first:\n" + "\n".join(lines)
+
+
+def compose_briefing(
+    *,
+    language: str = "en",
+    location_name: str = "",
+    verdict: str | None = None,
+    ocean: dict | None = None,
+    pfz: dict | None = None,
+    hazard: dict | None = None,
+    cards: list | None = None,
+    readiness: dict | None = None,
+    local_hour: int | None = None,
+    memory_note: str = "",
+    timeout: float | None = None,
+) -> dict | None:
+    """One LLM call producing the dashboard's three localized prose pieces.
+
+    Returns None when the LLM is unavailable, when the model quoted none of the
+    live figures, or when a danger verdict was not honoured — the dashboard
+    then renders its cards with no briefing rather than a fabricated one.
+    """
+    if not is_enabled() or not llm_client.is_available():
+        return None
+    if not (ocean or pfz or hazard or cards):
+        return None            # nothing live to brief on -- say nothing
+
+    lang_name = _LANGUAGE_NAMES.get((language or "en").lower(), "English")
+    verdict_txt = str(verdict or "").upper()
+
+    top_card = (cards or [{}])[0].get("type", "") if cards else ""
+    factor_lines = ""
+    if readiness and readiness.get("factors"):
+        factor_lines = "; ".join(
+            f"{f.get('factor')} {f.get('contribution')}/{f.get('max')} ({f.get('detail')})"
+            for f in readiness["factors"]
+        )
+
+    blocks = [
+        f"- Location: {location_name}" if location_name else "",
+        f"- Local hour now: {local_hour:02d}:00" if local_hour is not None else "",
+        _fmt_block("Live ocean state", ocean),
+        _fmt_block("Nearest potential fishing zone (PFZ)", pfz),
+        _fmt_block("Hazard / safety assessment", hazard),
+        _card_block(cards),
+        f"- Top-ranked card: {top_card}" if top_card else "",
+        f"- Readiness factors: {factor_lines}" if factor_lines else "",
+        f"- Known about this fisher: {memory_note}" if memory_note else "",
+    ]
+    live_block = "\n".join(b for b in blocks if b)
+
+    danger_note = ""
+    if verdict_txt in _DANGER_VERDICTS:
+        danger_note = (
+            f"\nSAFETY OVERRIDE: the assessed verdict is {verdict_txt}. The "
+            "briefing's first sentence must plainly tell them not to go out."
+        )
+
+    user_prompt = (
+        f"Write today's pre-departure briefing in {lang_name}.\n"
+        f"{danger_note}\n\n"
+        f"LIVE DATA AVAILABLE RIGHT NOW:\n{live_block}\n"
+    )
+
+    to = timeout if timeout is not None else float(
+        os.getenv("ORCA_BRIEFING_TIMEOUT", "12").strip() or 12)
+    try:
+        raw = llm_client.complete(
+            _BRIEFING_SYSTEM_PROMPT, user_prompt,
+            temperature=0.7, max_tokens=700, timeout=to, attempts=1,
+        )
+    except llm_client.LLMUnavailableError:
+        return None
+    except Exception as exc:            # the dashboard must still render
+        _log.warning("compose_briefing failed (%s); dashboard omits briefing", exc)
+        return None
+
+    parsed = _parse_tagged(raw)
+    briefing = _strip_markup(parsed["BRIEFING"]).replace("\n", " ").strip()
+    why = _strip_markup(parsed["WHY"]).replace("\n", " ").strip()
+    note = _strip_markup(parsed["READINESS"]).replace("\n", " ").strip()
+    if len(briefing) < 40:
+        return None
+
+    # Anti-generic guard: the briefing must quote a figure we actually supplied.
+    live_nums = _numbers_in(ocean) + _numbers_in(pfz)
+    if live_nums and not any(n in briefing for n in live_nums):
+        _log.info("briefing dropped — quoted none of the live figures")
+        return None
+
+    if verdict_txt in _DANGER_VERDICTS and not _honours_danger(briefing):
+        _log.info("briefing dropped — danger verdict not honoured")
+        return None
+
+    return {"briefing": briefing, "why_top_card": why, "readiness_note": note}

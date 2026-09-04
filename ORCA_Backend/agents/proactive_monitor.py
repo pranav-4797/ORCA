@@ -41,6 +41,12 @@ def list_users() -> list[dict]:
     return [{**u, "user_id": uid} for uid, u in _users.items()]
 
 
+def get_user(user_id: str) -> dict | None:
+    """Return a single registered user's saved record (without user_id) or None."""
+    entry = _users.get(user_id)
+    return dict(entry) if entry else None
+
+
 async def register_user(user_id: str, lat: float, lon: float,
                         name: str = "", phone: str = "",
                         location_name: str = "", language: str = "en",
