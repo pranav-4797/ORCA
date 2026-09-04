@@ -22,6 +22,7 @@ Visualisation payloads (P1 #13):
 from __future__ import annotations
 import asyncio
 import hashlib
+import logging
 import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -36,6 +37,7 @@ import sessions as session_store
 import storage
 from agents.proactive_monitor import (
     ProactiveMonitorAgent,
+    get_user,
     list_users,
     register_user,
     unregister_user,
@@ -56,6 +58,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ORCA Agent Backend", version="0.3.0", lifespan=lifespan)
+
+logger = logging.getLogger("orca.main")
 
 # --- CORS / API-key hardening (NFR security) ------------------------------
 # CORS_ORIGINS=https://your.domain,https://demo.domain   (default: * for dev)
@@ -321,6 +325,130 @@ async def query_voice(
 # User registry + proactive alerts (PS component #10 delivery channels)
 # ---------------------------------------------------------------------------
 
+# Cached dashboard entries per user/location, with short TTL so subsequent
+# card taps don't re-fetch INCOIS / Bhuvan every time. ORCA_DASHBOARD_TTL_S
+# default 120s matches the ocean-state agent TTL.
+_DASHBOARD_TTL_S = int(os.getenv("ORCA_DASHBOARD_TTL_S", "120").strip() or 120)
+
+
+def _dashboard_cache_key(user_key: str, lat: float, lon: float) -> str:
+    return f"{user_key or 'anon'}|{round(lat, 3):.3f}|{round(lon, 3):.3f}"
+
+
+async def _gather_dashboard_inputs(location: "Location", time_window: str,
+                                 vessel_class: str = "small_fishing_boat"):
+    """Run OceanState / PFZ / Hazard in parallel; never raise.
+
+    Each agent has its own 2-minute in-process cache, so a back-to-back
+    /dashboard call is essentially free. The four-thread pool limit on
+    OceanState's INCOIS fetch is the latency ceiling, not the LLM.
+
+    The three specialist calls run in parallel via asyncio.gather. PFZ
+    depends on OceanState, so it is sequenced after, but Hazard also reads
+    OceanState and is run in parallel with PFZ.
+    """
+    from agents.dashboard_agent import build_dashboard
+    from agents.hazard_agent import HazardAgent
+    from agents.ocean_state_agent import OceanStateAgent
+    from agents.pfz_agent import PFZAgent
+    from agents.narrative import compose_briefing
+    from data_connectors.geocode import reverse_geocode
+    import memory as memory_pkg
+    import memory.memory_service as memory_service
+
+    ocean_agent = OceanStateAgent()
+    pfz_agent = PFZAgent()
+    hazard_agent = HazardAgent()
+
+    try:
+        ocean, _ = await asyncio.to_thread(ocean_agent.run, location, time_window)
+    except Exception as exc:
+        logger.warning("dashboard ocean fetch failed: %s", exc)
+        ocean = None
+
+    async def _pfz():
+        try:
+            return await asyncio.to_thread(
+                pfz_agent.run, location, ocean, time_window
+            )
+        except Exception as exc:
+            logger.warning("dashboard pfz fetch failed: %s", exc)
+            return None
+
+    async def _hazard():
+        try:
+            return await asyncio.to_thread(
+                hazard_agent.run, ocean, vessel_class
+            )
+        except Exception as exc:
+            logger.warning("dashboard hazard fetch failed: %s", exc)
+            return None
+
+    pfz, risk = await asyncio.gather(_pfz(), _hazard())
+
+    return {
+        "ocean": ocean,
+        "pfz": pfz,
+        "risk": risk,
+        "build_dashboard": build_dashboard,
+        "compose_briefing": compose_briefing,
+        "reverse_geocode": reverse_geocode,
+        "memory_pkg": memory_pkg,
+        "memory_service": memory_service,
+    }
+
+
+def _ocean_summary(ocean) -> dict:
+    """Flat dict of live ocean fields, only ones that are actually populated.
+
+    Used by the dashboard so the briefing LLM can quote the figures without
+    being handed internal agent objects.
+    """
+    if ocean is None:
+        return {}
+    out: dict = {}
+    fs = getattr(ocean, "field_sources", {}) or {}
+    for f in ("sst_celsius", "wave_height_m", "primary_swell_height_m",
+              "wind_speed_kmh", "wind_gust_kmh", "wind_direction",
+              "wind_direction_deg", "surface_current_mps", "tide_level_m",
+              "visibility_km", "chlorophyll_mg_m3"):
+        v = getattr(ocean, f, None)
+        if v is None or str(fs.get(f, "")) == "unavailable":
+            continue
+        out[f] = v
+    return out
+
+
+def _pfz_summary(pfz) -> dict:
+    if pfz is None:
+        return {}
+    out: dict = {}
+    for f in ("distance_from_reference_km", "bearing_deg", "sst_at_zone_celsius"):
+        v = getattr(pfz, f, None)
+        if v is not None:
+            out[f] = v
+    return out
+
+
+def _hazard_summary(risk) -> tuple[str | None, dict]:
+    if risk is None:
+        return None, {}
+    status = str(getattr(getattr(risk, "status", None), "value",
+                         getattr(risk, "status", "")) or "")
+    out: dict = {"status": status}
+    flags = []
+    for flag in (getattr(risk, "flags", None) or []):
+        label = getattr(flag, "label", None) or (flag.get("label") if isinstance(flag, dict) else None)
+        detail = getattr(flag, "detail", None) or (flag.get("detail") if isinstance(flag, dict) else None)
+        if label:
+            flags.append({"label": str(label), "detail": str(detail or "")})
+    if flags:
+        out["flags"] = flags
+    if getattr(risk, "cap_polygons", None):
+        out["cap_alerts"] = len(risk.cap_polygons)
+    return status, out
+
+
 @app.post("/users/register")
 async def users_register(req: RegisterRequest):
     user = await register_user(
@@ -355,6 +483,214 @@ async def users_position(user_id: str, req: PositionRequest):
     if not update_position(user_id, req.lat, req.lon, req.location_name):
         raise HTTPException(404, "unknown user")
     return {"updated": True}
+
+
+# ---------------------------------------------------------------------------
+# "Before You Sail" Dashboard (P0 #14 from gap analysis)
+# ---------------------------------------------------------------------------
+# The dashboard is what the fisher sees on app open. It serves:
+#   * A ranked list of live cards (PFZ, SST, Wind, Current, Tide, Hazard)
+#   * The Today's Fishing Readiness score (0-100) with per-factor breakdown
+#   * One localized briefing paragraph + 2 one-sentence notes
+#   * Quick-action chips that internally dispatch the same query
+#
+# The agent calls (ocean, pfz, hazard) run in parallel; the briefing LLM is
+# a single follow-up call reusing the SAME hard-rules contract used for full
+# /query answers, so the dashboard cannot fabricate a figure either.
+#
+# `user_key` (optional) loads the registered fisher's saved position and
+# language; otherwise the call must supply `lat`/`lon`/`language` inline.
+
+class DashboardRequest(BaseModel):
+    user_key: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    location_name: str | None = None
+    language: str = "en"
+    time_window: str = "today"
+    vessel_class: str = "small_fishing_boat"
+    # Skip the LLM briefing (cards + readiness only). Useful for first paint.
+    skip_briefing: bool = False
+
+
+def _resolve_dashboard_point(req: "DashboardRequest") -> "Location | None":
+    """Pick a Location for the dashboard: registered user first, then inline."""
+    if req.user_key:
+        saved = get_user(req.user_key)
+        if saved:
+            return Location(
+                name=saved.get("location_name") or req.location_name or "Saved position",
+                lat=float(saved["lat"]),
+                lon=float(saved["lon"]),
+            )
+    if req.lat is not None and req.lon is not None:
+        return Location(
+            name=req.location_name or f"{float(req.lat):.4f}, {float(req.lon):.4f}",
+            lat=float(req.lat), lon=float(req.lon),
+        )
+    return None
+
+
+@app.post("/dashboard")
+async def dashboard(req: DashboardRequest):
+    """One-shot smart dashboard for the fisher's first screen.
+
+    Resolves the location from the registered user (if `user_key` given) or
+    inline `lat`/`lon`, then returns the live, ranked cards, the readiness
+    score, and (when the LLM is reachable) one localized briefing paragraph.
+    """
+    location = _resolve_dashboard_point(req)
+    if location is None:
+        raise HTTPException(
+            400,
+            "Provide `user_key` of a registered user, or inline `lat` + `lon`.",
+        )
+
+    cache_key = _dashboard_cache_key(req.user_key or "", location.lat, location.lon)
+    cached = storage.dashboard_store.get(cache_key) if req.user_key else None
+    if cached is not None:
+        return cached
+
+    inputs = await _gather_dashboard_inputs(location, req.time_window, req.vessel_class)
+    ocean, pfz, risk = inputs["ocean"], inputs["pfz"], inputs["risk"]
+    build_dashboard = inputs["build_dashboard"]
+    compose_briefing = inputs["compose_briefing"]
+    memory_service = inputs["memory_service"]
+    reverse_geocode = inputs["reverse_geocode"]
+
+    # Best-effort place name upgrade (geocoder is cached + tolerant of failure)
+    if not req.location_name and not req.user_key:
+        try:
+            upgraded = reverse_geocode(location.lat, location.lon)
+            if upgraded:
+                location.name = upgraded
+        except Exception:
+            pass
+
+    mem = memory_service.get(req.user_key) if req.user_key else None
+    dashboard = build_dashboard(
+        location=location, language=req.language, memory=mem,
+        ocean=ocean, pfz=pfz, risk=risk, vessel_class=req.vessel_class,
+    )
+
+    # Personalize over time: opening the dashboard credits every visible card
+    # weakly. An explicit card tap (below) outweighs the auto-credit.
+    if req.user_key:
+        try:
+            memory_service.observe_safe(
+                req.user_key,
+                intent="dashboard_open",
+                location_name=location.name,
+                language=req.language,
+                hour=__import__("datetime").datetime.utcnow().hour,
+            )
+        except Exception:
+            pass
+
+    briefing = None
+    if not req.skip_briefing and (ocean or pfz or risk):
+        try:
+            briefing = compose_briefing(
+                language=req.language,
+                location_name=location.name,
+                verdict=str(getattr(getattr(risk, "status", None), "value", "")
+                            or "") or None,
+                ocean=_ocean_summary(ocean),
+                pfz=_pfz_summary(pfz),
+                hazard=_hazard_summary(risk)[1],
+                cards=dashboard.get("cards"),
+                readiness=dashboard.get("readiness"),
+            )
+        except Exception as exc:
+            logger.debug("dashboard briefing failed: %s", exc)
+            briefing = None
+
+    payload = {
+        "location": {
+            "name": location.name,
+            "lat": location.lat, "lon": location.lon,
+        },
+        "language": req.language,
+        "time_window": req.time_window,
+        "vessel_class": req.vessel_class,
+        "cards": dashboard.get("cards", []),
+        "omitted_cards": dashboard.get("omitted_cards", []),
+        "readiness": dashboard.get("readiness"),
+        "hazard_override": dashboard.get("hazard_override", False),
+        "briefing": briefing,
+        # Quick-action chip definitions (so the client can render shortcuts
+        # that map to existing /query intents).
+        "quick_actions": [
+            {"id": "pfz", "label": "Nearest PFZ", "icon": "fish",
+             "query": "Where is the nearest potential fishing zone from here?"},
+            {"id": "sst", "label": "SST", "icon": "thermometer",
+             "query": "What is the sea-surface temperature here right now?"},
+            {"id": "wind", "label": "Wind", "icon": "wind",
+             "query": "Wind at current location"},
+            {"id": "tide", "label": "Tide", "icon": "tide",
+             "query": "Tide at current location"},
+        ],
+        "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "cached": False,
+    }
+
+    # Cache the full payload (cards + briefing) for the TTL window so a card
+    # tap + re-render doesn't re-fetch INCOIS twice.
+    if req.user_key:
+        try:
+            storage.dashboard_store.set(cache_key, payload, ttl_s=_DASHBOARD_TTL_S)
+        except Exception:
+            pass
+    payload["cached"] = False
+    return payload
+
+
+@app.post("/dashboard/invalidate")
+async def dashboard_invalidate(req: DashboardRequest):
+    """Force a fresh fetch on the next /dashboard call (e.g. after a user
+    changes their saved position via /users/{id}/position)."""
+    location = _resolve_dashboard_point(req)
+    if location is None:
+        raise HTTPException(400, "Provide user_key or lat+lon.")
+    key = _dashboard_cache_key(req.user_key or "", location.lat, location.lon)
+    storage.dashboard_store.delete(key)
+    return {"invalidated": True}
+
+
+@app.post("/dashboard/card-tap")
+async def dashboard_card_tap(req: "DashboardRequest", card: str):
+    """Called by the client when the fisher taps a card or quick-action chip.
+
+    It (1) records a strong tap signal into MarineMemory so the card will rank
+    higher next time, and (2) returns the same full /dashboard payload so the
+    UI can re-render with the new ranking immediately.
+    """
+    if not card or not isinstance(card, str):
+        raise HTTPException(400, "card is required (pfz/sst/wind/current/tide/hazard)")
+    card = card.strip().lower()
+    if card not in ("pfz", "sst", "wind", "current", "tide", "hazard"):
+        raise HTTPException(400, f"unknown card: {card}")
+
+    if req.user_key:
+        try:
+            import memory.memory_service as _ms
+            _ms.observe_safe(req.user_key, card=card,
+                             location_name=(req.location_name or None),
+                             language=req.language,
+                             hour=__import__("datetime").datetime.utcnow().hour)
+        except Exception:
+            pass
+
+    # Reuse the cached payload if available so the tap stays instant.
+    location = _resolve_dashboard_point(req)
+    if location is not None:
+        key = _dashboard_cache_key(req.user_key or "", location.lat, location.lon)
+        cached = storage.dashboard_store.get(key) if req.user_key else None
+        if cached is not None:
+            cached["last_tap"] = card
+            return cached
+    # Cold path: re-run the full pipeline.
+    return await dashboard(req)
 
 
 @app.get("/alerts/{user_id}")
