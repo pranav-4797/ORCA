@@ -88,12 +88,36 @@ class AppStore {
   // and overrides GPS / typed / PFZ coordinates. Never snapped.
   public mapPoint: [number, number] | null = null;
 
+  // Single source of truth for "where the dashboard is acting on". Priority:
+  //   1. map pin (mapPoint)  ->  source="map_pin"
+  //   2. current GPS         ->  source="gps"
+  //   3. none
+  // The Quick Actions dock re-renders whenever this changes. Stale stored
+  // GPS is never reused -- it must be a live fix or an explicit map pin.
+  public activeLocation: { lat: number; lon: number; source: 'gps' | 'map_pin';
+                            label: string; setAt: number } | null = null;
+
   // Operational picture: /viz payloads for the last answered query.
   public vizGeojson: any = null;
   public vizSeries: OrcaVizSeries | null = null;
   public vizSessionId: string | null = null;
   public mapPanelOpen: boolean = true;
   public activityPanelOpen: boolean = false;
+
+  // Smart Dashboard (P0 #14) — the "Before You Sail" panel that mounts in
+  // the space below the map. Pulled from POST /dashboard on app open and
+  // whenever the user's GPS / map-point changes.
+  public dashboard: any | null = null;
+  public dashboardLoading: boolean = false;
+  public dashboardError: string | null = null;
+  public dashboardUpdatedAt: number = 0;
+  /** Map overlay toggles driven by card taps. */
+  public dashboardOverlay: {
+    sst: boolean;
+    wind: boolean;
+    chlorophyll: boolean;
+    hazardHighlight: boolean;
+  } = { sst: false, wind: false, chlorophyll: false, hazardHighlight: false };
 
 // Query routing: 'auto' = ORCA picks best specialist(s) (default, fast);
   // 'panel' = all specialists discuss then reconcile (demo/deep);
@@ -181,7 +205,9 @@ class AppStore {
       this.authInitialized = true;
       if (user) {
         void saveUserProfile(user);
-        
+        // First paint: pull the dashboard for the just-logged-in user.
+        void this.refreshDashboard({ force: true });
+
         // 1. Check user category/role (Check local storage cache first, then Firestore)
         try {
           const cachedRole = localStorage.getItem(`orca_role_${user.uid}`);
@@ -467,6 +493,47 @@ class AppStore {
     } else if (coords) {
       this.locationBanner = null;
     }
+    // Update the single-source-of-truth activeLocation (map pin wins).
+    this._refreshActiveLocationFromSources();
+    this.notify();
+    // Smart dashboard follows the GPS fix in the background.
+    if (coords) void this.refreshDashboard({ force: true });
+  }
+
+  /**
+   * Single source of truth: map pin > current GPS. The Quick Actions dock
+   * and the chat auto-submit both read from `activeLocation` so they can
+   * never disagree about where the user is acting from.
+   */
+  private _refreshActiveLocationFromSources(): void {
+    if (this.mapPoint) {
+      this.activeLocation = {
+        lat: this.mapPoint[0], lon: this.mapPoint[1],
+        source: 'map_pin', label: 'Map pin', setAt: Date.now(),
+      };
+      return;
+    }
+    // Only a live (granted) fix or a fresh cached one is honored -- the
+    // backend's own Panaji default is never inherited as a "user choice".
+    if (this.gpsCoords && (this.gpsStatus === 'granted' || this.gpsStatus === 'cached')) {
+      this.activeLocation = {
+        lat: this.gpsCoords[0], lon: this.gpsCoords[1],
+        source: 'gps', label: 'Current GPS', setAt: Date.now(),
+      };
+      return;
+    }
+    this.activeLocation = null;
+  }
+
+  /** Explicit user "Use this point" from the location picker. */
+  public setActiveLocation(loc: { lat: number; lon: number;
+                                  label: string;
+                                  source: 'gps' | 'map_pin' } | null): void {
+    if (!loc) {
+      this.activeLocation = null;
+    } else {
+      this.activeLocation = { ...loc, setAt: Date.now() };
+    }
     this.notify();
   }
 
@@ -480,7 +547,21 @@ class AppStore {
    * `map_point` (a distinct field from GPS — it must never be snapped). */
   public setMapPoint(coords: [number, number] | null): void {
     this.mapPoint = coords;
+    if (coords) {
+      // Map pin is the highest-priority active location.
+      this.activeLocation = {
+        lat: coords[0], lon: coords[1],
+        source: 'map_pin',
+        label: 'Map pin',
+        setAt: Date.now(),
+      };
+    } else {
+      // Pin cleared -> fall back to live GPS if available.
+      this._refreshActiveLocationFromSources();
+    }
     this.notify();
+    // Map-tap is a hard location override -> dashboard re-fetches at once.
+    if (coords) void this.refreshDashboard({ force: true });
   }
 
   /** Restore a previously saved GPS position so we never start on Panaji.
@@ -1180,6 +1261,105 @@ class AppStore {
   public setSearchQuery(q: string): void {
     this.searchQuery = q;
     this.notify();
+  }
+
+  // -------- Smart Dashboard mutators ------------------------------------
+  public setDashboard(snapshot: any | null, error: string | null = null): void {
+    this.dashboard = snapshot;
+    this.dashboardError = error;
+    this.dashboardUpdatedAt = snapshot ? Date.now() : this.dashboardUpdatedAt;
+    this.notify();
+  }
+
+  public setDashboardLoading(loading: boolean): void {
+    this.dashboardLoading = loading;
+    this.notify();
+  }
+
+  public setDashboardOverlay(overlay: Partial<{
+    sst: boolean;
+    wind: boolean;
+    chlorophyll: boolean;
+    hazardHighlight: boolean;
+  }>): void {
+    this.dashboardOverlay = { ...this.dashboardOverlay, ...overlay };
+    this.notify();
+  }
+
+  public toggleDashboardOverlay(key: 'sst' | 'wind' | 'chlorophyll' | 'hazardHighlight'): void {
+    this.dashboardOverlay = {
+      ...this.dashboardOverlay,
+      [key]: !this.dashboardOverlay[key],
+    };
+    this.notify();
+  }
+
+  /**
+   * Fetch the dashboard for the current effective location. Resolves
+   * `user_key` (Firebase UID) -> saved coords first, then device GPS, then
+   * map point. Always overwrites `this.dashboard` (with the live payload
+   * or null on error) and stamps `dashboardUpdatedAt`.
+   */
+  public async refreshDashboard(opts: { force?: boolean; skipBriefing?: boolean } = {}): Promise<void> {
+    if (this.dashboardLoading) return;
+    // Don't re-hit the backend more than once per 30s unless caller forces.
+    const fresh = this.dashboardUpdatedAt > 0 && (Date.now() - this.dashboardUpdatedAt) < 30_000;
+    if (fresh && !opts.force) return;
+
+    const lang = (this.activeLanguage || 'en') as 'en' | 'mr' | 'hi';
+    const userKey = this.currentUser?.uid || undefined;
+    let lat: number | null = null;
+    let lon: number | null = null;
+    let locationName: string | null = null;
+    if (this.mapPoint) {
+      lat = this.mapPoint[0]; lon = this.mapPoint[1];
+      locationName = 'Map selection';
+    } else if (this.gpsCoords) {
+      lat = this.gpsCoords[0]; lon = this.gpsCoords[1];
+    } else {
+      const fallback = OrcaApiService.effectiveGps();
+      if (fallback && fallback.length >= 2) { lat = fallback[0]; lon = fallback[1]; }
+    }
+    this.setDashboardLoading(true);
+    try {
+      const snap = await OrcaApiService.fetchDashboard({
+        user_key: userKey,
+        lat, lon,
+        location_name: locationName,
+        language: lang,
+        skip_briefing: !!opts.skipBriefing,
+      });
+      if (snap) {
+        this.setDashboard(snap, null);
+      } else {
+        this.setDashboard(this.dashboard, 'Backend unreachable or returned no data');
+      }
+    } catch (err: any) {
+      this.setDashboard(this.dashboard, err?.message || 'Dashboard fetch failed');
+    } finally {
+      this.setDashboardLoading(false);
+    }
+  }
+
+  public async tapDashboardCard(card: string): Promise<void> {
+    const lang = (this.activeLanguage || 'en') as 'en' | 'mr' | 'hi';
+    const userKey = this.currentUser?.uid || undefined;
+    let lat: number | null = this.mapPoint?.[0] ?? this.gpsCoords?.[0] ?? null;
+    let lon: number | null = this.mapPoint?.[1] ?? this.gpsCoords?.[1] ?? null;
+    if ((lat == null || lon == null)) {
+      const fb = OrcaApiService.effectiveGps();
+      if (fb && fb.length >= 2) { lat = fb[0]; lon = fb[1]; }
+    }
+    // Optimistic UI: record the tap on the store so the map reacts at once.
+    if (card === 'sst' || card === 'wind' || card === 'chlorophyll' || card === 'hazard') {
+      const key = card === 'hazard' ? 'hazardHighlight'
+        : (card as 'sst' | 'wind' | 'chlorophyll');
+      this.toggleDashboardOverlay(key);
+    }
+    const snap = await OrcaApiService.tapDashboardCard({
+      user_key: userKey, lat, lon, language: lang, card,
+    });
+    if (snap) this.setDashboard(snap, null);
   }
 
   // Getters
