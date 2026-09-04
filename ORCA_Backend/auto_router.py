@@ -48,7 +48,7 @@ INTENT_KEYWORDS = {
         r"கடற்கரை", r"சுற்றுலா", r"సముద్ర తీరం", r"బీచ్", r"കര", r"ബീച്ച്", r"ಸಮುದ್ರ ತೀರ", r"બીચ",
     ],
     "trend_analysis": [
-        r"why has", r"why is", r"trend", r"declined", r"change.*over",
+        r"why has", r"trend", r"declined", r"change.*over",
         r"over the last", r"productivity", r"correlation", r"correlate",
         r"sst.*changed", r"chlorophyll.*changed", r"months", r"years.*change",
     ],
@@ -60,6 +60,7 @@ INTENT_KEYWORDS = {
         r"sea surface temperature", r"sea temperature", r"ocean temperature",
         r"temperature", r"temp", r"temper", r"chlorophyll", r"\btide\b",
         r"high tide", r"low tide", r"\bcurrents?\b",
+        r"mausam", r"samundar", r"samudra", r"hawa", r"leher", r"kinara",
     ],
     "zone_scan": [
         r"which zones", r"which regions", r"zones to avoid", r"where should i fish",

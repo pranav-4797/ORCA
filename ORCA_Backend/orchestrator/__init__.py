@@ -974,30 +974,64 @@ class Orchestrator:
 
     def _persist_conversation_findings(self, session_id: str, response: OrchestratorResponse, plan: dict | None = None) -> None:
         """Gap 2 — store the last verdict/answer/evidence so follow-ups like
-        'why is that?' or 'what about the wind?' can be answered with context."""
+        'why is that?' or 'what about the wind?' can be answered with context.
+        Smarter: also stores ocean/hazard/tourism summaries and appends assistant
+        turn to rolling history for anaphora resolution.
+        """
         try:
             verdict = ""
             evidence = ""
-            # Prefer synthesis verdict, fallback to response status
             synth = getattr(response, "status", None)
             if synth:
                 v = getattr(synth, "value", str(synth))
                 verdict = v
-            # Evidence: first reasoning line or key evidence
             reasons = getattr(response, "reasoning", []) or []
             if reasons:
                 evidence = str(reasons[0])[:400]
             elif getattr(response, "answer", None):
                 evidence = str(response.answer)[:400]
             answer_snippet = str(getattr(response, "answer", ""))[:600]
-            # Also include prior intent's evidence if available (e.g. PFZ distance)
             if plan and plan.get("intent"):
                 evidence = f"[{plan.get('intent')}] {evidence}"
+            # Build richer summaries for next turn's memory line
+            ocean_summary = ""
+            hazard_summary = ""
+            tourism_count = 0
+            try:
+                ocean = getattr(response, "ocean_state", None)
+                if ocean:
+                    fs = getattr(ocean, "field_sources", {}) or {}
+                    def _v(k, a):
+                        return getattr(ocean, a, None) if str(fs.get(k, "")) != "unavailable" else None
+                    parts = []
+                    sst = _v("sst_celsius", "sst_celsius")
+                    if sst is not None:
+                        parts.append(f"SST {sst}C")
+                    wind = _v("wind_speed_kmh", "wind_speed_kmh")
+                    if wind is not None:
+                        parts.append(f"wind {wind}km/h")
+                    wave = _v("wave_height_m", "wave_height_m") or _v("primary_swell_height_m", "primary_swell_height_m")
+                    if wave is not None:
+                        parts.append(f"wave {wave}m")
+                    if parts:
+                        ocean_summary = ", ".join(parts)
+                risk = getattr(response, "risk", None)
+                if risk:
+                    hazard_summary = f"{getattr(risk.status, 'value', '')} — {getattr(risk, 'headline', '')[:120]}"
+                tourism = getattr(response, "tourism", None)
+                if tourism:
+                    tourism_count = len(tourism)
+            except Exception:
+                pass
             session_store.upsert(
                 session_id,
                 last_verdict=verdict,
                 last_answer=answer_snippet,
                 last_evidence=evidence,
+                last_ocean_summary=ocean_summary,
+                last_hazard_summary=hazard_summary,
+                last_tourism_count=tourism_count,
+                history_entry={"role": "assistant", "content": answer_snippet, "intent": (plan.get("intent") if plan else ""), "location": getattr(getattr(response, "ocean_state", None), "location", None) and getattr(response.ocean_state.location, "name", "") or "", "ts": __import__("time").time()},
             )
         except Exception:
             pass  # never break the response on persistence failure
@@ -2507,12 +2541,24 @@ class Orchestrator:
         except Exception:
             plan["fishing_context"] = False
 
-        # Persist the turn for the next follow-up.
+        # Smart follow-up inheritance: if the query is a short pronoun-heavy follow-up
+        # like "what about the wind?" without an explicit time, keep the prior time window
+        # (e.g. prior was "tomorrow", follow-up should stay tomorrow, not snap back to today).
+        if prior and plan.get("time_window") == "today" and prior.time_window != "today":
+            _q_low2 = normalized_query.lower()
+            _is_short_followup = len(_q_low2.split()) <= 9 and any(p in _q_low2 for p in ("what about", "how about", "and the", "and", "why", "still", "also", "wind", "sst", "wave", "safe", "that"))
+            _has_explicit_time = any(k in _q_low2 for k in ("today", "tomorrow", "kal", "aaj", "parson", "morning", "evening"))
+            if _is_short_followup and not _has_explicit_time:
+                plan["time_window"] = prior.time_window
+
+        # Persist the turn for the next follow-up — smarter memory.
         # Always store the resolved location's name (not the raw plan's "same"/"unknown")
         # so the next turn's prior.location_name is actually useful.
         resolved_name = location.name if location and location.name not in ("ASK_LOCATION",) else ""
         if resolved_name in ("", "unknown", "same") and prior is not None and prior.location_name:
             resolved_name = prior.location_name
+        # Vessel class inheritance for follow-ups
+        _vessel = state.get("vessel_class") or (prior.last_vessel_class if prior and prior.last_vessel_class else "small_fishing_boat")
         session_store.upsert(
             state["session_id"],
             location_name=resolved_name,
@@ -2528,6 +2574,8 @@ class Orchestrator:
             ),
             last_intent=plan["intent"],
             last_query=raw_query,
+            last_vessel_class=_vessel,
+            history_entry={"role": "user", "content": raw_query, "intent": plan["intent"], "location": resolved_name, "ts": __import__("time").time()},
         )
 
         dispatch_chain = (
@@ -3232,9 +3280,10 @@ class Orchestrator:
         if_prior_followup = False
         if prior is not None and (prior.last_query or prior.location_name):
             _q_low = normalized_query.lower().strip()
-            # Short + contains a follow-up pronoun / anaphor
-            _pronouns = ("why", "that", "it", "this", "is it", "is that", "what about", "how about", "and the", "still")
-            if len(_q_low.split()) <= 8 and any(p in _q_low for p in _pronouns):
+            # Short + contains a follow-up pronoun / anaphor — multilingual
+            _pronouns = ("why", "that", "it", "this", "is it", "is that", "what about", "how about", "and the", "still",
+                         "there", "here", "same place", "that place", "same", "wahan", "yahan", "tithe", "ithe", "angane", "ikkada", "kyun", "kaise", "kya")
+            if len(_q_low.split()) <= 9 and any(p in _q_low for p in _pronouns):
                 if_prior_followup = True
 
         # If it's a follow-up and fast-router is not high-confidence, use LLM
@@ -3284,27 +3333,42 @@ class Orchestrator:
             try:
                 memory_line = ""
                 if prior is not None and (prior.location_name or prior.last_query):
-                    # Gap 1 + 2: include last query/intent and last verdict/evidence so
-                    # follow-ups like "why is that?", "what about the wind?", "is it
-                    # still the case?" can be resolved without repeating location/time.
-                    q_part = f"'{prior.last_query}'" if prior.last_query else "—"
-                    intent_part = f" (intent: {prior.last_intent})" if prior.last_intent else ""
-                    loc_part = f"'{prior.location_name}'" if prior.location_name else "unknown location"
-                    time_part = f"'{prior.time_window}'" if prior.time_window else "'today'"
-                    memory_line = (
-                        f"\nCONVERSATION MEMORY: previous turn was {q_part}{intent_part} about "
-                        f"{loc_part} at {time_part}."
-                    )
+                    # Rich memory: last 2 turns + verdict/evidence/vessel/ocean so pronouns like
+                    # "why there?" / "what about the wind?" / "is it still safe tomorrow?" resolve correctly
+                    hist_lines = []
+                    for h in (getattr(prior, "history", []) or [])[-3:]:
+                        hist_lines.append(f"{h.get('role','user')}: {h.get('content','')[:80]} (intent {h.get('intent','')} @ {h.get('location','')})")
+                    hist_block = "\n".join(hist_lines) if hist_lines else ""
+                    mem_parts = []
+                    if prior.location_name:
+                        mem_parts.append(f"location '{prior.location_name}'")
+                    if prior.time_window and prior.time_window != "today":
+                        mem_parts.append(f"time '{prior.time_window}'")
+                    if prior.last_intent:
+                        mem_parts.append(f"intent {prior.last_intent}")
                     if prior.last_verdict:
-                        memory_line += f" Verdict was '{prior.last_verdict}'."
+                        mem_parts.append(f"verdict '{prior.last_verdict[:60]}'")
+                    if getattr(prior, "last_vessel_class", ""):
+                        mem_parts.append(f"vessel {prior.last_vessel_class}")
+                    if getattr(prior, "last_ocean_summary", ""):
+                        mem_parts.append(f"ocean {prior.last_ocean_summary}")
+                    if getattr(prior, "last_hazard_summary", ""):
+                        mem_parts.append(f"hazard {prior.last_hazard_summary[:80]}")
+                    mem_summary = ", ".join(mem_parts) if mem_parts else "no prior context"
+                    q_part = f"'{prior.last_query}'" if prior.last_query else "—"
+                    memory_line = (
+                        f"\nCONVERSATION MEMORY: previous turn was {q_part} about {mem_summary}."
+                    )
+                    if hist_block:
+                        memory_line += f"\nRecent history:\n{hist_block}"
                     if prior.last_evidence:
-                        # Keep it short — first evidence line is enough for "why?"
-                        ev = prior.last_evidence[:220]
-                        memory_line += f" Key evidence: '{ev}'."
+                        ev = prior.last_evidence[:180]
+                        memory_line += f"\nKey evidence: '{ev}'"
+                    # Multilingual anaphora: English + Hindi/Marathi/Tamil etc.
                     memory_line += (
-                        " If this turn is a follow-up referring to 'that', 'it', 'why', "
-                        "or asking about one specific field from the same location/time "
-                        "without repeating it, resolve accordingly."
+                        " If the user says 'same place'/'there'/'wahan'/'yahan'/'tithe'/'ithe' or asks 'what about the wind?'/'why?' without a new place/time, "
+                        "copy the prior location/time verbatim. If they say 'what about Goa?' keep the same intent but switch location to Goa. "
+                        "If they say 'and tomorrow?' keep location but switch time to tomorrow."
                     )
                 # For fast routing fallback, use low budget (fast timeout, few tokens, no retry)
                 # For ambiguous queries we still want the LLM, but we don't want to wait for a retry.
@@ -3384,6 +3448,18 @@ class Orchestrator:
             "routing_mode": "rules",
             "complexity": (fast_decision.complexity if fast_decision is not None else "fast"),
         }
+        # Smart follow-up: inherit prior intent/time when query is pronoun-heavy and still unknown
+        if plan["intent"] == "unknown" and prior is not None and prior.last_intent and prior.last_intent != "unknown":
+            _q_low = normalized_query.lower().strip()
+            if len(_q_low.split()) <= 9 and any(p in _q_low for p in ("what about", "how about", "and", "why", "that", "it", "there", "wahan", "yahan", "tithe", "ithe", "wind", "sst", "wave", "safe", "still", "tomorrow", "today")):
+                plan["intent"] = prior.last_intent
+                plan["agents_needed"] = INTENT_DEFAULT_AGENTS.get(prior.last_intent, plan["agents_needed"])
+                plan["why"] += f" (intent inherited from prior '{prior.last_intent}' for follow-up)"
+                if plan["time_window"] == "today" and prior.time_window != "today":
+                    _has_time = any(k in _q_low for k in ("today", "tomorrow", "kal", "aaj", "parson", "morning", "evening"))
+                    if not _has_time:
+                        plan["time_window"] = prior.time_window
+                        plan["why"] += f" (time inherited '{prior.time_window}')"
         return plan, "rules"
 
     def _extract_target_hour(self, query: str) -> int | None:
@@ -3427,8 +3503,11 @@ class Orchestrator:
         # Tourism / POI — beaches, lighthouses, harbours, viewpoints, sightseeing
         if any(kw in q for kw in ["beach", "harbour", "harbor", "lighthouse", "viewpoint", "touris", "sightseeing", "places to visit", "attractions", "poi"]):
             return Intent.POI_LOOKUP
-        if any(kw in q for kw in ["why has", "why is", "trend", "declined", "decline",
-                                  "changed over", "over the last", "productivity"]):
+        # Trend: only for analytical history questions, not generic "why is that?" follow-ups
+        if any(kw in q for kw in ["why has", "trend", "declined", "decline",
+                                  "changed over", "over the last", "productivity", "correlation"]):
+            return Intent.TREND_ANALYSIS
+        if "why is" in q and any(x in q for x in ["trend", "changed", "declined", "productivity", "correlation", "chlorophyll", "sst"]):
             return Intent.TREND_ANALYSIS
         if any(kw in q for kw in ["which zones", "which regions", "zones to avoid",
                                   "where should i fish", "good zones"]):
@@ -3440,6 +3519,7 @@ class Orchestrator:
             "wind", "wind speed", "wind gust", "waves", "wave", "wave height",
             "swell", "sst", "sea surface temperature", "chlorophyll", "tide",
             "high tide", "low tide", "current", "currents",
+            "mausam", "samundar", "samudra", "hawa", "leher", "kinara",
         )
         if any(kw in q for kw in OCEAN_STATE_KEYWORDS):
             if any(kw in q for kw in ["fishing zone", "fish zone", "pfz",

@@ -59,6 +59,15 @@ KNOWN_LOCATIONS = {
     "daman": Location(name="Daman Coast", lat=20.42, lon=72.85),
     "diu": Location(name="Diu Coast", lat=20.71, lon=70.98),
     "bhavnagar": Location(name="Bhavnagar Coast", lat=21.76, lon=72.15),
+    "goa": Location(name="Goa Coast", lat=15.49, lon=73.82),
+    "गोवा": Location(name="Goa Coast", lat=15.49, lon=73.82),
+    "கோவா": Location(name="Goa Coast", lat=15.49, lon=73.82),
+    "గోవా": Location(name="Goa Coast", lat=15.49, lon=73.82),
+    "ಗೋವಾ": Location(name="Goa Coast", lat=15.49, lon=73.82),
+    "ഗോവ": Location(name="Goa Coast", lat=15.49, lon=73.82),
+    "গোয়া": Location(name="Goa Coast", lat=15.49, lon=73.82),
+    "ગોવા": Location(name="Goa Coast", lat=15.49, lon=73.82),
+    "ଗୋଆ": Location(name="Goa Coast", lat=15.49, lon=73.82),
 }
 DEFAULT_LOCATION = Location(name="Unknown Coast (default demo point)", lat=15.5, lon=73.8)
 

@@ -562,7 +562,7 @@ def _repair(orca_intent: str, router_intent: str, agents: list) -> tuple[str, st
 def _history_to_text(conversation_history) -> tuple[str, str]:
     """Render recent turns for the prompt + a stable cache key. Accepts a
     list of {"role","content"} dicts, a list of strings, or a SessionContext-
-    like object with last_query/last_intent/location_name."""
+    like object with last_query/last_intent/location_name and rich history."""
     if not conversation_history:
         return "", ""
     lines: list[str] = []
@@ -576,13 +576,47 @@ def _history_to_text(conversation_history) -> tuple[str, str]:
             elif isinstance(turn, str) and turn.strip():
                 lines.append(f"user: {turn.strip()}")
     else:  # object with attributes (SessionContext)
-        lq = getattr(conversation_history, "last_query", "") or ""
-        li = getattr(conversation_history, "last_intent", "") or ""
-        ln = getattr(conversation_history, "location_name", "") or ""
-        if lq:
-            lines.append(f"previous query: {lq}"
-                         + (f" (intent {li})" if li else "")
-                         + (f" about {ln}" if ln else ""))
+        # Prefer rich history list if present
+        hist = getattr(conversation_history, "history", None)
+        if hist:
+            for h in list(hist)[-4:]:
+                role = h.get("role", "user")
+                content = str(h.get("content", "")).strip()
+                intent = h.get("intent", "")
+                loc = h.get("location", "")
+                if content:
+                    extra = ""
+                    if intent:
+                        extra += f" (intent {intent})"
+                    if loc:
+                        extra += f" @ {loc}"
+                    lines.append(f"{role}: {content}{extra}")
+        # Fallback to legacy single last_query fields
+        if not lines:
+            lq = getattr(conversation_history, "last_query", "") or ""
+            li = getattr(conversation_history, "last_intent", "") or ""
+            ln = getattr(conversation_history, "location_name", "") or ""
+            if lq:
+                lines.append(f"previous query: {lq}"
+                             + (f" (intent {li})" if li else "")
+                             + (f" about {ln}" if ln else ""))
+        # Also add richer prior summary if available
+        lv = getattr(conversation_history, "last_verdict", "") or ""
+        le = getattr(conversation_history, "last_evidence", "") or ""
+        lo = getattr(conversation_history, "last_ocean_summary", "") or ""
+        if lv or le or lo:
+            summ = []
+            if lv:
+                summ.append(f"verdict {lv[:50]}")
+            if lo:
+                summ.append(f"ocean {lo}")
+            if le:
+                summ.append(f"evidence {le[:80]}")
+            if summ:
+                lines.append("prior summary: " + "; ".join(summ))
+        lt = getattr(conversation_history, "time_window", "") or ""
+        if lt and lt != "today":
+            lines.append(f"prior time_window: {lt}")
     text = "\n".join(lines)
     return text, text[:200]
 

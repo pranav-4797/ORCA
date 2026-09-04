@@ -23,6 +23,7 @@ from models import AgentTrace, Location, QueryContext
 
 # Keywords that classify a query as an OCEAN_STATE / weather intent (Step 1).
 # Robust to paraphrases + common typos: 'tempreture'/'temprature' contain 'temp'/'temper'
+# Includes Hindi romanized coastal weather words so "mausam kaisa hai?" works without LLM.
 OCEAN_STATE_KEYWORDS = (
     "weather", "forecast", "marine weather", "ocean state", "sea condition", "sea conditions",
     "marine conditions", "ocean conditions", "sea state",
@@ -30,6 +31,7 @@ OCEAN_STATE_KEYWORDS = (
     "swell", "sst", "sea surface temperature", "sea temperature", "ocean temperature",
     "temperature", "temp", "temper", "chlorophyll", "tide",
     "high tide", "low tide", "current", "currents",
+    "mausam", "samundar", "samudra", "hawa", "leher", "kinara",
 )
 
 class PlanningMixin:
@@ -63,7 +65,10 @@ class PlanningMixin:
         q = query.lower()
         if any(kw in q for kw in ["beach", "harbour", "harbor", "lighthouse", "viewpoint", "touris", "sightseeing", "places to visit", "attractions", "poi"]):
             return Intent.POI_LOOKUP
-        if any(kw in q for kw in ["why has", "why is", "trend", "declined", "decline", "changed over", "over the last", "productivity"]):
+        # Trend: only when analytical, not generic "why is that?" follow-ups
+        if any(kw in q for kw in ["why has", "trend", "declined", "decline", "changed over", "over the last", "productivity", "correlation"]):
+            return Intent.TREND_ANALYSIS
+        if "why is" in q and any(x in q for x in ["trend", "changed", "declined", "productivity", "correlation", "shelf", "chlorophyll", "sst"]):
             return Intent.TREND_ANALYSIS
         if any(kw in q for kw in ["which zones", "which regions", "zones to avoid", "where should i fish", "good zones"]):
             return Intent.ZONE_SCAN
@@ -130,12 +135,39 @@ class PlanningMixin:
         if llm_client.is_available():
             try:
                 memory_line = ""
-                if prior is not None and prior.location_name:
+                if prior is not None and (prior.location_name or prior.last_query):
+                    # Richer memory: last 2 turns + verdict/evidence + vessel
+                    hist_lines = []
+                    # Include rolling history if present
+                    for h in (getattr(prior, "history", []) or [])[-3:]:
+                        hist_lines.append(f"{h.get('role','user')}: {h.get('content','')[:80]} (intent {h.get('intent','')} @ {h.get('location','')})")
+                    hist_block = "\n".join(hist_lines) if hist_lines else ""
+                    # Prior summary line
+                    mem_parts = []
+                    if prior.location_name:
+                        mem_parts.append(f"location '{prior.location_name}'")
+                    if prior.time_window and prior.time_window != "today":
+                        mem_parts.append(f"time '{prior.time_window}'")
+                    if prior.last_intent:
+                        mem_parts.append(f"intent {prior.last_intent}")
+                    if prior.last_verdict:
+                        mem_parts.append(f"verdict '{prior.last_verdict[:60]}'")
+                    if prior.last_vessel_class:
+                        mem_parts.append(f"vessel {prior.last_vessel_class}")
+                    if prior.last_ocean_summary:
+                        mem_parts.append(f"ocean {prior.last_ocean_summary}")
+                    mem_summary = ", ".join(mem_parts) if mem_parts else "no prior context"
                     memory_line = (
-                        f"\nCONVERSATION MEMORY: the previous turn was about "
-                        f"'{prior.location_name}' at '{prior.time_window}'. If "
-                        "the user says 'same place'/'there', copy that location "
-                        "name verbatim into location_name."
+                        f"\nCONVERSATION MEMORY: previous turn was {mem_summary}. "
+                        f"Last query was '{prior.last_query[:80]}'."
+                    )
+                    if hist_block:
+                        memory_line += f"\nRecent history:\n{hist_block}"
+                    if prior.last_evidence:
+                        memory_line += f"\nKey evidence: '{prior.last_evidence[:150]}'"
+                    memory_line += (
+                        " If the user says 'same place'/'there'/'wahan'/'yahan' or asks 'what about the wind?' without a new place/time, "
+                        "copy the prior location/time verbatim. If they say 'what about Goa?' keep the same intent but switch location to Goa."
                     )
                 is_fallback = fast_decision is None
                 args = llm_client.complete_structured(
@@ -211,6 +243,16 @@ class PlanningMixin:
             "routing_mode": "rules",
             "complexity": (fast_decision.complexity if fast_decision is not None else "fast"),
         }
+        if plan["intent"] == "unknown" and prior is not None and prior.last_intent and prior.last_intent != "unknown":
+            _q_low = normalized_query.lower().strip()
+            if len(_q_low.split()) <= 9 and any(p in _q_low for p in ("what about", "how about", "and", "why", "that", "it", "there", "wahan", "yahan", "tithe", "ithe", "wind", "sst", "wave", "safe", "still", "tomorrow", "today")):
+                plan["intent"] = prior.last_intent
+                plan["agents_needed"] = INTENT_DEFAULT_AGENTS.get(prior.last_intent, plan["agents_needed"])
+                plan["why"] += f" (intent inherited from prior '{prior.last_intent}' for follow-up)"
+                if plan["time_window"] == "today" and prior.time_window != "today":
+                    _has_time = any(k in _q_low for k in ("today", "tomorrow", "kal", "aaj", "parson", "morning", "evening"))
+                    if not _has_time:
+                        plan["time_window"] = prior.time_window
         return plan, "rules"
 
     def _step_plan(self, normalized_query: str, raw_query: str, state):
