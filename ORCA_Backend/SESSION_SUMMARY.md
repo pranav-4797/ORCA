@@ -607,3 +607,20 @@ LLM fusion for latency.
 - Existing suite (`test_optimized.py` etc.) still green — no regressions (INCOIS `500` for `20260830` is expected, not a code bug)
 
 **Remaining (still externally blocked, now accurately documented):** `api.imd.gov.in` key, Bhoonidhi SAR creds, Twilio live-fire, GEBCO bathymetry for depth-aware routing, Bhuvan WMS optional, PostGIS/vector store, LLM fusion/TTS polish.
+
+---
+
+## 16. Session 2026-09-04 — Tourism merge + full coastal multilingual + smarter Intent+Memory
+
+**Context:** Three sequential user requests in one session: (1) resolve local tourism divergence from `origin/main@eb68c57` (narrative), (2) make *every* answer stay in the language asked — all coastal languages, romanized or native script, even when the Groq LLM is down, (3) make the system *smarter* — specifically **Intent + memory** (pronoun-heavy follow-ups, anaphora, multi-turn context).
+
+**Commits:** `5f3d839` tourism merge → `b714287` multilingual fallback → `f41509f` intent+memory smarter (all pushed to `origin/main`). Full standalone report: [`SESSION_SUMMARY_2026-09-04.md`](SESSION_SUMMARY_2026-09-04.md).
+
+### 16.1 Tourism merge (`5f3d839`)
+Rebased local `146185a` (coastal POI: `TourismAgent` + `coastal_poi` Overpass, per-POI `OceanState→Hazard`) onto remote `8189b56 Update mobile UI` (no file overlap). Wired `TourismPoi` through `models` → `state`/`__init__` (`SPECIALIST_REGISTRY`, `INTENT_DEFAULT_AGENTS[poi_lookup]`, `ORCAGraphState.tourism`) → `dispatch` (`needs_tourism`, 45 s) → `response`/`viz` (`tourism_poi` GeoJSON) → `intent_router`/`auto_router` (`tourism`/`poi_lookup`) → UI `OceanMap` toggle. Verified: mocked `Ratnagiri` tourism query returns Hindi-localized POI table + `tourism_poi` GeoJSON.
+
+### 16.2 Multilingual fallback (`b714287`)
+`LanguageAgent` fast-path now voting-detects romanized (`hi` `kya/hai/kaisa`, `kfr` `chhe/mane`, `byr` `nannu/ente`, `mvv` `khella/zali`) before returning `en`; Devanagari `hi` vs `mr` disambiguated via vocab (`मध्ये`→`mr`); `intent_router` Unicode `\b` fix + `KNOWN_LOCATIONS` native-script transliterations for `Ratnagiri` (10 scripts) + `Goa`; `state` voting; `i18n.py` shared fallback (`17` codes) localizes deterministic templates (`response_agent`, `orchestrator`, `pfz_output`, `narrative`); `auto_router` Hindi tourism keywords (`समुद्र तट`). `14/14` fallback tests with `GROQ=""` pass (en + 9 native scripts + romanized `hi` + `kfr`).
+
+### 16.3 Intent+Memory smarter (`f41509f`)
+`sessions.SessionContext` now rolling `history[6]` + `last_ocean/hazard_summary`; `_step_plan` time inheritance for short follow-ups (`What about tomorrow?` keeps prior `tomorrow`); `intent_router` history-aware; `trend` no longer hijacks generic `Why is that?`; Hindi ocean keywords (`mausam`) added; `Goa` added to gazetteer. Verified 7-turn: `Ratnagiri today` → `What about tomorrow?` (keeps `Ratnagiri`+`tomorrow`) → `Is it safe to go there?` (keeps `tomorrow`) → `Why is that?` (keeps `safety_check`, not `trend`) → `What about Goa?` (switches to `Goa`, keeps `safety_check`) → `wahan ka mausam kaisa hai?` (`hi` `ocean_state`, keeps `Goa`).
