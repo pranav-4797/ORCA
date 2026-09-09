@@ -36,6 +36,7 @@ _LANGUAGE_NAMES = {
     "gu": "Gujarati", "or": "Odia", "pa": "Punjabi",
     "kok": "Konkani", "tcy": "Tulu", "kfr": "Kutchi", "byr": "Beary",
     "mvv": "Malvani", "ncr": "Nicobarese", "adm": "Andamanese",
+    "as": "Assamese", "ur": "Urdu", "ne": "Nepali", "si": "Sinhala", "mni": "Manipuri",
 }
 
 # Localized word for "Source" — now delegated to shared i18n (keeps fallback unified).
@@ -59,6 +60,7 @@ def _source_line(language: str | None = "en") -> str:
         "en": "Source", "hi": "स्रोत", "mr": "स्रोत", "ta": "ஆதாரம்",
         "te": "మూలం", "bn": "উৎস", "ml": "ഉറവിടം", "kn": "ಮೂಲ",
         "gu": "સ્રોત", "or": "ଉତ୍ସ", "pa": "ਸਰੋਤ",
+        "as": "উৎস", "ur": "ماخذ", "ne": "स्रोत", "si": "මූලාශ්‍රය", "mni": "Source",
     }
     word = _SOURCE_WORD.get((language or "en").lower(), _SOURCE_WORD["en"])
     return f"*{word}: {_SOURCE_PROVENANCE}*"

@@ -39,6 +39,7 @@ _LANGUAGE_NAMES = {
     "gu": "Gujarati", "or": "Odia", "pa": "Punjabi",
     "kok": "Konkani", "tcy": "Tulu", "kfr": "Kutchi", "byr": "Beary",
     "mvv": "Malvani", "ncr": "Nicobarese", "adm": "Andamanese",
+    "as": "Assamese", "ur": "Urdu", "ne": "Nepali", "si": "Sinhala", "mni": "Manipuri",
 }
 
 _DANGER_VERDICTS = ("UNSAFE", "EXTREME", "CRITICAL")

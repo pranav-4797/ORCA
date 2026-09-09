@@ -22,10 +22,12 @@ SUPPORTED_LANGUAGES = [
     "en", "hi", "mr", "ta", "te", "bn", "ml", "kn", "gu", "or",
     "kok", "tcy",
     "kfr", "byr", "mvv", "ncr", "adm",
+    "as", "ur", "ne", "si", "mni",
 ]
 
 # Script-range heuristic fallback: first significant codepoint per script.
 _SCRIPT_RANGES = [
+    ("as", (0x0980, 0x09FF)),  # Assamese (Bengali block, distinct via vocab)
     ("bn", (0x0980, 0x09FF)),  # Bengali (also covers Assamese)
     ("gu", (0x0A80, 0x0AFF)),
     ("or", (0x0B00, 0x0B7F)),
@@ -35,6 +37,9 @@ _SCRIPT_RANGES = [
     ("ml", (0x0D00, 0x0D7F)),
     ("hi", (0x0900, 0x097F)),  # Devanagari -> default Hindi (mr, kok checked via LLM)
     ("tcy", (0x0C80, 0x0CFF)),  # Tulu (uses Kannada script range)
+    ("ur", (0x0600, 0x06FF)),  # Urdu (Arabic block)
+    ("si", (0x0D80, 0x0DFF)),  # Sinhala
+    ("mni", (0x0ABC, 0x0ACF)),  # Meetei Mayek (Manipuri)
 ]
 
 

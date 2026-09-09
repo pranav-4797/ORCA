@@ -1031,13 +1031,17 @@ class Orchestrator:
                         ref_lat, ref_lon = (ctx.device_gps or (location.lat, location.lon))
                         geofence = self.geospatial_agent._check_geofence(ref_lat, ref_lon, location)
                         results["geofence"] = geofence
-                    # Now plan route avoiding both restricted and hazard zones
+                    # Now plan route avoiding both restricted and hazard zones + hazard polygons + current
+                    hazard_polys = getattr(risk, "cap_polygons", []) if risk else []
+                    ocean_state = results.get("ocean_state")
                     route = self.geospatial_agent._plan_route(
                         (ctx.device_gps[0] if ctx.device_gps else location.lat),
                         (ctx.device_gps[1] if ctx.device_gps else location.lon),
                         ctx.destination.lat, ctx.destination.lon,
                         restricted=[h.zone_name for h in (geofence.hits if geofence else [])],
                         hazard_names=hazard_labels,
+                        hazard_polygons=hazard_polys,
+                        ocean_state=ocean_state,
                     )
                     results["route"] = route
                     # Create trace for route
@@ -2793,9 +2797,13 @@ class Orchestrator:
             hazard_labels = (
                 [f.label for f in state["risk"].flags] if state.get("risk") else []
             )
+            hazard_polys = getattr(state.get("risk"), "cap_polygons", []) if state.get("risk") else []
+            ocean_state = state.get("ocean_state")
             (gf, rt), t = self.geospatial_agent.run(
                 location, context.device_gps, context.destination,
                 hazard_zone_names=hazard_labels,
+                hazard_polygons=hazard_polys,
+                ocean_state=ocean_state,
             )
             state["geofence"] = gf
             if rt is not None:

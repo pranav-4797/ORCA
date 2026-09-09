@@ -109,6 +109,69 @@
           [73.420, 16.130]
         ]]
       }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Pichavaram Mangrove Eco-sensitive Zone (Tamil Nadu) buffer approximation",
+        "zone_type": "ECO",
+        "source": "Tamil Nadu Forest Dept. notified eco-sensitive zone, simplified buffer",
+        "treaty_reference": "Pichavaram Mangrove Forest, Cuddalore (India) — eco-sensitive"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [79.770, 11.450],
+          [79.820, 11.430],
+          [79.840, 11.380],
+          [79.800, 11.340],
+          [79.750, 11.350],
+          [79.730, 11.400],
+          [79.770, 11.450]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Chilika Lake Eco-sensitive Zone buffer approximation",
+        "zone_type": "ECO",
+        "source": "Odisha Forest Dept. + Chilika Development Authority, simplified buffer",
+        "treaty_reference": "Chilika Lake (Ramsar site) eco-sensitive zone, Odisha"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [85.300, 19.750],
+          [85.450, 19.730],
+          [85.500, 19.650],
+          [85.420, 19.580],
+          [85.320, 19.600],
+          [85.280, 19.680],
+          [85.300, 19.750]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Sundarbans Tiger Reserve Eco-sensitive buffer approximation",
+        "zone_type": "ECO",
+        "source": "West Bengal Forest Dept. / MoEFCC notified eco-sensitive zone, simplified",
+        "treaty_reference": "Sundarbans National Park & Tiger Reserve, West Bengal (UNESCO) — eco-sensitive"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [88.800, 22.100],
+          [88.950, 22.080],
+          [89.000, 21.950],
+          [88.900, 21.850],
+          [88.750, 21.900],
+          [88.700, 22.000],
+          [88.800, 22.100]
+        ]]
+      }
     }
   ]
 }

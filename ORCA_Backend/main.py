@@ -1273,6 +1273,50 @@ def fleet_demo(lat: float, lon: float, level: str = "high"):
     }
 
 # ---------------------------------------------------------------------------
+# Heatmap Scan — high chlorophyll + favourable SST regions (PS query)
+# ---------------------------------------------------------------------------
+
+class HeatmapScanRequest(BaseModel):
+    lat: float
+    lon: float
+    radius_km: float = 50.0
+    step_km: float = 12.0
+    sst_min: float = 26.0
+    sst_max: float = 29.0
+    chl_min: float = 0.7
+
+@app.get("/heatmap/scan")
+async def heatmap_scan_get(
+    lat: float, lon: float,
+    radius_km: float = 50.0, step_km: float = 12.0,
+    sst_min: float = 26.0, sst_max: float = 29.0, chl_min: float = 0.7,
+):
+    """GET variant for quick map overlay — scans grid and returns hits + GeoJSON."""
+    import heatmap_scan as hs
+    result = await asyncio.to_thread(
+        hs.scan_heatmap, lat, lon, radius_km, step_km, sst_min, sst_max, chl_min
+    )
+    return {**result, "geojson": hs.hits_to_geojson(result)}
+
+@app.post("/heatmap/scan")
+async def heatmap_scan_post(req: HeatmapScanRequest):
+    """POST variant — same scan, JSON body."""
+    import heatmap_scan as hs
+    result = await asyncio.to_thread(
+        hs.scan_heatmap, req.lat, req.lon, req.radius_km, req.step_km,
+        req.sst_min, req.sst_max, req.chl_min
+    )
+    return {**result, "geojson": hs.hits_to_geojson(result)}
+
+@app.get("/heatmap/status")
+def heatmap_status():
+    return {
+        "provider": "INCOIS THREDDS SST + ERDDAP OceanSat-2 CHL (live)",
+        "defaults": {"radius_km": 50, "step_km": 12, "sst_min": 26, "sst_max": 29, "chl_min": 0.7},
+        "note": "Favourable SST 26-29C + CHL >=0.7 mg/m3 = high productivity (PFZ proxy). Unavailable fields skipped, never simulated.",
+    }
+
+# ---------------------------------------------------------------------------
 # Satellite–Model Wind Divergence Flag (Innovation #4)
 # ---------------------------------------------------------------------------
 

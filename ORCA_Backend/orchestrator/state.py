@@ -93,6 +93,11 @@ _DEGRADED_MESSAGES: dict[str, str] = {
     "mvv": "सेवा सध्या मर्यादित मोडमध्ये आसा। कृपया थोड्या वेळान परतून प्रयत्न करा।",
     "ncr": "Service is running in limited mode right now, please try again shortly or ask in English.",
     "adm": "Service is running in limited mode right now, please try again shortly or ask in English.",
+    "as": "সেৱা এতিয়া সীমিত মডত চলি আছে। অনুগ্ৰহ কৰি অলপ সময়ৰ পিছত আকৌ চেষ্টা কৰক বা ইংৰাজীত সুধক।",
+    "ur": "سروس فی الحال محدود موڈ میں چل رہی ہے۔ براہ کرم تھوڑی دیر بعد دوبارہ کوشش کریں یا انگریزی میں پوچھیں۔",
+    "ne": "सेवा अहिले सीमित मोडमा चलिरहेको छ। कृपया केही समयपछि फेरि प्रयास गर्नुहोस् वा अङ्ग्रेजीमा सोध्नुहोस्।",
+    "si": "සේවාව දැනට සීමිත ආකාරයෙන් ක්‍රියාත්මක වේ. කරුණාකර මඳ වේලාවකින් නැවත උත්සාහ කරන්න හෝ ඉංග්‍රීසියෙන් අසන්න.",
+    "mni": "Service is running in limited mode right now, please try again shortly or ask in English.",
 }
 
 def _degraded_message_for(lang: str) -> str:
@@ -199,6 +204,11 @@ ROMANIZED_KEYWORDS: dict[str, list[str]] = {
     # Nicobarese / Andamanese — minimal placeholders
     "ncr": ["nicobar", "car", "nancowry"],
     "adm": ["andaman", "jarawa", "onge"],
+    "as": ["nirapad", "maas", "xagor", "bipod", "hoxabotora", "dheu", "batax", "upokul", "maasor", "samudra", "dhumuha", "ghurnijhor"],
+    "ur": ["mehfooz", "machhli", "samandar", "toofan", "khatra", "chetavni", "lehar", "hawa", "kinara", "mausam", "jaal", "machhera"],
+    "ne": ["surakshit", "machha", "samudra", "toofan", "khatra", "chetavni", "lahar", "hawa", "kinara", "mausam", "jaal", "machhuara"],
+    "si": ["arakshawa", "malu", "sagaraya", "anathuraya", "awadanama", "dhew", "hawai", "wella", "dhumuha", "ghurnijhar", "maluwo", "samudraya"],
+    "mni": ["ngak", "safety", "imphal", "loktak", "manipur", "chakravat", "veshak", "thangnaba"],
 }
 
 # Flatten for quick check and map lowercased word -> language

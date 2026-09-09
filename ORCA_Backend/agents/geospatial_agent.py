@@ -210,6 +210,8 @@ class GeospatialAgent:
         device_gps: tuple | None = None,
         destination: Location | None = None,
         hazard_zone_names: list[str] | None = None,
+        hazard_polygons: list[dict] | None = None,
+        ocean_state=None,
     ) -> tuple[tuple[GeofenceStatus, RoutePlan | None], AgentTrace]:
         start = time.perf_counter()
         ref_lat, ref_lon = device_gps or (location.lat, location.lon)
@@ -222,6 +224,8 @@ class GeospatialAgent:
                 ref_lat, ref_lon, destination.lat, destination.lon,
                 restricted=[h.zone_name for h in geofence.hits],
                 hazard_names=hazard_zone_names or [],
+                hazard_polygons=hazard_polygons,
+                ocean_state=ocean_state,
             )
 
         geofence.reasoning_note = self._generate_reasoning_note(geofence, route)
@@ -315,13 +319,26 @@ class GeospatialAgent:
         end_lat: float, end_lon: float,
         restricted: list[str],
         hazard_names: list[str],
+        hazard_polygons: list[dict] | None = None,
+        ocean_state=None,
     ) -> RoutePlan:
-        route = self._astar_route(start_lat, start_lon, end_lat, end_lon)
+        # Pass hazard polygons + ocean current into A* so it can block/penalise those cells
+        route = self._astar_route(
+            start_lat, start_lon, end_lat, end_lon,
+            hazard_polygons=hazard_polygons, ocean_state=ocean_state,
+        )
         if route is None:
             route = self._detour_route(start_lat, start_lon, end_lat, end_lon,
-                                       restricted, hazard_names)
+                                       restricted, hazard_names,
+                                       hazard_polygons=hazard_polygons, ocean_state=ocean_state)
         avoided = list(dict.fromkeys(route.avoided_zones))
         avoided.extend(h for h in hazard_names if h not in avoided)
+        # Also surface hazard polygon events in avoided list for explainability
+        if hazard_polygons:
+            for hp in hazard_polygons:
+                label = hp.get("event") or hp.get("area_desc") or "Hazard polygon"
+                if label not in avoided:
+                    avoided.append(label)
         route.avoided_zones = avoided
         return route
 
@@ -331,6 +348,8 @@ class GeospatialAgent:
         end_lat: float, end_lon: float,
         restricted: list[str],
         hazard_names: list[str],
+        hazard_polygons: list[dict] | None = None,
+        ocean_state=None,
     ) -> RoutePlan:
         total = _haversine_km(start_lat, start_lon, end_lat, end_lon)
         n_steps = max(2, int(total / _ROUTE_SAMPLE_KM))
@@ -346,8 +365,21 @@ class GeospatialAgent:
             lon = start_lon + (end_lon - start_lon) * f
             status = self._check_geofence(lat, lon, Location(name="waypoint", lat=lat, lon=lon))
             clipped = [h.zone_name for h in status.hits]
-            if clipped:
-                avoided.extend(z for z in clipped if z not in avoided)
+            # Hazard polygon hit (IMD CAP) — treat as restricted for detour
+            hazard_hit = False
+            hazard_label = None
+            if hazard_polygons:
+                for hp in hazard_polygons:
+                    poly = hp.get("polygon") or []
+                    if poly and _point_in_ring(lat, lon, [[lon2, lat2] for lat2, lon2 in poly]):
+                        hazard_hit = True
+                        hazard_label = hp.get("event") or hp.get("area_desc") or "Hazard polygon"
+                        break
+            if clipped or hazard_hit:
+                if clipped:
+                    avoided.extend(z for z in clipped if z not in avoided)
+                if hazard_hit and hazard_label and hazard_label not in avoided:
+                    avoided.append(hazard_label)
                 offset_deg = 90.0 if _bearing_deg(start_lat, start_lon, end_lat, end_lon) <= 180 else -90.0
                 rad = math.radians(offset_deg)
                 waypoints.append((
@@ -377,9 +409,12 @@ class GeospatialAgent:
 
     # ------------------------------------------------------------------
     def _astar_route(self, start_lat: float, start_lon: float,
-                     end_lat: float, end_lon: float) -> RoutePlan | None:
-        """A* over a local lat/lon grid avoiding restricted zones and
-        shallow water (real ETOPO depth checks).
+                     end_lat: float, end_lon: float,
+                     hazard_polygons: list[dict] | None = None,
+                     ocean_state=None) -> RoutePlan | None:
+        """A* over a local lat/lon grid avoiding restricted zones, hazard
+        polygons (IMD CAP) and shallow water (real ETOPO depth checks).
+        Also penalises high surface current (>1.0 m/s) when ocean_state provided.
 
         Returns None when the problem is too large or the depth feed is
         unavailable -- the caller falls back to the sampled detour.
@@ -458,6 +493,24 @@ class GeospatialAgent:
                             self._route_zone_labels[h.zone_name] = True
                 elif not gf.clear:
                     penalty[(i, j)] = _APPROACH_BUFFER_KM  # discourage but allow
+                # Hazard polygons (IMD CAP) — block cells inside active warnings
+                if hazard_polygons:
+                    for hp in hazard_polygons:
+                        poly = hp.get("polygon") or []
+                        if poly and _point_in_ring(la, lo, [[lon2, lat2] for lat2, lon2 in poly]):
+                            blocked.add((i, j))
+                            label = hp.get("event") or hp.get("area_desc") or "Hazard"
+                            if label not in self._route_zone_labels:
+                                self._route_zone_labels[label] = True
+                            break
+                # High surface current penalty (>1.0 m/s) when ocean_state available
+                if ocean_state is not None and getattr(ocean_state, "surface_current_mps", None) is not None:
+                    try:
+                        cur = float(ocean_state.surface_current_mps)  # type: ignore
+                        if cur > 1.0:
+                            penalty[(i, j)] = penalty.get((i, j), 0) + 5.0
+                    except (TypeError, ValueError):
+                        pass
 
         if start_cell in blocked or goal_cell in blocked:
             logger.info("start/goal cell blocked; A* skipped")
