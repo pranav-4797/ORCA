@@ -562,10 +562,11 @@ class ResponseAgent:
                 f"; min depth along path {route.min_depth_m} m"
                 if route.min_depth_m is not None else ""
             )
+            bathy_txt = route.bathymetry_source or "unavailable (sampled-detour, no depth check)"
             extras.append(
                 f"- Route ({route.algorithm}): {route.estimated_distance_km} km, "
                 f"{len(route.waypoints)} waypoints{depth_txt}; bathymetry: "
-                f"{route.bathymetry_source}; avoided: "
+                f"{bathy_txt}; avoided: "
                 f"{', '.join(route.avoided_zones) or 'nothing'}"
             )
         if trend is not None:

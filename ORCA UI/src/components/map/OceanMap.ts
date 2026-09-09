@@ -27,6 +27,7 @@ export class OceanMap {
   private lastMapPoint: [number, number] | null = null;
   private lastGeojson: any = null;
   private lastPfzToken: string = '';
+  private lastVizSessionId: string | null = null;
   private queryPoint: { lat: number; lon: number } | null = null;
   private lastUserPos: [number, number] | null = null;
 
@@ -165,15 +166,18 @@ export class OceanMap {
         : store.vizSessionId ? 'NO MAP DATA' : 'ASK A QUESTION';
       return;
     }
+    const vizSessionId = (store as any).vizSessionId ?? store.vizGeojson?.session_id ?? null;
     if (geojson === this.lastGeojson && pfzToken === this.lastPfzToken &&
+        vizSessionId === this.lastVizSessionId &&
         this.map && this.layer && this.layer.getLayers().length > 0) {
-      // Same data AND we already have a populated map -- resize only.
+      // Same data + same session AND we already have a populated map -- resize only.
       this.map.invalidateSize();
       if (statusEl && hereLabel) statusEl.textContent = hereLabel;
       return;
     }
     this.lastGeojson = geojson;
     this.lastPfzToken = pfzToken;
+    this.lastVizSessionId = vizSessionId;
     if (statusEl) statusEl.textContent =
       (hereLabel ? hereLabel + ' · ' : '') +
       `${geojson?.session_id?.slice(0, 8) ?? ''}${store.pfzLive ? ' · PFZ ' + (store.pfzLive.valid_upto || 'live') : ''}`;
@@ -766,24 +770,31 @@ export class OceanMap {
     }
   }
 
+  private _yyyymmdd(d: Date): string {
+    return d.toISOString().slice(0, 10).replace(/-/g, '');
+  }
+
   private _buildWmsLayer(kind: 'sst' | 'wind' | 'chlorophyll'): L.TileLayer.WMS | null {
-    // INCOIS THREDDS WMS endpoints (per the official ORCA backend OSF paths).
-    // These are the same sources the backend hits; the UI mirror is read-only
-    // and degrades to a no-op when the upstream is down.
+    // INCOIS THREDDS WMS — same date-templated datasets as backend `incois_marine.py`.
+    // Frontend uses today's UTC date; backend `_try_dates` already falls back to
+    // yesterday when today's NetCDF is not yet published, so a blank tile is the
+    // honest fallback (never a stale hardcoded file). Chlorophyll uses the
+    // dedicated ERDDAP WMS (OceanSat-2) — the only INCOIS route that serves CHL.
+    const ymd = this._yyyymmdd(new Date());
     const config: Record<string, { url: string; layers: string; format?: string }> = {
       sst: {
-        url: 'https://incois.gov.in/thredds/wms/osf/winds/SST_NIO.nc',
+        url: `https://incois.gov.in/thredds/wms/osf/winds/SST_NIO_${ymd}.nc`,
         layers: 'SST',
         format: 'image/png',
       },
       wind: {
-        url: 'https://incois.gov.in/thredds/wms/osf/ww3/rsmc_combined_ww3.nc',
-        layers: 'UWND__VWND-mag',
+        url: `https://incois.gov.in/thredds/wms/osf/ww3/rsmc_combined_ww3_${ymd}.nc`,
+        layers: 'UWND:VWND-mag',
         format: 'image/png',
       },
       chlorophyll: {
-        url: 'https://incois.gov.in/thredds/wms/osf/chl/EOS6_OCM_NIO_L4.nc',
-        layers: 'CHL',
+        url: 'https://erddap.incois.gov.in/erddap/wms/incois_oceansat2_datasets/request',
+        layers: 'incois_oceansat2_datasets:CHL',
         format: 'image/png',
       },
     };
@@ -794,7 +805,7 @@ export class OceanMap {
       format: cfg.format || 'image/png',
       transparent: true,
       opacity: 0.65,
-      version: '1.3.0',
+      version: '1.1.1',
       attribution: 'INCOIS / ISRO',
     });
   }

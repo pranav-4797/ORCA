@@ -371,6 +371,7 @@ class GeospatialAgent:
                 _haversine_km(*waypoints[i], *waypoints[i + 1])
                 for i in range(len(waypoints) - 1)
             ), 1),
+            bathymetry_source="",
             algorithm="sampled-detour",
         )
 

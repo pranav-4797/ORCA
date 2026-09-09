@@ -105,22 +105,26 @@ class HazardAgent:
         else:
             reasoning.append("Wave height unavailable (live INCOIS value)")
 
-        # --- Wind gust check ---
-        if gust_kmh is not None and gust_kmh > thr["wind_gust_unsafe_kmh"]:
+        # --- Wind check: INCOIS WW3 does not publish gust, so fall back to sustained wind_speed ---
+        wind_speed_kmh = ocean_state.wind_speed_kmh
+        effective_wind = gust_kmh if gust_kmh is not None else wind_speed_kmh
+        effective_label = "wind gusts" if gust_kmh is not None else "sustained wind"
+        wind_source_note = "" if gust_kmh is not None else " (gust unavailable — evaluated on sustained wind)"
+        if effective_wind is not None and effective_wind > thr["wind_gust_unsafe_kmh"]:
             flags.append(HazardFlag(
-                label="High wind gusts",
-                detail=f"{gust_kmh} km/h forecast",
+                label="High wind gusts" if gust_kmh is not None else "High wind (sustained)",
+                detail=f"{effective_wind} km/h {effective_label} forecast{wind_source_note}",
                 threshold_crossed=f"> {thr['wind_gust_unsafe_kmh']} km/h (unsafe threshold)",
             ))
-        elif gust_kmh is not None and gust_kmh > thr["wind_gust_caution_kmh"]:
+        elif effective_wind is not None and effective_wind > thr["wind_gust_caution_kmh"]:
             reasoning.append(
-                f"Wind gusts {gust_kmh} km/h are moderate "
-                f"(caution range starts at {thr['wind_gust_caution_kmh']} km/h)"
+                f"{effective_label.capitalize()} {effective_wind} km/h are moderate "
+                f"(caution range starts at {thr['wind_gust_caution_kmh']} km/h){wind_source_note}"
             )
-        elif gust_kmh is not None:
-            reasoning.append(f"Wind gusts {gust_kmh} km/h are within normal range")
+        elif effective_wind is not None:
+            reasoning.append(f"{effective_label.capitalize()} {effective_wind} km/h are within normal range{wind_source_note}")
         else:
-            reasoning.append("Wind gust unavailable (live INCOIS value)")
+            reasoning.append("Wind unavailable (live INCOIS value — both gust and sustained wind missing)")
 
         # --- Live IMD CAP checks (Tier 1, keyless feed, ONE fetch) ---
         # The same fetched alert list feeds three checks: cyclone/depression,
@@ -292,7 +296,7 @@ class HazardAgent:
             status = SafetyStatus.UNSAFE
             headline = "Not safe to go fishing -- hazardous conditions forecast"
         elif (wave_m is not None and wave_m > thr["wave_height_caution_m"]) or \
-                (gust_kmh is not None and gust_kmh > thr["wind_gust_caution_kmh"]):
+                (effective_wind is not None and effective_wind > thr["wind_gust_caution_kmh"]):
             status = SafetyStatus.CAUTION
             headline = "Proceed with caution -- borderline conditions forecast"
         else:
@@ -356,23 +360,25 @@ class HazardAgent:
             else "none"
         )
         # Deterministic template — no LLM needed for threshold verdict
-        # Example: "UNSAFE because significant wave height exceeds the small-boat threshold."
+        # INCOIS does not publish gust, so sustained wind_speed is the effective wind.
+        _eff_wind = ocean_state.wind_gust_kmh if ocean_state.wind_gust_kmh is not None else ocean_state.wind_speed_kmh
+        _eff_label = "gusts" if ocean_state.wind_gust_kmh is not None else "sustained wind (gust unavailable)"
         if risk.status.value == "UNSAFE":
             base = f"UNSAFE: {flags_text}."
             if ocean_state.wave_height_m is not None and ocean_state.wave_height_m > thr['wave_height_unsafe_m']:
                 base = f"UNSAFE because wave height {ocean_state.wave_height_m} m exceeds the {thr['wave_height_unsafe_m']} m small-boat threshold."
-            elif ocean_state.wind_gust_kmh is not None and ocean_state.wind_gust_kmh > thr['wind_gust_unsafe_kmh']:
-                base = f"UNSAFE because wind gusts {ocean_state.wind_gust_kmh} km/h exceed the {thr['wind_gust_unsafe_kmh']} km/h threshold."
+            elif _eff_wind is not None and _eff_wind > thr['wind_gust_unsafe_kmh']:
+                base = f"UNSAFE because {_eff_label} {_eff_wind} km/h exceed the {thr['wind_gust_unsafe_kmh']} km/h threshold."
             else:
                 base = f"UNSAFE: {flags_text}."
         elif risk.status.value == "CAUTION":
             wave_txt = f"{ocean_state.wave_height_m} m" if ocean_state.wave_height_m is not None else "unavailable"
-            gust_txt = f"{ocean_state.wind_gust_kmh} km/h" if ocean_state.wind_gust_kmh is not None else "unavailable"
-            base = f"CAUTION: wave {wave_txt} / gusts {gust_txt} are borderline (caution thresholds {thr['wave_height_caution_m']} m / {thr['wind_gust_caution_kmh']} km/h)."
+            gust_txt = f"{_eff_wind} km/h" if _eff_wind is not None else "unavailable"
+            base = f"CAUTION: wave {wave_txt} / {_eff_label} {gust_txt} are borderline (caution thresholds {thr['wave_height_caution_m']} m / {thr['wind_gust_caution_kmh']} km/h)."
         else:
             wave_txt = f"{ocean_state.wave_height_m} m" if ocean_state.wave_height_m is not None else "unavailable"
-            gust_txt = f"{ocean_state.wind_gust_kmh} km/h" if ocean_state.wind_gust_kmh is not None else "unavailable"
-            base = f"SAFE: wave {wave_txt} and gusts {gust_txt} within safe limits."
+            gust_txt = f"{_eff_wind} km/h" if _eff_wind is not None else "unavailable"
+            base = f"SAFE: wave {wave_txt} and {_eff_label} {gust_txt} within safe limits."
         if cyclone_note:
             base += f" Cyclone check: {cyclone_note}"
         for m in (marine_lines or []):
@@ -409,10 +415,13 @@ class HazardAgent:
             "cyclone check could not be verified, say so honestly -- never claim the "
             "cyclone situation is clear when the feed was unreachable."
         )
+        # Include sustained wind when gust is unavailable (INCOIS reality)
+        _wind_for_prompt = ocean_state.wind_gust_kmh if ocean_state.wind_gust_kmh is not None else ocean_state.wind_speed_kmh
+        _wind_label_for_prompt = "gusts" if ocean_state.wind_gust_kmh is not None else "sustained wind (gust unavailable)"
         user_prompt = (
             f"Location: {ocean_state.location.name}, time window data was fetched for.\n"
-            f"Input readings: wave height {ocean_state.wave_height_m} m, wind gusts "
-            f"{ocean_state.wind_gust_kmh} km/h (thresholds for "
+            f"Input readings: wave height {ocean_state.wave_height_m} m, {_wind_label_for_prompt} "
+            f"{_wind_for_prompt} km/h (thresholds for "
             f"{vessel_class.replace('_', ' ')}: waves unsafe > "
             f"{thr['wave_height_unsafe_m']} m, gusts unsafe > "
             f"{thr['wind_gust_unsafe_kmh']} km/h).\n"

@@ -37,6 +37,7 @@ class DataSource(str, Enum):
     DERIVED_LIVE = "derived_from_live_data"  # computed FROM live fields (not invented)
     STATIC_DERIVED = "static_derived"
     SIMULATED = "simulated"
+    UNAVAILABLE = "unavailable"  # honest: INCOIS feed unreachable, no value fabricated
 
 
 class WindObsStatus(str, Enum):
@@ -144,9 +145,10 @@ class OceanStateReading:
     # MOSDAC provenance: when chlorophyll came from MOSDAC, this holds the
     # 3‑day latency disclosure ("Registered tier — 3‑day latency").
     chlorophyll_latency_note: str | None = None
-    # Per-field honesty metadata: maps field name -> "live" | "simulated" so
-    # responses can state exactly which values are real and which are not,
-    # instead of blanket-tagging the whole reading.
+    # Per-field honesty metadata: maps field name -> "live" | "tide_gauge_model" | "unavailable"
+    # so responses can state exactly which values are real and which are not,
+    # instead of blanket-tagging the whole reading. "simulated" is reserved
+    # for the seeded PFZ fallback only; ocean fields are never simulated.
     field_sources: dict = field(default_factory=dict)
     # Threshold-crossing intervals computed from the hourly forecast series
     # (temporal exceedance reasoning, PDF Sec. 15.1). Empty when no threshold
@@ -290,7 +292,7 @@ class RoutePlan:
     waypoints: list = field(default_factory=list)       # [(lat, lon), ...]
     avoided_zones: list[str] = field(default_factory=list)
     estimated_distance_km: float = 0.0
-    bathymetry_source: str = "not yet integrated (GEBCO TODO)"
+    bathymetry_source: str = ""  # empty = unavailable; set by GeospatialAgent when depth data present
     # Minimum depth (negative metres) sampled along the route; None when
     # bathymetry was unavailable.
     min_depth_m: Optional[float] = None

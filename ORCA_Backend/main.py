@@ -207,7 +207,7 @@ async def pfz_live():
 
 
 @app.post("/query")
-def query(request: QueryRequest):
+async def query(request: QueryRequest):
     destination = (
         Location(
             name=request.destination.get("name", "Requested Destination"),
@@ -247,7 +247,8 @@ def query(request: QueryRequest):
     if cached is not None:
         return cached
 
-    response = orchestrator.handle_query(
+    response = await asyncio.to_thread(
+        orchestrator.handle_query,
         request.query,
         session_id,
         device_gps=device_gps,

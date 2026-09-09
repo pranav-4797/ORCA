@@ -34,8 +34,8 @@ _pre_incois_backup/
 **/_pre_incois_backup/
 *.zip
 
-# ---- CI / Workflows (skip if lacking workflow scope) ----
-.github/
+# ---- CI / Workflows ----
+# .github/ previously ignored — now enabled for ORCA CI (`ci.yml`)
 
 # ---- Local smoke-test artifacts (never commit) ----
 server_test.out

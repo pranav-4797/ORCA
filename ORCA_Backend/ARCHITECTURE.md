@@ -51,12 +51,13 @@ flowchart TD
     LLM["llm_client.py → Groq openai/gpt-oss-120b<br/>(language · planning · synthesis · response)"]
 
     subgraph SRC["Data Source / Connector Layer (data_connectors/)"]
-        OM["Open-Meteo Marine + Weather"]
-        TIDE["UHSLC ERDDAP tide harmonics"]
-        NOAA["NOAA ERDDAP: chlorophyll-a · ETOP180 depth"]
-        CAP["IMD CAP RSS (keyless) + api.imd.gov.in (gated)"]
-        ISRO["MOSDAC · INCOIS · data.gov.in (gated)"]
-        OSM["OSM Nominatim geocoding"]
+        INCOIS["INCOIS THREDDS WMS — SST_NIO / WW3 (wind+swell) / CURRENTS_NIO<br/>+ ERDDAP OceanSat-2 CHL (incois_marine.py)"]
+        MOSDAC["MOSDAC OCM chlorophyll (primary, Registered tier, 3-day latency)"]
+        TIDE["UHSLC tide harmonics (tide.py)"]
+        BATHY["GEBCO / INCOIS bathymetry (bathymetry.py) — A* depth check"]
+        CAP["IMD CAP RSS keyless (imd_cap.py) + api.imd.gov.in gated fallback (imd_live.py)"]
+        ISRO["Bhuvan WMS / Bhoonidhi SAR — staged (isro_sources.py, NOT ACTIVATED)"]
+        OSM["OSM Nominatim geocoding (geocode.py)"]
         BND["marine_boundaries.geojson<br/>India–SL IMBL · Sir Creek · MPAs"]
     end
 
@@ -77,14 +78,15 @@ flowchart TD
     MON --> BUS
     BUS --> ALERTS
     BUS -->|"Twilio REST"| SMS
-    OCEAN & PFZ --> OM
+    OCEAN --> INCOIS
+    OCEAN --> MOSDAC
     OCEAN --> TIDE
-    PFZ --> NOAA
+    PFZ --> INCOIS
     HAZ --> CAP
     HAZ -.-> ISRO
     PLAN --> OSM
     GEO --> BND
-    GEO --> NOAA
+    GEO --> BATHY
     LANG & PLAN & SYN & RESP -.-> LLM
     CORE -.-> TRACE
 ```
@@ -96,7 +98,7 @@ flowchart TD
 | 1 | Language / Intent | `agents/language_agent.py` | LLM detection of 11 Indic languages + Unicode-script fallback |
 | 2 | Orchestrator / Planner | `orchestrator.py` | LangGraph StateGraph; LLM plan schema + rule fallback; parallel dispatch |
 | 3 | PFZ | `agents/pfz_agent.py` | Official INCOIS/SAMUDRA daily advisory via nearest landing centre (KD-indexed); derived 25-pt SST-ring + SIM fallbacks |
-| 4 | Ocean-State | `agents/ocean_state_agent.py` | Open-Meteo marine/weather; UHSLC harmonic tide; exceedance windows |
+| 4 | Ocean-State | `agents/ocean_state_agent.py` + `data_connectors/incois_marine.py` | INCOIS THREDDS WMS (SST/WW3 wind+swell/Currents) + OceanSat-2 CHL + MOSDAC OCM primary; UHSLC harmonic tide; per-field provenance |
 | 5 | Hazard / Alert | `agents/hazard_agent.py` + `data_connectors/imd_cap.py` | Wave/gust thresholds; live IMD CAP (cyclone, lightning, marine) polygon hit-test |
 | 6 | Geospatial | `agents/geospatial_agent.py` | Ray-cast IMBL/MPA geofence; hazard-aware route detours; depth check |
 | 7 | Synthesis | `agents/synthesis_agent.py` | Reconciles findings, flags conflicts, verdict + confidence |
@@ -106,8 +108,9 @@ flowchart TD
 
 ## Data-source tiers
 
-- **Tier 1 (official/live):** IMD CAP RSS (keyless, signed), api.imd.gov.in (key-gated), UHSLC tide gauges, MOSDAC/INCOIS (key-gated)
-- **Tier 2 (derived/live):** Open-Meteo marine + weather, NOAA ERDDAP (chlorophyll-a, ETOP180 bathymetry), OSM Nominatim
-- **Tier 3 (local/seeded):** `data/marine_boundaries.geojson` (digitized treaties), seeded last-resort values — always labelled
+- **Tier 1 (official/live, keyless):** INCOIS THREDDS WMS (SST_NIO, WW3 wind/swell, CURRENTS_NIO), INCOIS ERDDAP OceanSat-2 CHL, IMD CAP RSS (signed), UHSLC tide gauges
+- **Tier 1 (official/live, gated):** MOSDAC OCM chlorophyll (Registered tier, 3-day latency), api.imd.gov.in cyclone, Bhuvan WMS / Bhoonidhi SAR (staged via `isro_sources.py`, NOT ACTIVATED)
+- **Tier 2 (live/derived):** OSM Nominatim geocoding, GEBCO/INCOIS bathymetry (`bathymetry.py`), derived SST-front PFZ ring
+- **Tier 3 (local/seeded):** `data/marine_boundaries.geojson` (treaty-digitized IMBL/MPA), seeded fallback — always labelled `unavailable`/`simulated`, never hidden
 
 Every numeric field carries a `DataSource` tag (`live` / `tide_gauge_model` / `derived` / `simulated`); an unreachable feed is reported as *unverifiable*, never *clear*.

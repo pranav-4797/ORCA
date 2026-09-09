@@ -88,7 +88,7 @@ class OceanStateAgent:
                 agent_name=self.name,
                 action=f"Tried INCOIS marine state for {location.name} ({time_window})",
                 result_summary=f"Official INCOIS data is temporarily unavailable ({degraded_reason}).",
-                data_sources=["unavailable"],
+                data_sources=[DataSource.UNAVAILABLE],
                 duration_ms=duration_ms,
             )
 
@@ -133,7 +133,7 @@ class OceanStateAgent:
             timestamp=datetime.now(timezone.utc),
             sst_celsius=None, chlorophyll_mg_m3=None, wave_height_m=None,
             wind_speed_kmh=None, wind_gust_kmh=None, tide_level_m=None,
-            source=DataSource.SIMULATED, confidence=0.0,
+            source=DataSource.UNAVAILABLE, confidence=0.0,
             field_sources=field_sources,
         )
         reading.primary_swell_height_m = None
@@ -254,7 +254,7 @@ class OceanStateAgent:
             wind_speed_kmh=round(float(wind_speed), 2) if wind_speed is not None else None,
             wind_gust_kmh=None,
             tide_level_m=round(float(tide_val), 2) if tide_val is not None else None,
-            source=DataSource.LIVE if has_live else DataSource.SIMULATED,
+            source=DataSource.LIVE if has_live else DataSource.UNAVAILABLE,
             confidence=0.9 if has_live else 0.0,
             field_sources=field_sources,
             exceedance_windows=[],

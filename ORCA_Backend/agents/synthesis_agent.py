@@ -168,7 +168,7 @@ class SynthesisAgent:
                 f"[Route Plan] {route.start_lat},{route.start_lon} -> "
                 f"{route.dest_lat},{route.dest_lon}; {route.estimated_distance_km} km; "
                 f"avoiding: {', '.join(route.avoided_zones) or 'nothing'}; "
-                f"bathymetry: {route.bathymetry_source}."
+                f"bathymetry: {route.bathymetry_source or 'unavailable (sampled-detour, no depth check)'}."
             )
 
         system_prompt = (

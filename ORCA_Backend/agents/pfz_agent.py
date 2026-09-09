@@ -242,9 +242,21 @@ class PFZAgent:
         # hundreds of km away (e.g. Andhra Pradesh) while still reporting a
         # small, misleading distance -- because that distance never went
         # through the cap. Apply the same cap here before accepting it.
+        # Pre-filter: only lines whose bbox is within the same 150km radius as the
+        # landing-centre check. This eliminates cross-state geometry (e.g. an Andhra
+        # line for a Mumbai query) before the expensive per-segment scan, rather
+        # than relying solely on the post-scan distance cap.
+        all_line_features = (live.get("pfz_lines") or {}).get("features") or []
+        filtered = [
+            f for f in all_line_features
+            if _bbox_distance_km(location.lat, location.lon, _line_bbox(f)) <= _MAX_CENTRE_DIST_KM
+        ]
+        # If the spatial pre-filter empties the set, the advisory position is the
+        # only honest target — no line is plausibly near this query point.
+        candidate_features = filtered if filtered else []
         nearest = self._nearest_point_on_lines(
             location.lat, location.lon,
-            (live.get("pfz_lines") or {}).get("features") or [],
+            candidate_features,
         )
         import logging as _logging
         _pfzlog = _logging.getLogger("orca.pfz")

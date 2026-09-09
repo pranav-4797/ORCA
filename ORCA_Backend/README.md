@@ -15,7 +15,7 @@ Queries run in `panel` mode (specialists debate before reconciling) or
 | Ocean-State Agent | **Fully real** — LIVE INCOIS THREDDS SST/waves/wind/currents/swell + harmonic tide on real UHSLC gauge obs; chlorophyll **MOSDAC OCM (ISRO Oceansat‑3) primary** (Registered tier, 3‑day latency) → INCOIS ERDDAP OceanSat‑2 secondary (free, archive 2011‑02‑02) → `unavailable`; per-field provenance always shown |
 | Hazard Agent | **Fully real** — threshold logic + LIVE keyless IMD CAP alert feed (cyclone/marine warnings, polygon hit-test); gated `api.imd.gov.in` kept as secondary fallback |
 | PFZ Agent | **Official live advisory** — nearest landing centre's INCOIS/SAMUDRA PFZ (zone geometry, direction/distance/depth) from the keyless `gemini.incois.gov.in` feeds, cached 10 min; falls back to derived live-SST thermal front, then seeded. Always tagged, never hidden |
-| Geospatial Reasoning Agent | **Real math** on Tier-2 static data — point-in-polygon/distance vs treaty-digitized IMBL + MPA GeoJSON (`data/marine_boundaries.geojson`), safe-route detours; GEBCO bathymetry TODO |
+| Geospatial Reasoning Agent | **Real math** on Tier-2 static data — point-in-polygon/distance vs treaty-digitized IMBL + MPA GeoJSON (`data/marine_boundaries.geojson`), sampled safe-route detours + **GEBCO/INCOIS bathymetry A* (4km grid, <250km legs, <10m draft block)**; falls back to sampled detour when bathymetry unavailable |
 | Synthesis Agent | **Real** — reconciles all findings, flags cross-agent conflicts, assigns confidence |
 | Response Agent | **Real** — final answer composed in the user's detected language |
 | Discussion Agent | **Real** — moderated round-table between specialists before reconciliation: structured challenge/clarify/concede turns over each other's actual numbers, ending in a consensus that feeds Synthesis and the final explanation; deterministic fallback without an LLM |
@@ -54,7 +54,7 @@ orca_backend/
 │                                #   parallel specialist dispatch -> synthesis -> response
 ├── agents/
 │   ├── language_agent.py        # PS #1: detect language, normalize query
-│   ├── ocean_state_agent.py     # PS #4: LIVE Open-Meteo SST/waves/wind (+tide/chl sim)
+│   ├── ocean_state_agent.py     # PS #4: LIVE INCOIS THREDDS SST/waves/wind/currents/swell + OceanSat-2 CHL (MOSDAC OCM primary) + harmonic tide
 │   ├── hazard_agent.py          # PS #5: threshold-based safety verdict
 │   ├── pfz_agent.py             # PS #3: nearest fishing zone (official INCOIS/SAMUDRA advisory, derived/SIM fallback)
 │   ├── geospatial_agent.py      # PS #6: IMBL/MPA geofence + safe-route planning
