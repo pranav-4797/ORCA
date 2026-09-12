@@ -56,6 +56,10 @@ export interface OrcaPfzLandingCenter {
 
 export interface OrcaPfz {
   source?: string;
+  center_lat?: number | null;
+  center_lon?: number | null;
+  distance_from_reference_km?: number | null;
+  bearing_deg?: number | null;
   landing_center?: OrcaPfzLandingCenter | null;
   alternates?: Array<Record<string, unknown>>;
 }
@@ -521,8 +525,17 @@ export class OrcaApiService implements IAIService {
       ['Distance offshore', lc.advisory_distance_km != null ? `${lc.advisory_distance_km} km` : ''],
       ['Depth', lc.advisory_depth_m != null ? `${lc.advisory_depth_m} m` : ''],
       ['Valid until', lc.valid_upto ?? ''],
+      // Target zone the distance/bearing in the answer refer to — the resolved
+      // zone point, NOT the landing centre's own advisory position (the two
+      // can differ when the official line geometry is nearer the user).
       ['Zone position',
-        lc.pfz_lat != null && lc.pfz_lon != null ? `${lc.pfz_lat}, ${lc.pfz_lon}` : ''],
+        pfz?.center_lat != null && pfz?.center_lon != null
+          ? `${pfz.center_lat}, ${pfz.center_lon}`
+          : (lc.pfz_lat != null && lc.pfz_lon != null ? `${lc.pfz_lat}, ${lc.pfz_lon}` : '')],
+      ['From your location',
+        pfz?.distance_from_reference_km != null && pfz?.bearing_deg != null
+          ? `${pfz.distance_from_reference_km} km (${Math.round(pfz.bearing_deg)}°)`
+          : ''],
     ].filter(([, v]) => v !== '' && v != null) as Array<[string, string]>;
 
     const source = (pfz?.source || 'incois_live').replace(/_/g, ' ').toUpperCase();

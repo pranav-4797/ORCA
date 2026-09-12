@@ -288,12 +288,32 @@ def compose_narrative(
             "sentence must tell them clearly not to venture out."
         )
 
+    # The measurements are relative to the resolved position (map pin / GPS /
+    # place the pipeline actually resolved) — which can differ from a place
+    # name the question merely mentions. Make the attribution explicit so the
+    # prose never says "X km from <named place>" when the figures are measured
+    # from somewhere else.
+    reference = None
+    for blk in (ocean, pfz):
+        if isinstance(blk, dict):
+            reference = blk.get("location") or blk.get("measured_from") or reference
+    reference_note = ""
+    if reference:
+        reference_note = (
+            f"\nREFERENCE POSITION: every distance/bearing/coordinate above is measured "
+            f'from "{reference}" — the position the app resolved (selected map point, '
+            "GPS, or the place that was actually resolved). If the question names a "
+            "DIFFERENT place than the reference position, do NOT attribute these "
+            "figures to that place; attribute them to the reference position."
+        )
+
     user_prompt = (
         f'THE FISHER ASKED: "{user_query}"\n'
         f"PRIMARY INTENT: {intent}\n"
         f"SAFETY VERDICT: {verdict_txt or 'not assessed'}\n"
         f"WRITE IN: {lang_name}\n"
         f"\nLIVE DATA AVAILABLE (use only these):\n{data_block}\n"
+        f"{reference_note}\n"
         f"\nFOCUS: {focus}\n"
         f"STRUCTURE FOR THIS ANSWER: {style} {length}"
         f"{danger_note}\n"

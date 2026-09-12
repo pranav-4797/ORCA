@@ -186,8 +186,21 @@ def generate_context_summary(
         f"PRIMARY INTENT: {intent}\n"
         f"LANGUAGE: {lang_name}\n"
         f"AVAILABLE LIVE DATA:\n{data_block}\n\n"
-        "Write the single summary paragraph now."
     )
+    # Attribution rule: the PFZ dict carries `measured_from` — the resolved
+    # position (map pin / GPS) every distance/bearing is actually measured
+    # from. The question may name a DIFFERENT place; never attribute the
+    # figures to it.
+    measured_from = (pfz or {}).get("measured_from") if isinstance(pfz, dict) else None
+    if measured_from:
+        user_prompt += (
+            f'REFERENCE POSITION: all distances/bearings above are measured from '
+            f'"{measured_from}" — the position the app resolved (selected map point, '
+            "GPS, or the place actually resolved). If the question names a different "
+            "place, attribute the figures to the reference position, never to the "
+            "place name from the question.\n\n"
+        )
+    user_prompt += "Write the single summary paragraph now."
     import os
     to = timeout if timeout is not None else float(os.getenv("ORCA_SUMMARY_TIMEOUT_S", "5").strip() or 5)
     max_tok = int(os.getenv("ORCA_SUMMARY_MAX_TOKENS", "800").strip() or 800)
@@ -216,12 +229,16 @@ def _pfz_narrative(context: "QueryContext", pfz: "PFZRecommendation", language: 
     """
     try:
         lc = getattr(pfz, "landing_center", None) or {}
+        ref = getattr(pfz, "reference_location", None)
         pfz_d = {
             "distance_km": getattr(pfz, "distance_from_reference_km", None),
             "bearing_deg": getattr(pfz, "bearing_deg", None),
             "sst_at_zone_celsius": getattr(pfz, "sst_at_zone_celsius", None),
             "landing_centre": lc.get("name") if lc else None,
             "nearest_landmark": getattr(pfz, "nearest_landmark", None),
+            # Distance/bearing are measured from the resolved position (map
+            # pin / GPS), not from a place name the question merely mentions.
+            "measured_from": getattr(ref, "name", None),
         }
         pfz_d = {k: v for k, v in pfz_d.items() if v is not None}
         return generate_context_summary(
@@ -394,6 +411,8 @@ class ResponseAgent:
                     "sst_at_zone_celsius": getattr(pfz, "sst_at_zone_celsius", None),
                     "landing_centre": lc.get("name") if lc else None,
                     "nearest_landmark": getattr(pfz, "nearest_landmark", None),
+                    # Same attribution rule as the PFZ fast path below.
+                    "measured_from": getattr(getattr(pfz, "reference_location", None), "name", None),
                 }
                 pfz_d = {k: v for k, v in pfz_d.items() if v is not None}
             hazard_d = None

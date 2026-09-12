@@ -1889,12 +1889,17 @@ class Orchestrator:
         pfz_d = None
         if pfz is not None:
             lc = getattr(pfz, "landing_center", None) or {}
+            ref = getattr(pfz, "reference_location", None)
             pfz_d = {
                 "distance_km": getattr(pfz, "distance_from_reference_km", None),
                 "bearing_deg": getattr(pfz, "bearing_deg", None),
                 "sst_at_zone_celsius": getattr(pfz, "sst_at_zone_celsius", None),
                 "landing_centre": lc.get("name") if lc else None,
                 "nearest_landmark": getattr(pfz, "nearest_landmark", None),
+                # The position every distance/bearing here is measured from —
+                # the resolved (map-pinned/GPS) point, NOT a place name that
+                # merely appears in the question text.
+                "measured_from": getattr(ref, "name", None),
             }
             pfz_d = {k: v for k, v in pfz_d.items() if v is not None}
         hazard_d = None
