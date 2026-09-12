@@ -197,6 +197,19 @@ def test_no_forecast_wind_available_is_graceful():
     assert result.pct_diff == 0.0 or result.pct_diff is not None
 
 
+def test_none_forecast_wind_returns_unavailable_not_crash():
+    """Regression: missing INCOIS WW3 wind used to raise
+    'unsupported operand type(s) for /: NoneType and float', masked by the
+    orchestrator's catch-all into UNAVAILABLE. Must now return a clean
+    UNAVAILABLE result (and survive result_to_dict) without any exception."""
+    result = wd.analyze_wind_divergence(forecast_wind_kmh=None, location=_loc(), demo_scenario="match")
+    assert result.status == DivergenceStatus.UNAVAILABLE
+    assert result.satellite_wind_kmh is None
+    d = wd.result_to_dict(result)
+    assert d["forecast_wind_kn"] is None
+    assert d["status"] == "UNAVAILABLE"
+
+
 def test_models_import_does_not_break_existing_dataclasses():
     from models import OceanStateReading, DataSource
     # Existing dataclass still constructs fine after Innovation #4 additions.

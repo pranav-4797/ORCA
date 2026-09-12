@@ -269,53 +269,30 @@ def run_sar_scan(
         from .providers import _DEMO_KNOWN_VESSELS_OFFSET, _DEMO_DETECTIONS_RAW
         from .models import KnownVessel as KV
         fleet_vessels = get_known_vessels(include_simulated=False)
-        # Check if we have enough vessels to match demo detections; if not and using demo provider, inject synthetic
         is_demo = getattr(observation, "source", "") == SARSource.ORCA_SIMULATION.value
-        if is_demo and not fleet_vessels:
-            # Inject synthetic known vessels for demo determinism
-            import time as _t2
-            now_epoch = _t2.time()
-            fleet_vessels = []
-            for det_id, lat, lon, _conf in _DEMO_DETECTIONS_RAW:
-                off = _DEMO_KNOWN_VESSELS_OFFSET.get(det_id)
+        if is_demo:
+            # Demo determinism: the scenario is designed as 4 KNOWN + 1 UNKNOWN.
+            # Real ORCA activity (fleet/users) participates in matching first, but
+            # any demo detection that still has no spatial+temporal match gets a
+            # synthetic known vessel (labelled simulated). This replaces the old
+            # "only when the global inventory is empty" rule, which broke the demo
+            # whenever unrelated real activity existed anywhere in the store.
+            from .matching import find_match as _find_match
+            for det in detections:
+                off = _DEMO_KNOWN_VESSELS_OFFSET.get(det.detection_id)
                 if off is None:
-                    continue
-                dlat, dlon = off
+                    continue  # SAR-DEMO-001 stays deliberately unmatched
+                if _find_match(det, fleet_vessels, cfg.match_radius_km, cfg.match_window_minutes) is not None:
+                    continue  # already covered by real ORCA activity
                 fleet_vessels.append(KV(
-                    vessel_id=f"SYNTH-{det_id}",
-                    latitude=lat + dlat,
-                    longitude=lon + dlon,
-                    timestamp=now_epoch - 15*60,  # 15 min ago, within window
+                    vessel_id=f"SYNTH-{det.detection_id}",
+                    latitude=det.latitude + off[0],
+                    longitude=det.longitude + off[1],
+                    timestamp=time.time() - 15 * 60,  # 15 min ago, within window
                     source="ORCA_SIMULATION",
                     is_simulated=True,
                     label="Demo known vessel",
                 ))
-        elif is_demo and fleet_vessels and len(fleet_vessels) < 3:
-            # Supplement with synthetic to guarantee at least 4 matches
-            import time as _t2
-            now_epoch2 = _t2.time()
-            existing_ids = {v.vessel_id for v in fleet_vessels}
-            for det_id, lat, lon, _conf in _DEMO_DETECTIONS_RAW:
-                if det_id == "SAR-DEMO-001":
-                    continue  # keep unknown
-                off = _DEMO_KNOWN_VESSELS_OFFSET.get(det_id)
-                if off is None:
-                    continue
-                dlat, dlon = off
-                synth_lat, synth_lon = lat + dlat, lon + dlon
-                # Check if any existing vessel is already near this detection within match radius
-                from .matching import _haversine_km as _hav
-                already_covered = any(_hav(synth_lat, synth_lon, v.latitude, v.longitude) <= cfg.match_radius_km for v in fleet_vessels)
-                if not already_covered:
-                    fleet_vessels.append(KV(
-                        vessel_id=f"SYNTH-{det_id}",
-                        latitude=synth_lat,
-                        longitude=synth_lon,
-                        timestamp=now_epoch2 - 15*60,
-                        source="ORCA_SIMULATION",
-                        is_simulated=True,
-                        label="Demo known vessel",
-                    ))
         known_vessels = fleet_vessels
 
     # Enrich each detection (boundary + matching + alert level)

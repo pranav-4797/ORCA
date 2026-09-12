@@ -139,6 +139,7 @@ from .state import (
     _degraded_message_for,
     resolve_location,
 )
+from i18n import ask_location as _ask_location_for
 
 class ORCAGraphState(TypedDict, total=False):
     """Shared state flowing through the graph.
@@ -1405,11 +1406,23 @@ class Orchestrator:
         # Location unresolved → ask user (never default to Panaji)
         plan = state.get("plan") or {}
         if plan.get("needs_location"):
-            ask_msg = plan.get("ask_message") or "I couldn't determine your location. Please enable GPS or tell me a coastal location such as Ratnagiri, Veraval, Kochi, or coordinates."
+            lang = state.get("language", "en") or "en"
+            try:
+                llm_ok = bool(llm_client.is_available())
+            except Exception:
+                llm_ok = False
+            ask_msg = plan.get("ask_message") or _ask_location_for(lang)
+            # LLM outage + non-English query: the rules planner could not
+            # confidently serve this query, so pair the localized ask with the
+            # honest limited-mode notice and mark routing as degraded.
+            degraded_ask = lang != "en" and not llm_ok
+            if degraded_ask:
+                ask_msg = f"{_degraded_message_for(lang)} {ask_msg}"
             resp_trace = AgentTrace(
                 agent_name="ResponseAgent",
                 action="Location unresolved — asked user for location",
-                result_summary="No GPS, map selection, or chat location; prompted user.",
+                result_summary="No GPS, map selection, or chat location; prompted user."
+                    + (" Degraded limited-mode notice included (LLM outage, non-English)." if degraded_ask else ""),
                 data_sources=[],
                 duration_ms=(time.perf_counter() - t0) * 1000,
             )
@@ -1417,6 +1430,8 @@ class Orchestrator:
             timings["response_ms"] = round(resp_trace.duration_ms, 1)
             response = self._assemble_response(state, ask_msg)
             response.trace.append(resp_trace)
+            if degraded_ask and isinstance(response.routing, dict):
+                response.routing = {**response.routing, "routing_mode": "degraded"}
             # Override assembled answer with ask message
             response.answer = ask_msg
             return {"response": response, "traces": [resp_trace], "timings": timings}
@@ -1942,8 +1957,18 @@ class Orchestrator:
     def _node_unsupported(self, state: ORCAGraphState) -> dict:
         plan = state.get("plan") or {}
         # Handle degraded non-English + LLM outage case with honest localized message
-        if plan.get("degraded"):
-            lang = plan.get("degraded_language") or state.get("language", "en")
+        lang = state.get("language", "en") or "en"
+        try:
+            llm_ok = bool(llm_client.is_available())
+        except Exception:
+            llm_ok = False
+        # Also cover the case the rules planner understood nothing (intent
+        # "unknown") for a non-English query while the LLM is down — the
+        # English generic fallback below would otherwise ignore the user's
+        # language entirely.
+        degraded_no_llm = lang != "en" and not llm_ok
+        if plan.get("degraded") or degraded_no_llm:
+            lang = plan.get("degraded_language") or lang
             degraded_msg = plan.get("degraded_message") or _degraded_message_for(lang)
             trace = AgentTrace(
                 agent_name="Orchestrator",
@@ -2204,7 +2229,9 @@ class Orchestrator:
                         location = Location(name=f"Current Position ({device_gps[0]:.3f}°N, {device_gps[1]:.3f}°E)", lat=device_gps[0], lon=device_gps[1])
                         plan["location_name"] = location.name
                 else:
-                    ask_msg = "I couldn't determine your location. Please enable GPS or tell me a coastal location such as Ratnagiri, Veraval, Kochi, or coordinates."
+                    # Localized so a regional-language user is never asked for
+                    # their position in English (PS: reply in the query language).
+                    ask_msg = _ask_location_for(lang)
                     _glog.warning("Location unresolved — asking user for location")
                     plan["needs_location"] = True
                     plan["ask_message"] = ask_msg

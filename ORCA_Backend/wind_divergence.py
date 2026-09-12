@@ -148,6 +148,20 @@ def analyze_wind_divergence(
     Never blocks on network I/O for a real fetch (unactivated -> instant
     UNAVAILABLE); the demo path is deterministic and instant too.
     """
+    # Per-field graceful degradation: INCOIS WW3 wind can be missing for a
+    # point/time (forecast_wind_kmh=None). Compare nothing rather than crash.
+    if forecast_wind_kmh is None:
+        return WindDivergenceResult(
+            forecast_wind_kmh=None, satellite_wind_kmh=None,
+            abs_diff_kmh=None, pct_diff=None, direction_diff_deg=None,
+            status=DivergenceStatus.UNAVAILABLE,
+            warning="No forecast wind available for this point -- satellite comparison skipped.",
+            satellite_status=WindObsStatus.UNAVAILABLE, satellite_source="",
+            satellite_dataset="", observation_age_minutes=None,
+            spatial_offset_km=None, confidence_penalty=0.0,
+            reasoning_note="Forecast wind unavailable (per-field graceful degradation).",
+        )
+
     obs = get_satellite_observation(location, demo_scenario=demo_scenario)
 
     if obs.status == WindObsStatus.UNAVAILABLE:
@@ -156,6 +170,18 @@ def analyze_wind_divergence(
             abs_diff_kmh=None, pct_diff=None, direction_diff_deg=None,
             status=DivergenceStatus.UNAVAILABLE,
             warning="Satellite wind observation unavailable -- forecast used as-is.",
+            satellite_status=obs.status, satellite_source=obs.source,
+            satellite_dataset=obs.dataset, observation_age_minutes=None,
+            spatial_offset_km=None, confidence_penalty=0.0,
+            reasoning_note=obs.reason,
+        )
+
+    if obs.wind_speed_kmh is None:
+        return WindDivergenceResult(
+            forecast_wind_kmh=forecast_wind_kmh, satellite_wind_kmh=None,
+            abs_diff_kmh=None, pct_diff=None, direction_diff_deg=None,
+            status=DivergenceStatus.UNAVAILABLE,
+            warning="Satellite observation has no usable wind speed -- forecast used as-is.",
             satellite_status=obs.status, satellite_source=obs.source,
             satellite_dataset=obs.dataset, observation_age_minutes=None,
             spatial_offset_km=None, confidence_penalty=0.0,
@@ -228,7 +254,10 @@ def result_to_dict(result: WindDivergenceResult) -> dict:
     d["status"] = result.status.value
     d["satellite_status"] = result.satellite_status.value
     # Knots for the fisherman-facing UI ("Forecast: 18 kn / Satellite: 27 kn").
-    d["forecast_wind_kn"] = round(result.forecast_wind_kmh / _KMH_PER_KNOT, 1)
+    d["forecast_wind_kn"] = (
+        round(result.forecast_wind_kmh / _KMH_PER_KNOT, 1)
+        if result.forecast_wind_kmh is not None else None
+    )
     d["satellite_wind_kn"] = (
         round(result.satellite_wind_kmh / _KMH_PER_KNOT, 1)
         if result.satellite_wind_kmh is not None else None
