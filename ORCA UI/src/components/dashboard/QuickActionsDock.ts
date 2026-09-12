@@ -258,6 +258,12 @@ export class QuickActionsDock {
     // Pull the latest dashboard for the tap, then drive the map.
     const snap = store.dashboard as any;
     let pfzCard = snap?.cards?.find((c: any) => c.type === 'pfz');
+    // The snapshot is only valid if it was fetched for THIS location —
+    // reusing a card from a previously pinned point would fly the user to
+    // a zone on the wrong side of the coast.
+    if (pfzCard && !QuickActionsDock._snapshotMatches(snap, loc)) {
+      pfzCard = null;
+    }
     if (!pfzCard) {
       // Force a fresh /dashboard so the user always sees the *current*
       // nearest zone, not a stale one from a different point.
@@ -290,6 +296,15 @@ export class QuickActionsDock {
     } else {
       showToast('Map not ready', 'info');
     }
+  }
+
+  /** True when the dashboard snapshot was fetched for (roughly) this point. */
+  private static _snapshotMatches(snap: any, loc: { lat: number; lon: number }): boolean {
+    const l = snap?.location;
+    if (!l || typeof l.lat !== 'number' || typeof l.lon !== 'number') return false;
+    const dLatKm = (l.lat - loc.lat) * 111.32;
+    const dLonKm = (l.lon - loc.lon) * 111.32 * Math.cos((loc.lat * Math.PI) / 180);
+    return Math.sqrt(dLatKm * dLatKm + dLonKm * dLonKm) <= 2; // 2 km tolerance
   }
 
   private _t(): Record<string, string> {
