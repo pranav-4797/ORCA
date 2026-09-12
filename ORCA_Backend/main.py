@@ -369,21 +369,31 @@ async def _gather_dashboard_inputs(location: "Location", time_window: str,
 
     async def _pfz():
         try:
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 pfz_agent.run, location, ocean, time_window
             )
         except Exception as exc:
             logger.warning("dashboard pfz fetch failed: %s", exc)
             return None
+        # PFZAgent.run returns (PFZRecommendation, AgentTrace); every
+        # dashboard consumer (cards, readiness, briefing) wants the bare
+        # recommendation.
+        if isinstance(result, tuple) and len(result) == 2:
+            return result[0]
+        return result
 
     async def _hazard():
         try:
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 hazard_agent.run, ocean, vessel_class
             )
         except Exception as exc:
             logger.warning("dashboard hazard fetch failed: %s", exc)
             return None
+        # HazardAgent.run returns (RiskAssessment, AgentTrace) — unwrap.
+        if isinstance(result, tuple) and len(result) == 2:
+            return result[0]
+        return result
 
     pfz, risk = await asyncio.gather(_pfz(), _hazard())
 
