@@ -149,9 +149,10 @@ def _fetch_levels(uhslc_id: int) -> list[tuple[datetime, float]]:
     """
     # Step 1: latest timestamp actually present for this station
     # (orderByMax collapses the table to its newest row -- cheap).
+    order_param = urllib.parse.quote('"time"', safe='()"')
     raw = _erddap_get(
         f"time&uhslc_id={int(uhslc_id)}"
-        f"&orderByMax({urllib.parse.quote('\"time\"', safe='()\"')})"
+        f"&orderByMax({order_param})"
     )
     rows = _erddap_rows(raw)
     if not rows or not rows[0].get("time"):
